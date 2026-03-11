@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+.bun/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment — 敏感配置，绝不提交
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# PDFs — 版权材料 + 体积大，不纳入 git
+*.pdf
+
+# Claude Code 项目记忆（含本地路径等私有信息）
+.claude/
+
+# Data 目录 — 数据库、知识库原文、向量索引、上传缓存等运行时数据
+data/storage/
+data/cache/
+data/knowledge/raw/
+data/knowledge/chunks/
+data/knowledge/indexes/
+data/knowledge/uploads/
+data/knowledge/manifest.json

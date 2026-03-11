@@ -1,0 +1,451 @@
+/**
+ * 今日人品命令：.jrrp
+ *
+ * - 基于 userId + 日期哈希出当日固定的 1-100 数字
+ * - 每人每天最多调用 AI 生成 5 条不同评价（每次随机不同风格）
+ * - 超过 5 次后从已有 5 条中随机返回一条
+ * - 兜底文案默认从项目内 jrrp.fallback.json 读取（可用 JRRP_GUGU_FILE 覆盖）
+ */
+
+import { readFileSync } from 'fs';
+import { existsSync } from 'fs';
+import { resolve } from 'path';
+import type { Database } from 'bun:sqlite';
+import type { CommandHandler, CommandContext, CommandResult } from '../CommandRegistry';
+import type { ParsedCommand } from '../CommandParser';
+import { DashScopeClient } from '../../ai/client/DashScopeClient';
+import { migrateCoreSchema, openDatabase } from '../../storage/Database';
+
+const MAX_GENERATIONS_PER_DAY = 5;
+const PROJECT_JRRP_FALLBACK_FILE = new URL('./jrrp.fallback.json', import.meta.url);
+
+/* ─── 兜底文案加载 ─── */
+
+interface ProjectJrrpFallbackConfig {
+  expr?: string;
+}
+
+interface GuguConfig {
+  items?: { 娱乐?: { 今日人品?: [string, number][] } };
+}
+
+/** 从 {% $t人品 > 99 ? 'a', ... , 1 ? 'z' %} 解析出规则 */
+function parseGuguExpr(expr: string): ((value: number) => string) | null {
+  const m = expr.match(/\{%\s*([\s\S]*?)\s*%\}/);
+  if (!m) return null;
+
+  const rules: Array<{ minExclusive: number; text: string }> = [];
+  let fallbackText: string | null = null;
+
+  for (const line of m[1].split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const quoteStart = trimmed.indexOf("'");
+    const quoteEnd = trimmed.lastIndexOf("'");
+    if (quoteStart < 0 || quoteEnd <= quoteStart) continue;
+
+    const condition = trimmed.slice(0, quoteStart).trim();
+    const text = trimmed.slice(quoteStart + 1, quoteEnd).replace(/\\'/g, "'");
+
+    const condMatch = condition.match(/^\$t人品\s*>\s*(\d+)\s*\?$/);
+    if (condMatch) {
+      rules.push({ minExclusive: parseInt(condMatch[1], 10), text });
+      continue;
+    }
+
+    if (/^\d+\s*\?$/.test(condition)) {
+      fallbackText = text;
+    }
+  }
+
+  if (!rules.length && !fallbackText) return null;
+
+  return (value: number) => {
+    for (const rule of rules) {
+      if (value > rule.minExclusive) return rule.text;
+    }
+    return fallbackText ?? rules[rules.length - 1]?.text ?? '';
+  };
+}
+
+function parseJsonExpr(content: string): string | null {
+  try {
+    const data = JSON.parse(content) as ProjectJrrpFallbackConfig;
+    return typeof data.expr === 'string' && data.expr ? data.expr : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadLegacyGuguFallback(path: string): ((value: number) => string) | null {
+  const resolved = resolve(path);
+  if (!existsSync(resolved)) return null;
+  try {
+    const content = readFileSync(resolved, 'utf-8');
+    const data = JSON.parse(content) as GuguConfig;
+    const template = data?.items?.娱乐?.今日人品?.[0]?.[0];
+    if (!template || typeof template !== 'string') return null;
+    return parseGuguExpr(template);
+  } catch (err) {
+    console.error('[JRRP] 加载 .jrrp.gugu.txt 失败:', err);
+    return null;
+  }
+}
+
+function loadProjectJrrpFallback(): ((value: number) => string) | null {
+  if (!existsSync(PROJECT_JRRP_FALLBACK_FILE)) return null;
+  try {
+    const content = readFileSync(PROJECT_JRRP_FALLBACK_FILE, 'utf-8');
+    const template = parseJsonExpr(content);
+    if (!template || typeof template !== 'string') return null;
+    return parseGuguExpr(template);
+  } catch (err) {
+    console.error('[JRRP] 加载项目内 jrrp.fallback.json 失败:', err);
+    return null;
+  }
+}
+
+function loadGuguFallback(): ((value: number) => string) | null {
+  // 显式配置时优先读取旧版外部文件，便于兼容个人配置。
+  const customPath = process.env.JRRP_GUGU_FILE?.trim();
+  if (customPath) {
+    const legacy = loadLegacyGuguFallback(customPath);
+    if (legacy) return legacy;
+    console.error(`[JRRP] JRRP_GUGU_FILE 无法读取: ${customPath}`);
+  }
+
+  return loadProjectJrrpFallback();
+}
+
+/* ─── 风格类型池 ─── */
+
+interface CommentStyle {
+  name: string;
+  instruction: string;
+}
+
+const STYLES: CommentStyle[] = [
+  {
+    name: 'coc',
+    instruction: '用 CoC/克苏鲁跑团梗（SAN值、大成功、大失败、调查员、KP、深潜者、奈亚等）来评价。',
+  },
+  {
+    name: 'game',
+    instruction: '用电子游戏梗（RPG、暴击、Miss、装备掉落、隐藏关卡、存档读档、Boss战等）来评价。',
+  },
+  {
+    name: 'anime',
+    instruction: '用动漫/二次元梗（主角光环、flag、便当、死亡凝视、羁绊、觉醒、中二等）来评价。',
+  },
+  {
+    name: 'food',
+    instruction: '用美食/做饭比喻来评价（满汉全席、黑暗料理、米其林、路边摊、翻车、完美火候等）。',
+  },
+  {
+    name: 'office',
+    instruction: '用打工人/职场梗来评价（摸鱼、甲方、加班、周报、绩效、带薪拉屎、年终奖等）。',
+  },
+  {
+    name: 'cat',
+    instruction: '用猫猫视角来评价（猫主子、铲屎官、纸箱、小鱼干、zoomies、打翻杯子、假装看不见等）。',
+  },
+  {
+    name: 'xuanxue',
+    instruction: '用玄学/算命风格来评价（水逆、锦鲤、转运、太岁、紫微斗数、上上签、下下签等）。',
+  },
+  {
+    name: 'history',
+    instruction: '用历史典故风格来评价（诸葛亮、项羽、韩信、草船借箭、背水一战、卧薪尝胆等）。',
+  },
+  {
+    name: 'scifi',
+    instruction: '用科幻风格来评价（平行宇宙、时间线、量子叠加、虫洞、三体人、曲率引擎等）。',
+  },
+  {
+    name: 'romance',
+    instruction: '用恋爱/偶像剧梗来评价（心动值、告白、暗恋、发好人卡、命中注定、错过末班车等）。',
+  },
+  {
+    name: 'sport',
+    instruction: '用体育/竞技梗来评价（绝杀、翻盘、MVP、板凳席、红牌、帽子戏法、逆风局等）。',
+  },
+  {
+    name: 'survival',
+    instruction: '用荒野求生/末日生存梗来评价（捡到补给、踩雷、信号弹、安全屋、僵尸围城等）。',
+  },
+];
+
+/* ─── system prompt ─── */
+
+function buildPrompt(style: CommentStyle, value: number): string {
+  const tier =
+    value >= 90 ? '极高（90-100）' :
+    value >= 70 ? '偏高（70-89）' :
+    value >= 50 ? '中等（50-69）' :
+    value >= 30 ? '偏低（30-49）' :
+    value >= 10 ? '很低（10-29）' :
+    '极低（1-9）';
+
+  return `你是一个QQ群里幽默的骰子机器人。用户掷出了今日人品值 ${value} 分（满分100），属于${tier}档位。
+
+请根据这个具体分数 ${value} 生成一句评价。
+
+风格要求：
+${style.instruction}
+
+输出规则：
+- 1-2句话，不超过50字
+- 评价要贴合 ${value} 这个具体数字的高低——${value >= 50 ? '这个分数不错，往好的方向夸' : '这个分数偏低，用幽默的方式调侃安慰'}
+- 可以巧妙融入数字本身的谐音梗或特殊含义（比如 66=溜溜、69=nice、42=宇宙终极答案、13=反转幸运等），但不是必须
+- 不要重复"今日人品"四个字
+- 不要加引号、不要解释、不要任何前缀标记，直接输出那句评价
+- 幽默、有画面感、让人想转发`;
+}
+
+/* ─── 每人每天的缓存结构 ─── */
+
+interface UserDayCache {
+  value: number;
+  comments: string[];
+}
+
+interface JrrpCacheRow {
+  value: number;
+  comments_json: string;
+}
+
+/* ─── 命令实现 ─── */
+
+export class JrrpCommand implements CommandHandler {
+  name = 'jrrp';
+  description = '今日人品：.jrrp';
+
+  private aiClient: DashScopeClient | null;
+  private cache: Map<string, UserDayCache> = new Map();
+  private cacheLocks: Map<string, Promise<void>> = new Map();
+  private guguEval: ((value: number) => string) | null = null;
+  private db?: Database;
+
+  constructor(aiClient: DashScopeClient | null) {
+    this.aiClient = aiClient;
+    this.guguEval = loadGuguFallback();
+    try {
+      this.db = openDatabase();
+      migrateCoreSchema(this.db);
+    } catch (err) {
+      console.error('[JRRP] SQLite unavailable, fallback to in-memory cache:', err);
+      this.db = undefined;
+    }
+  }
+
+  async handle(ctx: CommandContext, cmd: ParsedCommand): Promise<CommandResult> {
+    const today = this.getDateKey();
+    const cacheKey = `${ctx.userId}:${today}`;
+
+    return this.withCacheLock(cacheKey, async () => {
+      let entry = this.cache.get(cacheKey);
+
+      // 首次：优先加载持久化缓存；没有则计算固定人品值
+      if (!entry) {
+        entry = this.loadPersistedCache(ctx.userId, today) ?? {
+          value: this.calcJrrp(ctx.userId, today),
+          comments: [],
+        };
+        this.cache.set(cacheKey, entry);
+        this.cleanExpiredCache(today);
+      }
+
+      // 防御性修正：历史并发导致超过 5 条时，收敛到前 5 条。
+      if (entry.comments.length > MAX_GENERATIONS_PER_DAY) {
+        entry.comments = entry.comments.slice(0, MAX_GENERATIONS_PER_DAY);
+        this.persistCache(ctx.userId, today, entry);
+      }
+
+      const { value } = entry;
+
+      // 已有 5 条 -> 随机返回一条
+      if (entry.comments.length >= MAX_GENERATIONS_PER_DAY) {
+        const picked = entry.comments[Math.floor(Math.random() * entry.comments.length)];
+        return { text: this.formatResult(ctx, value, picked) };
+      }
+
+      // 还没到 5 条 -> 生成新的一条
+      const style = this.pickStyle(ctx.userId, today, entry.comments.length);
+      let comment = this.fallbackComment(value);
+
+      if (this.aiClient) {
+        try {
+          comment = await this.generateComment(value, style);
+        } catch (err) {
+          console.error('[JRRP] AI 生成失败，使用默认评价:', err);
+        }
+      }
+
+      entry.comments.push(comment);
+      this.persistCache(ctx.userId, today, entry);
+      return { text: this.formatResult(ctx, value, comment) };
+    });
+  }
+
+  /* ─── 确定性哈希 ─── */
+
+  private calcJrrp(userId: number, dateKey: string): number {
+    return (Math.abs(this.hash(`jrrp:${userId}:${dateKey}:val`)) % 100) + 1;
+  }
+
+  /** 每次调用用不同的 seed 选风格，确保 5 次尽量不重复 */
+  private pickStyle(userId: number, dateKey: string, callIndex: number): CommentStyle {
+    const idx = Math.abs(this.hash(`jrrp:${userId}:${dateKey}:style:${callIndex}`)) % STYLES.length;
+    return STYLES[idx];
+  }
+
+  private hash(seed: string): number {
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) {
+      h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
+    }
+    return h;
+  }
+
+  /* ─── AI 生成 ─── */
+
+  private async generateComment(value: number, style: CommentStyle): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      let result = '';
+      let settled = false;
+
+      const finishResolve = (text: string) => {
+        if (settled) return;
+        settled = true;
+        resolve(text);
+      };
+
+      const finishReject = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+
+      void this.aiClient!.streamChat(
+        'qwen3.5-flash',
+        [
+          { role: 'system', content: buildPrompt(style, value) },
+          { role: 'user', content: `我掷出了 ${value} 分` },
+        ],
+        {
+          onToken: (token) => { result += token; },
+          onDone: () => {
+            finishResolve(this.clean(result, value) || this.fallbackComment(value));
+          },
+          onError: (err) => {
+            finishReject(new Error(err));
+          },
+        },
+      ).catch((err) => {
+        finishReject(new Error(err instanceof Error ? err.message : String(err)));
+      });
+    });
+  }
+
+  private clean(raw: string, value: number): string {
+    return raw
+      .replace(/^<think>[\s\S]*?<\/think>\s*/m, '')
+      .replace(/^["'"「」『』]/g, '')
+      .replace(/["'"「」『』]$/g, '')
+      .trim() || this.fallbackComment(value);
+  }
+
+  /* ─── 兜底（优先使用 .jrrp.gugu.txt）─── */
+
+  private fallbackComment(value: number): string {
+    if (this.guguEval) {
+      try {
+        const s = this.guguEval(value);
+        if (s && typeof s === 'string') return s;
+      } catch (_) {}
+    }
+    return `（未找到 jrrp.fallback.json 兜底文案，当前分数 ${value}）`;
+  }
+
+  /* ─── util ─── */
+
+  private formatResult(ctx: CommandContext, value: number, comment: string): string {
+    const name = ctx.senderName ?? String(ctx.userId);
+    return `${name} 今日人品为 ${value}，${comment}`;
+  }
+
+  private getDateKey(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  private loadPersistedCache(userId: number, dateKey: string): UserDayCache | null {
+    if (!this.db) return null;
+
+    const row = this.db.query(`
+      SELECT value, comments_json
+      FROM jrrp_daily_cache
+      WHERE user_id = ? AND date_key = ?
+    `).get(userId, dateKey) as JrrpCacheRow | null;
+
+    if (!row) return null;
+
+    try {
+      const parsed = JSON.parse(row.comments_json) as unknown;
+      const comments = Array.isArray(parsed)
+        ? parsed.filter((x): x is string => typeof x === 'string').slice(0, MAX_GENERATIONS_PER_DAY)
+        : [];
+
+      return { value: row.value, comments };
+    } catch (err) {
+      console.error(`[JRRP] failed to parse cache row: user=${userId} date=${dateKey}`, err);
+      return { value: row.value, comments: [] };
+    }
+  }
+
+  private persistCache(userId: number, dateKey: string, entry: UserDayCache): void {
+    if (!this.db) return;
+    this.db.query(`
+      INSERT INTO jrrp_daily_cache (user_id, date_key, value, comments_json, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, date_key) DO UPDATE SET
+        value = excluded.value,
+        comments_json = excluded.comments_json,
+        updated_at = excluded.updated_at
+    `).run(
+      userId,
+      dateKey,
+      entry.value,
+      JSON.stringify(entry.comments.slice(0, MAX_GENERATIONS_PER_DAY)),
+      new Date().toISOString(),
+    );
+  }
+
+  private async withCacheLock<T>(cacheKey: string, task: () => Promise<T>): Promise<T> {
+    const prev = this.cacheLocks.get(cacheKey) ?? Promise.resolve();
+
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const queueTail = prev.then(() => current);
+    this.cacheLocks.set(cacheKey, queueTail);
+
+    await prev;
+    try {
+      return await task();
+    } finally {
+      release();
+      if (this.cacheLocks.get(cacheKey) === queueTail) {
+        this.cacheLocks.delete(cacheKey);
+      }
+    }
+  }
+
+  private cleanExpiredCache(today: string): void {
+    for (const key of this.cache.keys()) {
+      if (!key.endsWith(`:${today}`)) {
+        this.cache.delete(key);
+      }
+    }
+  }
+}

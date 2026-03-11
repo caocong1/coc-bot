@@ -1,0 +1,32 @@
+{
+  "name": "coc-bot",
+  "version": "0.1.0",
+  "description": "AI QQ CoC 跑团平台 - 基于 Bun + SolidJS 的统一工作流平台",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/server/index.ts",
+    "web:dev": "cd web && bun install && bun run dev",
+    "web:build": "cd web && bun install && bun run build",
+    "migrate": "bun run scripts/migrate.ts",
+    "build": "bun run scripts/build.ts",
+    "import-pdfs": "bun run scripts/import-pdfs.ts",
+    "build-indexes": "bun run scripts/build-indexes.ts --embed",
+    "build-indexes:rules": "bun run scripts/build-indexes.ts --type=rules --embed",
+    "build-indexes:scenario": "bun run scripts/build-indexes.ts --type=scenario --embed",
+    "build-indexes:keeper": "bun run scripts/build-indexes.ts --type=keeper_secret --embed",
+    "build-indexes:all": "bun run build-indexes:rules && bun run build-indexes:scenario && bun run build-indexes:keeper",
+    "rebuild-summaries": "bun run scripts/rebuild-summaries.ts",
+    "replay-events": "bun run scripts/replay-events.ts"
+  },
+  "dependencies": {
+    "@types/bun": "latest",
+    "pdfjs-dist": "^5.5.207"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
