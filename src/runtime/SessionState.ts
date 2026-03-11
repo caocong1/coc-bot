@@ -86,6 +86,18 @@ export interface SceneInfo {
   activeNpcs: string[];
 }
 
+/** 模组内嵌图片（加载到 session 后的运行时表示） */
+export interface ScenarioImage {
+  /** 图片 ID，如 "img-001"（manifest 中定义） */
+  id: string;
+  /** 本机绝对路径 */
+  absPath: string;
+  /** 说明文字（KP 设置，供 AI KP 参考及展示给玩家） */
+  caption: string;
+  /** KP 是否允许 AI KP 自动展示给玩家 */
+  playerVisible: boolean;
+}
+
 /** 会话状态快照（供 ContextBuilder 读取） */
 export interface SessionSnapshot {
   sessionId: string;
@@ -454,6 +466,24 @@ export class SessionState {
        VALUES (?, ?, ?)`,
       [this.sessionId, JSON.stringify(this._pendingRolls), new Date().toISOString()],
     );
+  }
+
+  // ─── 模组图片 ────────────────────────────────────────────────────────────────
+
+  /** 当前会话加载的模组图片（内存，从 manifest 读取后注入） */
+  private _scenarioImages: ScenarioImage[] = [];
+
+  setScenarioImages(images: ScenarioImage[]): void {
+    this._scenarioImages = images;
+  }
+
+  getScenarioImages(): ScenarioImage[] {
+    return this._scenarioImages;
+  }
+
+  /** 按 ID 解析图片（供 KPPipeline 使用） */
+  resolveImage(imgId: string): ScenarioImage | undefined {
+    return this._scenarioImages.find((img) => img.id === imgId);
   }
 
   // ─── 模组全文 ────────────────────────────────────────────────────────────────

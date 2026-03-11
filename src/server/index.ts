@@ -25,6 +25,7 @@ import { PcCommand } from '../commands/sheet/PcCommand';
 import { CharacterStore } from '../commands/sheet/CharacterStore';
 import { HelpCommand } from '../commands/HelpCommand';
 import { JrrpCommand } from '../commands/fun/JrrpCommand';
+import { RegenCommand } from '../commands/fun/RegenCommand';
 import { WebCommand } from '../commands/web/WebCommand';
 import { DashScopeClient } from '../ai/client/DashScopeClient';
 import { CheckResolver } from '../rules/coc7/CheckResolver';
@@ -102,6 +103,8 @@ const apiRouter = new ApiRouter({
   characterStore,
   campaignHandler,
   adminSecret: ADMIN_SECRET,
+  aiClient: aiClient ?? undefined,
+  napcat: actionClient,
 });
 
 // commands
@@ -122,6 +125,7 @@ registry.register(new CocGenerateCommand());
 registry.register(new StCommand(characterStore));
 registry.register(new PcCommand(characterStore));
 registry.register(new JrrpCommand(aiClient));
+registry.register(new RegenCommand(aiClient, actionClient));
 registry.register(new HelpCommand(registry));
 registry.register(new WebCommand(tokenStore));
 
@@ -139,6 +143,23 @@ async function sendMessages(groupId: number, messages: string[]): Promise<void> 
   }
 }
 
+/** 发送 KP 回复文字 + 关联图片（图片在文字后 800ms 发出） */
+async function sendCampaignOutput(
+  groupId: number,
+  text: string | null,
+  images: Array<{ absPath: string; caption: string; id: string }>,
+): Promise<void> {
+  if (text) {
+    await actionClient.sendGroupMessage(groupId, text);
+  }
+  for (const img of images) {
+    await new Promise<void>((r) => setTimeout(r, 800));
+    // 说明文字格式：📷 caption（ID: img-xxx，可用 .regen img-xxx 重新生成）
+    const caption = `📷 ${img.caption || '图片'}（ID: ${img.id}，可用 .regen ${img.id} 重新生成）`;
+    await actionClient.sendGroupImage(groupId, img.absPath, caption);
+  }
+}
+
 async function handleMessage(ctx: MessageContext, senderName?: string): Promise<void> {
   const mode = modeResolver.resolveMode(ctx);
 
@@ -151,18 +172,16 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
   // Campaign 模式下非命令消息交给 AI KP
   if (!cmd) {
     if (mode === 'campaign' && campaignHandler && ctx.groupId) {
-      const kpReply = await campaignHandler.handlePlayerMessage(
+      const output = await campaignHandler.handlePlayerMessage(
         ctx.groupId,
         ctx.userId,
         senderName ?? String(ctx.userId),
         ctx.plainText,
       ).catch((err) => {
         console.error('[Bot] campaign handler error:', err);
-        return null;
+        return { text: null, images: [] as Array<{ absPath: string; caption: string; id: string }> };
       });
-      if (kpReply && ctx.groupId) {
-        await actionClient.sendGroupMessage(ctx.groupId, kpReply);
-      }
+      await sendCampaignOutput(ctx.groupId, output.text, output.images);
     }
     return;
   }
@@ -256,18 +275,16 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
     if (mode === 'campaign' && campaignHandler && ctx.groupId) {
       const diceCommands = new Set(['r', 'ra', 'rc', 'sc', 'rb', 'rp']);
       if (diceCommands.has(cmd.name)) {
-        const kpReply = await campaignHandler.handleDiceResult(
+        const diceOutput = await campaignHandler.handleDiceResult(
           ctx.groupId,
           ctx.userId,
           senderName ?? String(ctx.userId),
           result.text,
         ).catch((err) => {
           console.error('[Bot] campaign dice feedback error:', err);
-          return null;
+          return { text: null, images: [] as Array<{ absPath: string; caption: string; id: string }> };
         });
-        if (kpReply) {
-          await actionClient.sendGroupMessage(ctx.groupId, kpReply);
-        }
+        await sendCampaignOutput(ctx.groupId, diceOutput.text, diceOutput.images);
       }
     }
   } catch (err) {

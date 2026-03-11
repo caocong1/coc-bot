@@ -15,9 +15,10 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'f
 import { basename, extname, join, relative, resolve } from 'path';
 import { ChunkPipeline } from '../src/knowledge/chunking/ChunkPipeline';
 import { PdfTextExtractor } from '../src/knowledge/pdf/PdfTextExtractor';
+import { ImageLibrary, type ImageSource } from '../src/knowledge/images/ImageLibrary';
 
 /** 支持的文件扩展名 */
-const SUPPORTED_EXTS = new Set(['.pdf', '.txt', '.md']);
+const SUPPORTED_EXTS = new Set(['.pdf', '.txt', '.md', '.docx']);
 
 export type KnowledgeCategory = 'rules' | 'scenario' | 'keeper_secret';
 
@@ -27,13 +28,17 @@ interface ImportedFileEntry {
   sourceRelativePath: string;
   sourceSizeBytes: number;
   sourceMtimeMs: number;
-  fileType: 'pdf' | 'text';
+  fileType: 'pdf' | 'text' | 'docx';
   pages: number;
   textChars: number;
   textPath: string;
   chunkCount: number;
   chunkPath: string;
   category: KnowledgeCategory;
+  /** 是否包含混合内容（docx 中有 === KP ONLY === 标记） */
+  hasKeeperContent?: boolean;
+  /** 从文档提取的图片 ID 列表（存入 ImageLibrary） */
+  imageIds?: string[];
   metadata: {
     title?: string;
     author?: string;
@@ -127,6 +132,69 @@ function makeEntryId(relPath: string, size: number): string {
   return `${toSlug(relPath)}-${hash}`;
 }
 
+// ─── KP ONLY 标记正则 ──────────────────────────────────────────────────────────
+
+const KP_ONLY_START_RE = /={3,}\s*KP\s+ONLY\s+START\s*={3,}/i;
+const KP_ONLY_END_RE = /={3,}\s*KP\s+ONLY\s+END\s*={3,}/i;
+
+/**
+ * 解析含 "=== KP ONLY START ===" 标记的文本，
+ * 返回 scenario 段落和 keeper_secret 段落各自的纯文本。
+ */
+function splitKpOnlyText(fullText: string): { scenarioText: string; keeperText: string; hasSplit: boolean } {
+  const lines = fullText.split('\n');
+  const scenarioLines: string[] = [];
+  const keeperLines: string[] = [];
+  let inKeeper = false;
+  let hasSplit = false;
+
+  for (const line of lines) {
+    if (KP_ONLY_START_RE.test(line)) { inKeeper = true; hasSplit = true; continue; }
+    if (KP_ONLY_END_RE.test(line)) { inKeeper = false; continue; }
+    if (inKeeper) keeperLines.push(line);
+    else scenarioLines.push(line);
+  }
+
+  return {
+    scenarioText: scenarioLines.join('\n').trim(),
+    keeperText: keeperLines.join('\n').trim(),
+    hasSplit,
+  };
+}
+
+// ─── Docx 提取 ────────────────────────────────────────────────────────────────
+
+interface DocxExtractResult {
+  text: string;
+  images: Array<{ buffer: Buffer; mimeType: string; index: number }>;
+}
+
+async function extractDocx(filePath: string): Promise<DocxExtractResult> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mammoth = require('mammoth') as {
+    convertToHtml: (input: { path: string }, opts: Record<string, unknown>) => Promise<{ value: string }>;
+    extractRawText: (input: { path: string }) => Promise<{ value: string }>;
+    images: { imgElement: (fn: (img: { read: (enc?: string) => Promise<Buffer>; contentType: string }) => Promise<Record<string, string>>) => unknown };
+  };
+
+  const extractedImages: Array<{ buffer: Buffer; mimeType: string; index: number }> = [];
+  let imgIndex = 0;
+
+  // 提取图片（通过 HTML 转换的 convertImage 钩子）
+  await mammoth.convertToHtml({ path: filePath }, {
+    convertImage: mammoth.images.imgElement(async (image: { read: (enc?: string) => Promise<Buffer>; contentType: string }) => {
+      const buffer = await image.read();
+      extractedImages.push({ buffer, mimeType: image.contentType, index: imgIndex++ });
+      return { src: `__img_placeholder_${imgIndex - 1}__` };
+    }),
+  });
+
+  // 提取纯文本（更干净，不含 HTML 标签）
+  const textResult = await mammoth.extractRawText({ path: filePath });
+
+  return { text: textResult.value, images: extractedImages };
+}
+
 /** 纯文本文件直接读取，添加伪页标记（每 3000 字符一页）以兼容 ChunkPipeline */
 function extractTextFile(filePath: string): { text: string; pages: number } {
   const raw = readFileSync(filePath, 'utf-8');
@@ -156,27 +224,82 @@ async function processFile(
   chunkOutputDir: string,
   pdfExtractor: PdfTextExtractor,
   chunkPipeline: ChunkPipeline,
+  imageLibrary: ImageLibrary,
 ): Promise<ImportedFileEntry> {
   const ext = extname(filePath).toLowerCase();
   const stat = statSync(filePath);
   const id = makeEntryId(relPath, stat.size);
-  const fileType: 'pdf' | 'text' = ext === '.pdf' ? 'pdf' : 'text';
+  const fileType: 'pdf' | 'text' | 'docx' = ext === '.pdf' ? 'pdf' : ext === '.docx' ? 'docx' : 'text';
 
   console.log(`[import] extracting (${fileType}): ${relPath}`);
 
   let extractedText: string;
   let pages: number;
   let metadata: ImportedFileEntry['metadata'] = {};
+  let hasKeeperContent = false;
+  const imageIds: string[] = [];
 
   if (fileType === 'pdf') {
     const result = await pdfExtractor.extract(filePath);
     extractedText = result.text;
     pages = result.pages;
     metadata = result.metadata;
+  } else if (fileType === 'docx') {
+    const result = await extractDocx(filePath);
+    extractedText = result.text;
+    pages = Math.ceil(extractedText.length / 3000);
+
+    // 保存提取的图片到图片库
+    const imgDir = resolve(`data/knowledge/images/${id}`);
+    mkdirSync(imgDir, { recursive: true });
+
+    for (const img of result.images) {
+      const imgExt = img.mimeType.includes('png') ? '.png' : '.jpg';
+      const imgId = ImageLibrary.generateId();
+      const imgFilename = `${imgId}${imgExt}`;
+      const imgAbsPath = join(imgDir, imgFilename);
+      const imgRelPath = `data/knowledge/images/${id}/${imgFilename}`;
+
+      writeFileSync(imgAbsPath, img.buffer);
+      imageLibrary.upsert({
+        id: imgId,
+        source: 'docx' as ImageSource,
+        relativePath: imgRelPath,
+        mimeType: img.mimeType,
+        caption: '',
+        playerVisible: false,
+        sourceFileId: id,
+        createdAt: new Date().toISOString(),
+      });
+      imageIds.push(imgId);
+    }
+
+    if (result.images.length > 0) {
+      console.log(`[import] extracted ${result.images.length} images from ${relPath}`);
+    }
   } else {
     const result = extractTextFile(filePath);
     extractedText = result.text;
     pages = result.pages;
+  }
+
+  // 检测并处理 KP ONLY 标记（docx 和 txt/md 都支持）
+  const { scenarioText, keeperText, hasSplit } = splitKpOnlyText(extractedText);
+  if (hasSplit) {
+    hasKeeperContent = true;
+    console.log(`[import] KP ONLY split: scenario=${scenarioText.length} keeper=${keeperText.length} chars`);
+
+    // 守密人部分单独写 chunks（category 强制为 keeper_secret）
+    if (keeperText.length > 0) {
+      const keeperChunks = await chunkPipeline.chunk(keeperText, `${relPath}[keeper]`, {
+        maxChunkSize: 1200, overlapSize: 200, preserveStructure: true,
+      });
+      const kpChunkPath = join(chunkOutputDir, `${id}.keeper.chunks.json`);
+      writeFileSync(kpChunkPath, JSON.stringify(keeperChunks, null, 2) + '\n', 'utf-8');
+    }
+
+    // 公开部分覆盖 extractedText，用于后续主 chunk
+    extractedText = scenarioText;
   }
 
   const textFileName = `${id}.txt`;
@@ -206,7 +329,9 @@ async function processFile(
     textPath: relative(resolve('.'), textFullPath).replace(/\\/g, '/'),
     chunkCount: chunks.length,
     chunkPath: relative(resolve('.'), chunkFullPath).replace(/\\/g, '/'),
-    category,
+    category: hasSplit ? 'scenario' : category,
+    hasKeeperContent: hasSplit || undefined,
+    imageIds: imageIds.length > 0 ? imageIds : undefined,
     metadata,
     importedAt: new Date().toISOString(),
   };
@@ -232,6 +357,7 @@ async function main(): Promise<void> {
 
   const pdfExtractor = new PdfTextExtractor();
   const chunkPipeline = new ChunkPipeline();
+  const imageLibrary = new ImageLibrary();
 
   // ── 单文件合并模式（Web 上传触发）──────────────────────────────────────────
   if (options.singleFile) {
@@ -240,7 +366,7 @@ async function main(): Promise<void> {
     let entry: ImportedFileEntry;
     let exitCode = 0;
     try {
-      entry = await processFile(filePath, relPath, options.category, outputDir, chunkOutputDir, pdfExtractor, chunkPipeline);
+      entry = await processFile(filePath, relPath, options.category, outputDir, chunkOutputDir, pdfExtractor, chunkPipeline, imageLibrary);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[import] failed: ${relPath} -> ${message}`);
@@ -275,7 +401,7 @@ async function main(): Promise<void> {
   for (const filePath of targetFiles) {
     const relPath = relative(sourceRoot, filePath);
     try {
-      const entry = await processFile(filePath, relPath, options.category, outputDir, chunkOutputDir, pdfExtractor, chunkPipeline);
+      const entry = await processFile(filePath, relPath, options.category, outputDir, chunkOutputDir, pdfExtractor, chunkPipeline, imageLibrary);
       imported.push(entry);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

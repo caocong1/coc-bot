@@ -18,8 +18,13 @@
  * GET  /kp-templates                    — KP 人格模板列表
  */
 
+import { mkdirSync, writeFileSync } from 'fs';
+import { resolve } from 'path';
 import type { Database } from 'bun:sqlite';
 import type { CampaignHandler } from '../runtime/CampaignHandler';
+import { ImageLibrary } from '../knowledge/images/ImageLibrary';
+import type { DashScopeClient } from '../ai/client/DashScopeClient';
+import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
 
 type KnowledgeCategory = 'rules' | 'scenario' | 'keeper_secret';
 
@@ -37,11 +42,14 @@ export class AdminRoutes {
   /** SSE 订阅者 map: groupId → Set<Controller> */
   private sseClients: Map<number, Set<ReadableStreamDefaultController<Uint8Array>>> = new Map();
   private importJobs: Map<string, ImportJob> = new Map();
+  private readonly imageLibrary = new ImageLibrary();
 
   constructor(
     private readonly db: Database,
     private readonly campaignHandler: CampaignHandler | null,
     private readonly adminSecret: string,
+    private readonly aiClient?: DashScopeClient,
+    private readonly napcat?: NapCatActionClient,
   ) {}
 
   async handle(req: Request, subPath: string): Promise<Response | null> {
@@ -84,6 +92,24 @@ export class AdminRoutes {
       if (method === 'GET' && !segments[1]) return this.listKnowledge();
       if (method === 'GET' && segments[1] === 'jobs') return this.listKnowledgeJobs();
       if (method === 'POST' && segments[1] === 'upload') return this.uploadKnowledge(req);
+      // 图片管理：/knowledge/:fileId/images[/:imgId[/send]]
+      if (segments[1] && segments[2] === 'images') {
+        const fileId = segments[1];
+        const imgId = segments[3];
+        if (method === 'GET' && !imgId) return this.listFileImages(fileId);
+        if (method === 'PATCH' && imgId) return this.patchImage(imgId, req);
+        if (method === 'POST' && imgId && segments[4] === 'send') return this.sendImage(imgId, req);
+      }
+    }
+
+    // /images/generate — AI 图片生成
+    if (resource === 'images' && segments[1] === 'generate' && method === 'POST') {
+      return this.generateImage(req);
+    }
+
+    // /images/:imgId/send — 发图到群（任意图片）
+    if (resource === 'images' && segments[1] && segments[2] === 'send' && method === 'POST') {
+      return this.sendImage(segments[1], req);
     }
 
     // /kp-templates
@@ -381,6 +407,122 @@ export class AdminRoutes {
       rulesStrictness: t.rulesStrictness,
       narrativeFlexibility: t.narrativeFlexibility,
     })));
+  }
+
+  // ─── 图片管理 ───────────────────────────────────────────────────────────────
+
+  private listFileImages(fileId: string): Response {
+    const entries = this.imageLibrary.getBySourceFile(fileId);
+    return Response.json(entries.map((e) => ({
+      id: e.id,
+      source: e.source,
+      relativePath: e.relativePath,
+      mimeType: e.mimeType,
+      caption: e.caption,
+      playerVisible: e.playerVisible,
+      createdAt: e.createdAt,
+    })));
+  }
+
+  private async patchImage(imgId: string, req: Request): Promise<Response> {
+    const body = await req.json().catch(() => ({})) as {
+      caption?: string;
+      playerVisible?: boolean;
+    };
+    const ok = this.imageLibrary.patch(imgId, {
+      caption: body.caption,
+      playerVisible: body.playerVisible,
+    });
+    if (!ok) return Response.json({ error: '图片不存在' }, { status: 404 });
+    return Response.json({ ok: true });
+  }
+
+  private async sendImage(imgId: string, req: Request): Promise<Response> {
+    const body = await req.json().catch(() => ({})) as { groupId?: number };
+    if (!body.groupId) return Response.json({ error: 'groupId required' }, { status: 400 });
+    if (!this.napcat) return Response.json({ error: 'NapCat 未配置' }, { status: 503 });
+
+    const entry = this.imageLibrary.getById(imgId);
+    if (!entry) return Response.json({ error: '图片不存在' }, { status: 404 });
+
+    const absPath = ImageLibrary.absPath(entry.relativePath);
+    const caption = `📷 ${entry.caption || '图片'}（ID: ${entry.id}，可用 .regen ${entry.id} 重新生成）`;
+
+    try {
+      await this.napcat.sendGroupImage(body.groupId, absPath, caption);
+      return Response.json({ ok: true });
+    } catch (e) {
+      return Response.json({ error: String(e) }, { status: 500 });
+    }
+  }
+
+  /**
+   * AI 图片生成（qwen-image-2.0-pro）。
+   *
+   * 流程：
+   *  1. 接收用户中文描述
+   *  2. qwen3.5-plus 优化提示词（英文，细节丰富）
+   *  3. qwen-image-2.0-pro 异步生成（轮询直到 SUCCEEDED）
+   *  4. 下载图片保存到 data/knowledge/images/generated/
+   *  5. 存入 ImageLibrary，返回图片 ID
+   */
+  private async generateImage(req: Request): Promise<Response> {
+    if (!this.aiClient) return Response.json({ error: 'AI 客户端未配置' }, { status: 503 });
+
+    const body = await req.json().catch(() => ({})) as {
+      description?: string;
+      size?: string;
+      playerVisible?: boolean;
+    };
+    const desc = body.description?.trim();
+    if (!desc) return Response.json({ error: 'description required' }, { status: 400 });
+
+    try {
+      // 1. 优化提示词
+      const optimizedPrompt = await this.aiClient.optimizeImagePrompt(desc);
+      console.log(`[AdminRoutes] 图片生成 prompt 优化: "${desc}" → "${optimizedPrompt.slice(0, 80)}..."`);
+
+      // 2. 生成图片（返回 URL）
+      const imageUrl = await this.aiClient.generateImage(optimizedPrompt, body.size);
+
+      // 3. 下载并保存图片
+      const genDir = resolve('data/knowledge/images/generated');
+      mkdirSync(genDir, { recursive: true });
+
+      const imgId = ImageLibrary.generateId();
+      const imgPath = `${genDir}/${imgId}.jpg`;
+      const imgRelPath = `data/knowledge/images/generated/${imgId}.jpg`;
+
+      const imgResp = await fetch(imageUrl);
+      if (!imgResp.ok) throw new Error(`下载生成图片失败: ${imgResp.status}`);
+      const imgBuffer = await imgResp.arrayBuffer();
+      writeFileSync(imgPath, Buffer.from(imgBuffer));
+
+      // 4. 存入图片库
+      this.imageLibrary.upsert({
+        id: imgId,
+        source: 'generated',
+        relativePath: imgRelPath,
+        mimeType: 'image/jpeg',
+        caption: desc,
+        playerVisible: body.playerVisible ?? true,
+        generatedPrompt: desc,
+        optimizedPrompt,
+        createdAt: new Date().toISOString(),
+      });
+
+      console.log(`[AdminRoutes] 图片生成完成: id=${imgId}`);
+
+      return Response.json({
+        ok: true,
+        id: imgId,
+        relativePath: imgRelPath,
+        optimizedPrompt,
+      });
+    } catch (e) {
+      console.error('[AdminRoutes] 图片生成失败:', e);
+      return Response.json({ error: String(e) }, { status: 500 });
+    }
   }
 
   // ─── 工具 ──────────────────────────────────────────────────────────────────

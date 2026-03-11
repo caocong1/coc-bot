@@ -1,12 +1,15 @@
 /**
  * 阿里云百炼客户端
  *
- * 封装 DashScope OpenAI-compatible API 调用
+ * 封装 DashScope OpenAI-compatible API 调用，以及专有图片生成 API。
  */
 
 const DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DASHSCOPE_ENDPOINT = `${DASHSCOPE_BASE}/chat/completions`;
 const DASHSCOPE_EMBED_ENDPOINT = `${DASHSCOPE_BASE}/embeddings`;
+/** 图片生成（qwen-image-2.0-pro）专有 API，不走兼容模式 */
+const DASHSCOPE_IMAGE_SUBMIT = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis';
+const DASHSCOPE_TASK_URL = 'https://dashscope.aliyuncs.com/api/v1/tasks';
 
 /** text-embedding-v4 每批最多 25 条 */
 const EMBED_BATCH_SIZE = 25;
@@ -28,6 +31,17 @@ export interface StreamCallbacks {
   onToken: (token: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
+}
+
+/** 多模态消息内容块（用于视觉模型） */
+export type MultiModalContent =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+/** 视觉聊天消息 */
+export interface VisionMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string | MultiModalContent[];
 }
 
 /**
@@ -98,6 +112,137 @@ export class DashScopeClient {
       ordered[item.index] = item.embedding;
     }
     return ordered;
+  }
+
+  /**
+   * 非流式聊天（支持多模态 content，用于图片识别）
+   *
+   * @param model      如 'qwen3.5-plus'（支持视觉）
+   * @param messages   支持 content 为字符串或 MultiModalContent[]
+   */
+  async chat(
+    model: string,
+    messages: VisionMessage[],
+  ): Promise<string> {
+    const response = await fetch(DASHSCOPE_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({ model, messages, stream: false }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`chat 调用失败 (${response.status}): ${body}`);
+    }
+
+    const json = await response.json() as {
+      choices: Array<{ message: { content: string } }>;
+    };
+    return json.choices?.[0]?.message?.content?.trim() ?? '';
+  }
+
+  /**
+   * 优化图片生成提示词（中文描述 → 适合 qwen-image-2.0-pro 的 prompt）
+   *
+   * 先用 qwen3.5-plus 把用户的简短描述扩写成细节丰富、风格明确的英文提示词。
+   * 这一步通常能显著提升生成图片质量。
+   */
+  async optimizeImagePrompt(description: string): Promise<string> {
+    const system = `你是一位专业的 AI 绘图提示词工程师。
+用户会给你一段中文的场景描述，你需要将其转化为适合图片生成模型的详细 prompt。
+
+要求：
+- 输出英文，约 60-100 词
+- 风格明确（克苏鲁/1920s 恐怖氛围、油画/素描质感、阴暗光影等）
+- 包含构图、光线、色调、细节描述
+- 结尾加 "dark atmosphere, lovecraftian horror, cinematic lighting"
+- 只输出 prompt 本身，不要解释`;
+
+    try {
+      return await this.chat('qwen3.5-plus', [
+        { role: 'system', content: system },
+        { role: 'user', content: description },
+      ]);
+    } catch {
+      // 优化失败时退回原始描述
+      return description;
+    }
+  }
+
+  /**
+   * 图片生成（qwen-image-2.0-pro，异步任务模式）
+   *
+   * 流程：提交任务 → 轮询直至 SUCCEEDED → 返回图片 URL
+   * @param prompt     已优化的英文提示词
+   * @param size       图片尺寸，默认 1024*1024
+   * @param timeoutMs  最长等待时间（默认 90 秒）
+   */
+  async generateImage(
+    prompt: string,
+    size = '1024*1024',
+    timeoutMs = 90_000,
+  ): Promise<string> {
+    // 1. 提交任务
+    const submitResp = await fetch(DASHSCOPE_IMAGE_SUBMIT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+        'X-DashScope-Async': 'enable',
+      },
+      body: JSON.stringify({
+        model: 'qwen-image-2.0-pro',
+        input: { prompt },
+        parameters: { size, n: 1 },
+      }),
+    });
+
+    if (!submitResp.ok) {
+      const body = await submitResp.text().catch(() => '');
+      throw new Error(`图片生成提交失败 (${submitResp.status}): ${body}`);
+    }
+
+    const submitJson = await submitResp.json() as {
+      output: { task_id: string; task_status: string };
+    };
+    const taskId = submitJson.output?.task_id;
+    if (!taskId) throw new Error('图片生成：未返回 task_id');
+
+    // 2. 轮询结果
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise<void>((r) => setTimeout(r, 3000));
+
+      const pollResp = await fetch(`${DASHSCOPE_TASK_URL}/${taskId}`, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+      });
+
+      if (!pollResp.ok) continue;
+
+      const pollJson = await pollResp.json() as {
+        output: {
+          task_status: string;
+          results?: Array<{ url?: string }>;
+          message?: string;
+        };
+      };
+
+      const status = pollJson.output?.task_status;
+      if (status === 'SUCCEEDED') {
+        const url = pollJson.output?.results?.[0]?.url;
+        if (!url) throw new Error('图片生成成功但未返回 URL');
+        return url;
+      }
+      if (status === 'FAILED') {
+        throw new Error(`图片生成失败: ${pollJson.output?.message ?? 'unknown'}`);
+      }
+      // PENDING / RUNNING → 继续等
+    }
+
+    throw new Error(`图片生成超时（>${timeoutMs / 1000}秒）`);
   }
 
   /**

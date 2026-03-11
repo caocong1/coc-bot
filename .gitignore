@@ -51,4 +51,5 @@ data/knowledge/raw/
 data/knowledge/chunks/
 data/knowledge/indexes/
 data/knowledge/uploads/
+data/knowledge/images/
 data/knowledge/manifest.json

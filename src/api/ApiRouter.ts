@@ -12,6 +12,8 @@ import type { Database } from 'bun:sqlite';
 import type { TokenStore } from '../storage/TokenStore';
 import type { CharacterStore } from '../commands/sheet/CharacterStore';
 import type { CampaignHandler } from '../runtime/CampaignHandler';
+import type { DashScopeClient } from '../ai/client/DashScopeClient';
+import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
 import { PlayerRoutes } from './PlayerRoutes';
 import { AdminRoutes } from './AdminRoutes';
 
@@ -21,6 +23,8 @@ export interface ApiRouterOptions {
   characterStore: CharacterStore;
   campaignHandler: CampaignHandler | null;
   adminSecret: string;
+  aiClient?: DashScopeClient;
+  napcat?: NapCatActionClient;
 }
 
 export class ApiRouter {
@@ -29,7 +33,7 @@ export class ApiRouter {
 
   constructor(private readonly opts: ApiRouterOptions) {
     this.player = new PlayerRoutes(opts.db, opts.tokenStore, opts.characterStore);
-    this.admin = new AdminRoutes(opts.db, opts.campaignHandler, opts.adminSecret);
+    this.admin = new AdminRoutes(opts.db, opts.campaignHandler, opts.adminSecret, opts.aiClient, opts.napcat);
   }
 
   async handle(req: Request): Promise<Response | null> {

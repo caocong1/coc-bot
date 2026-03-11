@@ -19,15 +19,22 @@ import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import type { Database } from 'bun:sqlite';
 import { DashScopeClient } from '../ai/client/DashScopeClient';
-import { KPPipeline, type KPInput } from '../ai/pipeline/KPPipeline';
+import { KPPipeline, type KPInput, type KPImage } from '../ai/pipeline/KPPipeline';
 import { KnowledgeService } from '../knowledge/retrieval/KnowledgeService';
-import { SessionState } from './SessionState';
+import { SessionState, type ScenarioImage } from './SessionState';
 import { ModeResolver } from './ModeResolver';
 import { CharacterStore } from '../commands/sheet/CharacterStore';
+import { ImageLibrary } from '../knowledge/images/ImageLibrary';
 import type { Character } from '@shared/types/Character';
 
 const MANIFEST_PATH = 'data/knowledge/manifest.json';
 const KP_MODEL = 'qwen3.5-plus';
+
+/** Campaign 处理器返回值（支持文字 + 图片） */
+export interface CampaignOutput {
+  text: string | null;
+  images: KPImage[];
+}
 
 interface ManifestEntry {
   id: string;
@@ -36,6 +43,8 @@ interface ManifestEntry {
   /** 提取出的纯文本路径 data/knowledge/raw/{id}.txt */
   textPath: string;
   fileType?: string;
+  /** 该文件关联的图片 ID 列表（由 import-pdfs.ts 提取） */
+  imageIds?: string[];
 }
 
 interface PausedSessionRow {
@@ -68,6 +77,7 @@ export class CampaignHandler {
   private readonly modeResolver: ModeResolver;
   private readonly defaultTemplateId: string;
   private readonly knowledge = new KnowledgeService();
+  private readonly imageLibrary = new ImageLibrary();
 
   /** groupId → 活跃 session */
   private readonly sessions = new Map<number, GroupSession>();
@@ -230,22 +240,23 @@ export class CampaignHandler {
       return '知识库索引文件不存在，请先运行 bun run build-indexes 构建索引。';
     }
 
-    let manifest: ManifestEntry[];
+    let manifestFiles: ManifestEntry[];
     try {
-      manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8')) as ManifestEntry[];
+      const raw = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8')) as { files?: ManifestEntry[] } | ManifestEntry[];
+      manifestFiles = Array.isArray(raw) ? raw : (raw.files ?? []);
     } catch {
       return '知识库索引文件损坏，请重新构建索引。';
     }
 
     const keyword = filename.toLowerCase();
-    const entry = manifest.find(
+    const entry = manifestFiles.find(
       (e) =>
         e.sourceRelativePath.toLowerCase().includes(keyword) ||
         e.id.toLowerCase().includes(keyword),
     );
 
     if (!entry) {
-      const available = manifest
+      const available = manifestFiles
         .map((e) => e.sourceRelativePath.split(/[\\/]/).pop() ?? e.sourceRelativePath)
         .slice(0, 10)
         .join('、');
@@ -261,12 +272,17 @@ export class CampaignHandler {
 
     console.log(`[Campaign] 加载模组: group=${groupId} file=${label} path=${rawPath}`);
 
+    // 加载该文件关联的图片到 SessionState
+    this.loadScenarioImages(session.state, entry.id ?? '');
+
     // 后台分段（不阻塞命令响应）
     this.segmentModuleAsync(session.state).catch((err) => {
       console.error('[Campaign] 模组分段失败:', err);
     });
 
-    return `📖 模组已加载：${label}\n守秘人正在阅读模组，场景分析在后台进行，稍后即可开团。`;
+    const imgCount = session.state.getScenarioImages().length;
+    const imgHint = imgCount > 0 ? `\n📷 已加载 ${imgCount} 张模组图片` : '';
+    return `📖 模组已加载：${label}${imgHint}\n守秘人正在阅读模组，场景分析在后台进行，稍后即可开团。`;
   }
 
   // ─── 消息处理 ───────────────────────────────────────────────────────────────
@@ -276,9 +292,9 @@ export class CampaignHandler {
     userId: number,
     displayName: string,
     text: string,
-  ): Promise<string | null> {
+  ): Promise<CampaignOutput> {
     const session = this.sessions.get(groupId);
-    if (!session) return null;
+    if (!session) return { text: null, images: [] };
 
     session.state.trackPlayer(userId);
 
@@ -301,7 +317,7 @@ export class CampaignHandler {
 
     const reply = output.shouldRespond ? output.text : null;
     if (reply) session.state.advanceSegmentIfTitleMatches(reply);
-    return reply;
+    return { text: reply, images: output.images ?? [] };
   }
 
   async handleDiceResult(
@@ -309,9 +325,9 @@ export class CampaignHandler {
     rollerId: number,
     rollerName: string,
     resultText: string,
-  ): Promise<string | null> {
+  ): Promise<CampaignOutput> {
     const session = this.sessions.get(groupId);
-    if (!session) return null;
+    if (!session) return { text: null, images: [] };
 
     const input: KPInput = {
       kind: 'dice_result',
@@ -324,7 +340,7 @@ export class CampaignHandler {
     const output = await session.pipeline.process(input);
     const reply = output.shouldRespond ? output.text : null;
     if (reply) session.state.advanceSegmentIfTitleMatches(reply);
-    return reply;
+    return { text: reply, images: output.images ?? [] };
   }
 
   // ─── 查询 ────────────────────────────────────────────────────────────────────
@@ -562,6 +578,24 @@ export class CampaignHandler {
         },
       );
     });
+  }
+
+  /**
+   * 从 ImageLibrary 加载与模组文件关联的图片，注入 SessionState。
+   */
+  private loadScenarioImages(state: SessionState, fileId: string): void {
+    if (!fileId) return;
+    const entries = this.imageLibrary.getBySourceFile(fileId);
+    const images: ScenarioImage[] = entries.map((e) => ({
+      id: e.id,
+      absPath: ImageLibrary.absPath(e.relativePath),
+      caption: e.caption,
+      playerVisible: e.playerVisible,
+    }));
+    state.setScenarioImages(images);
+    if (images.length > 0) {
+      console.log(`[Campaign] 加载模组图片: fileId=${fileId} count=${images.length}`);
+    }
   }
 
   private findPausedSession(groupId: number): PausedSessionRow | null {

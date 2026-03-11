@@ -40,6 +40,7 @@
 | `.en` | 技能成长 | ✅ |
 | `.setcoc` | 房规设置 | ✅ |
 | `.help` | 帮助 | ✅ |
+| `.regen <id>` | 重新生成图片（按 ID）| ✅ |
 
 ### 5. 今日人品 `.jrrp`
 
@@ -207,11 +208,232 @@
 - [ ] 我的团：参与过的/进行中的团列表 + 团详情（玩家视角：场景名/已发现线索/参与玩家/消息历史只读）
 - [ ] 操作手册：指令列表 + CoC7 快速规则参考 + FAQ
 
-### 2. 可选增强
+### 2. 模组媒体系统（图片 & Word 文档）✅ 已实现
+
+#### 背景与场景
+
+实际跑团模组通常以 `.docx` Word 文档提供，且文档中混合了：
+- **模组正文**：场景描述、NPC 介绍、公开线索（可被 AI KP 参考）
+- **守密人专用内容**：幕后真相、隐藏触发条件（`[KP ONLY]` 标记，AI 知晓但不直接说）
+- **内嵌图片**：地图、室内结构图、道具图、NPC 肖像等
+  - 这些图片在适当时机可以「发给玩家」在 QQ 群展示
+- **纯文字场景描述**：可由 AI 基于描述生成氛围图
+
+#### 阶段一：Word 文档解析（`.docx` 支持）
+
+**目标**：`scripts/import-pdfs.ts` 扩展支持 `.docx` 格式
+
+**实现方案**：
+
+```
+bun add mammoth          # Word → HTML/Markdown 转换
+bun add sharp            # 图片后处理（压缩、格式转换）
+```
+
+解析流程：
+1. 用 `mammoth` 将 `.docx` 转为 HTML，同时提取所有内嵌图片（base64 → Buffer）
+2. 文字部分送入现有 `ChunkPipeline` 切片
+3. 图片部分逐一保存到 `data/knowledge/images/<docId>/img-001.jpg` 等
+4. 在 manifest 中记录每张图片的来源文档、位置顺序、原始文件名（如果有）
+
+**关键数据结构扩展**（manifest.json）：
+
+```jsonc
+{
+  "files": [
+    {
+      "id": "file-abc123",
+      "name": "与苏珊共进晚餐.docx",
+      "category": "scenario",           // 主体文字的类别
+      "importedAt": "2026-03-12T...",
+      "charCount": 45000,
+      "chunkCount": 32,
+      "images": [                       // 新增：内嵌图片列表
+        {
+          "id": "img-001",
+          "path": "data/knowledge/images/file-abc123/img-001.jpg",
+          "mimeType": "image/jpeg",
+          "caption": "",                // 人工或 AI 生成的说明
+          "playerVisible": false        // KP 决定是否可发给玩家
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### 阶段二：混合文档拆分（scenario + keeper_secret 同文档）
+
+**问题**：一个 `.docx` 文件里 KP 内容和公开内容混排，不能整个文档都标为 `scenario` 或 `keeper_secret`。
+
+**方案：约定标记语法**
+
+在 Word 文档中，用特殊标注划分区域：
+
+```
+=== KP ONLY START ===
+这段是守密人专用内容……
+=== KP ONLY END ===
+```
+
+解析器在切片前先做预处理：
+1. 扫描 `=== KP ONLY START ===` / `=== KP ONLY END ===` 标记
+2. 标记区域内的文本块打上 `keeper_secret` 标签，其余打 `scenario` 标签
+3. 两类文本块分别生成各自的 chunks，索引到对应的向量库
+4. 对外 manifest 里该文件记录为 `category: "mixed"` 并携带 `hasKeeperContent: true`
+
+**替代方案（更简单）**：KP 在上传时手动上传两次，一次选「模组正文」一次选「守密人专用」，无需解析标记。两种方案都支持，标记语法作为高级功能。
+
+#### 阶段三：图片管理 — KP 端（Admin UI）
+
+**新页面：模组管理 → 图片标注**
+
+- 上传完成后，图片列表展示在对应模组卡片下
+- 每张图片可以：
+  - 预览（缩略图）
+  - 编辑说明文字（`caption`）
+  - 切换「可见给玩家」开关（`playerVisible`）
+  - 手动「发给当前团」按钮（立即通过 NapCat 发到群）
+- KP Studio 可见「图片队列」：在叙事推进中，KP 可手动选一张图发给玩家
+
+**AI 自动 Caption 生成**（图片识别）：
+
+图片导入时，可调用 `qwen3.5-plus`（视觉模型）对图片内容进行识别，自动生成说明文字：
+
+```typescript
+// 调用 DashScope 视觉 API，传入图片 base64
+const caption = await dashScope.chat({
+  model: 'qwen3.5-plus',
+  messages: [{
+    role: 'user',
+    content: [
+      { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } },
+      { type: 'text', text: '这是一张克苏鲁跑团模组中的图片，请简洁描述其内容（地图/室内/NPC/道具等），中文，不超过50字。' },
+    ],
+  }],
+});
+```
+
+生成的 caption 作为 AI KP 叙事时「图片队列说明」的初始值，KP 可手动修改。
+
+**API**：
+
+```
+GET  /admin/knowledge/:fileId/images          — 列出图片
+PATCH /admin/knowledge/:fileId/images/:imgId  — 更新 caption/playerVisible
+POST  /admin/knowledge/:fileId/images/:imgId/send
+      body: { sessionId, groupId }            — 发图到 QQ 群
+```
+
+**NapCat 图片发送**（已有 `NapCatActionClient`，扩展）：
+
+```typescript
+// NapCatActionClient.ts 新增
+async sendGroupImage(groupId: string, imagePath: string): Promise<void> {
+  await this.call('send_group_msg', {
+    group_id: groupId,
+    message: [{ type: 'image', data: { file: `file://${imagePath}` } }],
+  });
+}
+```
+
+#### 阶段四：AI KP 自动触发图片展示
+
+**场景**：AI KP 在叙事中认为应该展示一张图时（比如「玩家进入地图室」），可以自动发图。
+
+**实现**：
+
+1. KP system prompt 中注入当前模组可用图片列表（id + caption）
+2. AI 回复中可以包含特殊标记：`[SHOW_IMAGE:img-001]`
+3. `KPPipeline` 解析回复时检测此标记，提取图片 id，调用 `sendGroupImage()`
+4. 过滤后发给玩家的文字中移除该标记（不暴露内部格式）
+
+**Context 注入**（第 2 层扩展）：
+
+```
+可用图片：
+- [img-001] 酒店平面图（一楼）
+- [img-002] 苏珊·怀特肖像
+如需向玩家展示，在回复中加入 [SHOW_IMAGE:img-xxx]
+```
+
+#### 阶段五：AI 图片生成
+
+**场景**：模组中没有配图，但 KP 或 AI 想根据文字描述生成一张氛围图/NPC 肖像。
+
+**技术选型**：
+
+| 方案 | 优点 | 缺点 |
+|------|------|------|
+| DashScope `qwen-image-2.0-pro` | 已有 DashScope Key，中文提示词友好，质量高 | — |
+| Stable Diffusion（本地） | 免费、高质量 | 需 GPU，部署复杂 |
+| DALL-E 3 | 高质量 | 需 OpenAI Key |
+
+**推荐**：使用 DashScope `qwen-image-2.0-pro`（与现有 AI 体系一致，复用 Key，质量优于旧版 wanx）
+
+**KP Studio 触发方式**（Admin UI）：
+
+```
+[生成图片] 输入框：「1920年代波士顿大学图书馆，阴沉，蜡烛，CoC风格」
+→ 调用 DashScope qwen-image-2.0-pro API
+→ 结果图保存到 data/knowledge/images/generated/gen-xxx.jpg
+→ 显示预览，可选「发给当前团」或「保存到模组」
+```
+
+**AI KP 自动生成**（可选，高级）：
+- AI KP 叙事时携带 `[GEN_IMAGE: 场景描述]` 标记
+- Pipeline 检测并异步生成图片（30-60 秒）
+- 生成完成后发到 QQ 群（带说明文字）
+- 开关控制（默认关闭，防止 AI KP 滥用）
+
+#### 实施顺序
+
+```
+阶段一（docx 解析）     → 解锁 Word 文档导入
+阶段三（KP 图片管理）   → KP 手动发图给玩家
+阶段二（混合内容拆分）   → 精细化 KP/公开内容分离
+阶段四（AI 自动触发）   → AI KP 智能展示图片
+阶段五（AI 图片生成）   → 氛围图自动生成
+```
+
+#### 受影响的文件
+
+| 文件 | 变更 |
+|------|------|
+| `scripts/import-pdfs.ts` | 新增 `.docx` 解析分支、图片提取、KP ONLY 标记处理 |
+| `src/knowledge/pdf/PdfTextExtractor.ts` | 新增 `DocxExtractor`（或独立文件） |
+| `src/knowledge/chunking/ChunkPipeline.ts` | 支持带 `category` 标签的 chunk |
+| `src/api/AdminRoutes.ts` | 新增图片列表/更新/发送 API |
+| `src/adapters/napcat/NapCatActionClient.ts` | 新增 `sendGroupImage` |
+| `src/ai/kp/KPPipeline.ts` | 解析 `[SHOW_IMAGE:]` / `[GEN_IMAGE:]` 标记 |
+| `src/ai/kp/ContextBuilder.ts` | 第 2 层注入可用图片列表 |
+| `web/src/pages/admin/ScenarioManager.tsx` | 图片列表、标注、发图 UI |
+| `web/src/pages/admin/KPStudio.tsx` | 图片队列 + AI 生成触发 |
+| `web/src/api.ts` | 新增图片相关 API 方法 |
+| `data/knowledge/images/` | 新运行时目录（git 忽略） |
+
+### 3. 已实现的图片系统关键文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/knowledge/images/ImageLibrary.ts` | 图片库服务（持久化 library.json）|
+| `src/adapters/napcat/NapCatActionClient.ts` | 新增 `sendGroupImage()`（CQ码发本地文件）|
+| `src/ai/client/DashScopeClient.ts` | 新增 `chat()`、`optimizeImagePrompt()`、`generateImage()` |
+| `src/runtime/SessionState.ts` | 新增 `ScenarioImage` + `setScenarioImages()`、`resolveImage()` |
+| `src/ai/context/ContextBuilder.ts` | 层 2 注入可用图片列表 |
+| `src/ai/pipeline/KPPipeline.ts` | 解析 `[SHOW_IMAGE:id]` 标记，`KPOutput` 携带 `images[]` |
+| `src/runtime/CampaignHandler.ts` | 加载模组时同步图片，`handlePlayerMessage` 返回 `CampaignOutput` |
+| `src/commands/fun/RegenCommand.ts` | `.regen <imgId>` 命令重新生成图片 |
+| `src/api/AdminRoutes.ts` | 图片列表/更新/发图 + `/images/generate` AI 生成接口 |
+| `scripts/import-pdfs.ts` | 支持 `.docx`，提取图片存图片库，解析 KP ONLY 标记 |
+| `data/knowledge/images/library.json` | 图片库（运行时，git忽略）|
+
+### 4. 可选增强
 
 - [ ] `.bot on/off` — 群内启用/禁用机器人响应
 - [ ] 战斗轮追踪（CombatResolver 已有基础，暴露为命令）
 - [ ] `.jrrp` CoC 风格长文案第二套
+- [ ] Admin UI 图片列表预览（ScenarioManager 展示提取的图片，支持标注 caption 和 playerVisible）
 
 ---
 
@@ -223,4 +445,4 @@
 
 ---
 
-*最后更新：2026-03-11*
+*最后更新：2026-03-12（模组媒体系统 + .docx + 图片库 + AI 生图全部实现）*

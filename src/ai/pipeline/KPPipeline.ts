@@ -36,12 +36,24 @@ export interface KPInput {
   diceRollerId?: number;
 }
 
+/** 需要展示给玩家的图片 */
+export interface KPImage {
+  id: string;
+  absPath: string;
+  caption: string;
+}
+
 /** 流水线输出 */
 export interface KPOutput {
   /** 是否需要发送回复（false = KP 选择沉默） */
   shouldRespond: boolean;
-  /** 最终发送到群聊的文本 */
+  /** 最终发送到群聊的文本（已去除 [SHOW_IMAGE:] 标记） */
   text: string;
+  /**
+   * AI KP 决定展示的图片列表（从文本中提取的 [SHOW_IMAGE:id] 标记解析而来）。
+   * 调用方负责按顺序发送，800ms 间隔。
+   */
+  images?: KPImage[];
   /** 调试信息 */
   debug?: {
     interventionReason: string;
@@ -148,6 +160,8 @@ export class KPPipeline {
     const sceneSegments = this.state.getSegments();
     const currentSegmentId = this.state.getCurrentSegmentId() ?? undefined;
 
+    const scenarioImages = this.state.getScenarioImages();
+
     const { systemPrompt, messages, layerStats } = this.contextBuilder.build(
       template,
       snapshot,
@@ -160,6 +174,7 @@ export class KPPipeline {
         sceneSegments: sceneSegments.length > 0 ? sceneSegments : undefined,
         currentSegmentId,
         maxRecentMessages: 30,
+        scenarioImages: scenarioImages.length > 0 ? scenarioImages : undefined,
       },
     );
 
@@ -169,12 +184,26 @@ export class KPPipeline {
       return { shouldRespond: false, text: '', debug: { interventionReason: intervention.reason, layerStats, draftLength: 0, filteredLength: 0 } };
     }
 
-    // 7. 守密人过滤
-    const finalText = this.enableGuardrail
-      ? await this.applyGuardrail(draft, snapshot.discoveredClues.map((c) => c.title))
-      : draft;
+    // 7. 提取 [SHOW_IMAGE:xxx] 标记（在 guardrail 之前，防止被过滤模型删除）
+    const { cleanText: draftClean, imageIds } = extractShowImageMarkers(draft);
 
-    // 8. 写入 KP 回复到历史
+    // 8. 守密人过滤（仅过滤文字部分）
+    const filteredText = this.enableGuardrail
+      ? await this.applyGuardrail(draftClean, snapshot.discoveredClues.map((c) => c.title))
+      : draftClean;
+
+    // 9. 解析图片 ID → 实际路径（仅 playerVisible=true 的图片）
+    const images: KPImage[] = [];
+    for (const imgId of imageIds) {
+      const img = this.state.resolveImage(imgId);
+      if (img && img.playerVisible) {
+        images.push({ id: img.id, absPath: img.absPath, caption: img.caption });
+      }
+    }
+
+    const finalText = filteredText;
+
+    // 10. 写入 KP 回复到历史
     const kpMsgId = `kp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     this.state.addMessage({
       id: kpMsgId,
@@ -183,12 +212,13 @@ export class KPPipeline {
       timestamp: new Date(),
     });
 
-    // 9. 检查是否需要触发摘要压缩
+    // 11. 检查是否需要触发摘要压缩
     this.maybeTriggerSummary();
 
     return {
       shouldRespond: true,
       text: finalText,
+      images: images.length > 0 ? images : undefined,
       debug: {
         interventionReason: intervention.reason,
         layerStats,
@@ -394,4 +424,19 @@ export class KPPipeline {
 
     return result;
   }
+}
+
+// ─── 模块级工具函数 ───────────────────────────────────────────────────────────
+
+/**
+ * 从 AI 草稿中提取 [SHOW_IMAGE:id] 标记。
+ * 返回干净文本（已去除标记）和图片 ID 列表。
+ */
+function extractShowImageMarkers(text: string): { cleanText: string; imageIds: string[] } {
+  const imageIds: string[] = [];
+  const cleanText = text.replace(/\[SHOW_IMAGE:([^\]]+)\]/g, (_, id: string) => {
+    imageIds.push(id.trim());
+    return '';
+  }).trim();
+  return { cleanText, imageIds };
 }

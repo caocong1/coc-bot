@@ -16,7 +16,7 @@
 
 import type { Character } from '@shared/types/Character';
 import type { KPTemplate } from '../config/KPTemplateRegistry';
-import type { SessionSnapshot, SceneSegment } from '../../runtime/SessionState';
+import type { SessionSnapshot, SceneSegment, ScenarioImage } from '../../runtime/SessionState';
 import type { KnowledgeChunk } from '../../knowledge/retrieval/KnowledgeService';
 
 // ─── 公开类型 ─────────────────────────────────────────────────────────────────
@@ -57,6 +57,11 @@ export interface BuildOptions {
   currentSegmentId?: string;
   /** 最多保留多少条近期原文消息（默认 30） */
   maxRecentMessages?: number;
+  /**
+   * 当前模组可供 AI KP 展示的图片列表。
+   * 只注入 playerVisible=true 的图片，让 AI KP 知道可以用 [SHOW_IMAGE:id] 指令展示。
+   */
+  scenarioImages?: ScenarioImage[];
 }
 
 // ─── 实现 ─────────────────────────────────────────────────────────────────────
@@ -74,7 +79,7 @@ export class ContextBuilder {
     const layerStats: Record<string, number> = {};
 
     const layer1 = this.buildKPPersonality(template);
-    const layer2 = this.buildSceneState(snapshot);
+    const layer2 = this.buildSceneState(snapshot, options.scenarioImages);
     const layer3 = this.buildCharacterSheets(options.characters);
     const layer4 = this.buildRuleContext(options.ruleChunks ?? []);
     const layer5 = (options.sceneSegments && options.sceneSegments.length > 0 && options.currentSegmentId)
@@ -185,7 +190,7 @@ ${template.defaultPromptBlock}
 
   // ─── 层 2：场景状态 ─────────────────────────────────────────────────────────
 
-  private buildSceneState(snapshot: SessionSnapshot): string {
+  private buildSceneState(snapshot: SessionSnapshot, images?: ScenarioImage[]): string {
     const parts: string[] = ['# 当前场景状态'];
 
     if (snapshot.currentScene) {
@@ -215,6 +220,17 @@ ${template.defaultPromptBlock}
       parts.push('\n**玩家已知线索**：');
       for (const clue of snapshot.discoveredClues) {
         parts.push(`- ${clue.title}：${clue.playerDescription}`);
+      }
+    }
+
+    // 注入可用图片列表（仅 playerVisible=true 的图片）
+    const visibleImages = (images ?? []).filter((img) => img.playerVisible && img.caption);
+    if (visibleImages.length > 0) {
+      parts.push(
+        '\n**可展示给玩家的图片**（在叙事中进入新地点或发现重要物件时，可在回复末尾附加 [SHOW_IMAGE:id]，每次最多 1 张）：',
+      );
+      for (const img of visibleImages) {
+        parts.push(`- [${img.id}] ${img.caption}`);
       }
     }
 

@@ -74,6 +74,22 @@ export class NapCatActionClient {
     await this.callApi('delete_msg', { message_id: messageId });
   }
 
+  /**
+   * 向群聊发送图片（本地文件路径）。
+   * 若提供 caption，先发一条说明文字，间隔 400ms 再发图。
+   * @param imagePath 本机绝对路径，如 /data/knowledge/images/file-abc/img-001.jpg
+   */
+  async sendGroupImage(groupId: number, imagePath: string, caption?: string): Promise<void> {
+    if (caption) {
+      await this.sendGroupMessage(groupId, caption);
+      await new Promise<void>((r) => setTimeout(r, 400));
+    }
+    // OneBot v11 CQ 码：file:/// + 正斜杠路径（Windows 路径也要转斜杠）
+    const normalizedPath = imagePath.replace(/\\/g, '/');
+    const cqMsg = `[CQ:image,file=file:///${normalizedPath.replace(/^\//, '')}]`;
+    await this.callApi('send_group_msg', { group_id: groupId, message: cqMsg });
+  }
+
   /* ───────── internal ───────── */
 
   private async callApi(action: string, params: Record<string, unknown>): Promise<OneBotApiResult> {
