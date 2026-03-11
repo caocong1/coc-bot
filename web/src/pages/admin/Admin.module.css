@@ -66,6 +66,18 @@
   cursor: pointer;
 }
 .btn:hover { opacity: 0.85; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnSecondary {
+  padding: 0.35rem 0.75rem;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.btnSecondary:hover { color: var(--text); border-color: var(--text-dim); }
 
 .btnSm {
   padding: 0.25rem 0.6rem;

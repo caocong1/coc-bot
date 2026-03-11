@@ -3,12 +3,14 @@ import Layout from '../../components/Layout';
 import Dashboard from './Dashboard';
 import Sessions from './Sessions';
 import Knowledge from './Knowledge';
+import ScenarioManager from './ScenarioManager';
 import KPStudio from './KPStudio';
 
 const NAV = [
   { label: '总览', href: '/admin', icon: '📊' },
   { label: '跑团管理', href: '/admin/sessions', icon: '🎭' },
-  { label: '知识库', href: '/admin/knowledge', icon: '📚' },
+  { label: '模组管理', href: '/admin/scenarios', icon: '📖' },
+  { label: '规则书', href: '/admin/knowledge', icon: '📚' },
   { label: 'KP Studio', href: '/admin/studio', icon: '🎨' },
 ];
 
@@ -48,6 +50,7 @@ const AdminApp: Component = () => {
   const path = location.pathname;
   let page: Component;
   if (path === '/admin/sessions') page = Sessions;
+  else if (path === '/admin/scenarios') page = ScenarioManager;
   else if (path === '/admin/knowledge') page = Knowledge;
   else if (path === '/admin/studio') page = KPStudio;
   else page = Dashboard;

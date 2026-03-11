@@ -1,167 +1,70 @@
-import { createResource, createSignal, For, onCleanup, Show, type Component } from 'solid-js';
-import { adminApi, type KnowledgeCategory } from '../../api';
+import { createResource, For, Show, type Component } from 'solid-js';
+import { adminApi } from '../../api';
 import styles from './Admin.module.css';
 
-const CATEGORY_LABELS: Record<KnowledgeCategory, string> = {
-  rules: '规则书',
-  scenario: '模组内容',
-  keeper_secret: '守密人专用',
-};
-
-const CATEGORY_HINT: Record<KnowledgeCategory, string> = {
-  rules: '规则机制、技能说明、基础设定（如 CoC7 规则书、调查员手册）',
-  scenario: '模组正文、场景描述（玩家可间接获取的信息）',
-  keeper_secret: '守密人内幕、隐藏线索、真相（不对玩家透露）',
-};
-
+/**
+ * 知识库 — 规则书管理
+ *
+ * 展示系统内置的规则书索引（category=rules）。
+ * 规则书通过命令行一次性导入，此处只读展示，不需要通过 Web 上传。
+ * 剧本文件请前往「模组管理」页面。
+ */
 const Knowledge: Component = () => {
-  const [files, { refetch: refetchFiles }] = createResource(() => adminApi.listKnowledge().catch(() => []));
-  const [jobs, { refetch: refetchJobs }] = createResource(() => adminApi.listKnowledgeJobs().catch(() => []));
-  const [uploading, setUploading] = createSignal(false);
-  const [category, setCategory] = createSignal<KnowledgeCategory>('rules');
-  const [uploadErr, setUploadErr] = createSignal('');
-
-  // 有 pending 任务时自动轮询
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-
-  const hasPending = () => (jobs() ?? []).some((j) => j.status === 'pending');
-
-  const startPoll = () => {
-    if (pollTimer) return;
-    pollTimer = setInterval(() => {
-      refetchJobs();
-      if (!hasPending()) {
-        clearInterval(pollTimer!);
-        pollTimer = null;
-        refetchFiles();
-      }
-    }, 3000);
-  };
-
-  onCleanup(() => { if (pollTimer) clearInterval(pollTimer); });
-
-  const handleUpload = async (e: Event) => {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    setUploadErr('');
-    try {
-      await adminApi.uploadKnowledge(file, category());
-      refetchJobs();
-      startPoll();
-    } catch (e) {
-      setUploadErr(`上传失败：${String(e)}`);
-    } finally {
-      setUploading(false);
-      input.value = '';
-    }
-  };
+  const [files, { refetch }] = createResource(() =>
+    adminApi.listKnowledge().then((all) => all.filter((f) => f.category === 'rules')).catch(() => []),
+  );
 
   return (
     <div>
-      {/* 上传区 */}
       <div class={styles.panel} style={{ 'max-width': '640px', 'margin-bottom': '2rem' }}>
-        <div class={styles.panelHeader}><h3>上传新文件</h3></div>
-        <div style={{ padding: '1rem', display: 'flex', 'flex-direction': 'column', gap: '0.75rem' }}>
-          <p class={styles.dim} style={{ 'font-size': '0.85rem' }}>
-            支持 PDF、TXT、MD 格式。每次上传后系统自动导入并合并到知识库，不会覆盖已有文件。
+        <div class={styles.panelHeader}><h3>关于知识库</h3></div>
+        <div style={{ padding: '1rem' }}>
+          <p style={{ 'font-size': '0.88rem', 'margin-bottom': '0.75rem' }}>
+            知识库存储 CoC7 规则书内容，供 AI KP 在跑团中检索规则细节。
           </p>
-
-          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '0.35rem' }}>
-            <label class={styles.label}>知识类型</label>
-            <select
-              class={styles.select}
-              value={category()}
-              onChange={(e) => setCategory(e.currentTarget.value as KnowledgeCategory)}
-            >
-              <option value="rules">规则书</option>
-              <option value="scenario">模组内容</option>
-              <option value="keeper_secret">守密人专用</option>
-            </select>
-            <p class={styles.dim} style={{ 'font-size': '0.78rem' }}>{CATEGORY_HINT[category()]}</p>
+          <p class={styles.dim} style={{ 'font-size': '0.82rem', 'margin-bottom': '0.5rem' }}>
+            规则书通过命令行一次性导入，<strong>不需要通过 Web 界面上传</strong>。
+          </p>
+          <div style={{
+            background: 'rgba(124,106,247,0.08)', border: '1px solid rgba(124,106,247,0.2)',
+            'border-radius': '6px', padding: '0.75rem', 'font-size': '0.8rem', 'font-family': 'monospace',
+          }}>
+            <div style={{ color: 'var(--text-dim)', 'margin-bottom': '0.35rem' }}># 初次导入规则书（只需运行一次）</div>
+            <div style={{ color: 'var(--accent)' }}>
+              bun scripts/import-pdfs.ts --file="[规则书]守秘人规则书.pdf" --category=rules
+            </div>
+            <div style={{ color: 'var(--accent)', 'margin-top': '0.25rem' }}>
+              bun scripts/import-pdfs.ts --file="[调查员手册].pdf" --category=rules
+            </div>
+            <div style={{ color: 'var(--text-dim)', 'margin-top': '0.5rem' }}># 构建向量索引</div>
+            <div style={{ color: 'var(--accent)' }}>bun scripts/build-indexes.ts --type=rules</div>
           </div>
-
-          <label class={styles.uploadLabel}>
-            {uploading() ? '上传中...' : '📁 选择文件（PDF / TXT / MD）'}
-            <input
-              type="file"
-              accept=".pdf,.txt,.md"
-              disabled={uploading()}
-              onChange={handleUpload}
-              style={{ display: 'none' }}
-            />
-          </label>
-
-          <Show when={uploadErr()}>
-            <p style={{ color: 'var(--danger)', 'font-size': '0.85rem' }}>❌ {uploadErr()}</p>
-          </Show>
+          <p class={styles.dim} style={{ 'font-size': '0.78rem', 'margin-top': '0.75rem' }}>
+            剧本和模组文件请前往 <strong>模组管理</strong> 页面上传。
+          </p>
         </div>
       </div>
 
-      {/* 导入任务状态 */}
-      <Show when={(jobs() ?? []).length > 0}>
-        <div class={styles.section} style={{ 'margin-bottom': '2rem' }}>
-          <div class={styles.sectionHeader}>
-            <h2>导入任务</h2>
-            <button class={styles.btnSm} onClick={() => { refetchJobs(); if (!hasPending()) refetchFiles(); }}>刷新</button>
-          </div>
-          <div class={styles.table}>
-            <div class={styles.tableHeader}>
-              <span>文件名</span>
-              <span>类型</span>
-              <span>状态</span>
-              <span>时间</span>
-            </div>
-            <For each={jobs()}>
-              {(job) => (
-                <div class={styles.tableRow}>
-                  <span style={{ 'font-size': '0.82rem' }}>{job.filename}</span>
-                  <span class={styles.dim}>{CATEGORY_LABELS[job.category]}</span>
-                  <span>
-                    {job.status === 'pending' && <span style={{ color: 'var(--warn)' }}>⏳ 处理中...</span>}
-                    {job.status === 'done' && <span style={{ color: 'var(--success)' }}>✅ 完成</span>}
-                    {job.status === 'failed' && <span style={{ color: 'var(--danger)' }} title={job.error}>❌ 失败</span>}
-                  </span>
-                  <span class={styles.dim} style={{ 'font-size': '0.78rem' }}>
-                    {new Date(job.startedAt).toLocaleTimeString()}
-                    {job.finishedAt && ` → ${new Date(job.finishedAt).toLocaleTimeString()}`}
-                  </span>
-                </div>
-              )}
-            </For>
-          </div>
-        </div>
-      </Show>
-
-      {/* 已导入文件列表 */}
       <div class={styles.section}>
         <div class={styles.sectionHeader}>
-          <h2>已导入文件</h2>
-          <button class={styles.btnSm} onClick={refetchFiles}>刷新</button>
+          <h2>已导入规则书</h2>
+          <button class={styles.btnSm} onClick={refetch}>刷新</button>
         </div>
         <Show when={!files.loading} fallback={<p class={styles.dim}>加载中...</p>}>
-          <Show when={(files() ?? []).length > 0} fallback={<p class={styles.dim}>暂无文件，请先上传</p>}>
+          <Show when={(files() ?? []).length > 0} fallback={<p class={styles.dim}>暂无规则书，请按上方说明通过命令行导入</p>}>
             <div class={styles.table}>
-              <div class={styles.tableHeader} style={{ 'grid-template-columns': '2fr 1fr 0.7fr 0.7fr 1fr' }}>
+              <div class={styles.tableHeader} style={{ 'grid-template-columns': '2.5fr 0.7fr 0.7fr 1fr' }}>
                 <span>文件名</span>
-                <span>类型</span>
                 <span>字符数</span>
                 <span>分块数</span>
                 <span>导入时间</span>
               </div>
               <For each={files()}>
                 {(f) => (
-                  <div class={styles.tableRow} style={{ 'grid-template-columns': '2fr 1fr 0.7fr 0.7fr 1fr' }}>
-                    <span style={{ 'font-size': '0.82rem' }}>{f.name}</span>
-                    <span>
-                      <span class={`${styles.badge} ${styles[`cat_${f.category}`]}`}>
-                        {CATEGORY_LABELS[f.category]}
-                      </span>
-                    </span>
+                  <div class={styles.tableRow} style={{ 'grid-template-columns': '2.5fr 0.7fr 0.7fr 1fr' }}>
+                    <span style={{ 'font-size': '0.82rem' }}>📗 {f.name}</span>
                     <span class={styles.dim}>{f.charCount > 0 ? `${(f.charCount / 1000).toFixed(0)}K` : '—'}</span>
-                    <span class={styles.dim}>{f.chunkCount > 0 ? f.chunkCount : '—'}</span>
+                    <span class={styles.dim}>{f.chunkCount || '—'}</span>
                     <span class={styles.dim} style={{ 'font-size': '0.78rem' }}>
                       {f.importedAt ? new Date(f.importedAt).toLocaleDateString() : '—'}
                     </span>
