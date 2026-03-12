@@ -417,3 +417,97 @@
 .faqItem { margin-bottom: 1.25rem; }
 .faqItem strong { display: block; margin-bottom: 0.25rem; }
 .faqItem p { font-size: 0.88rem; color: var(--text-dim); }
+
+/* ── 跑团房间 ─────────────────────────────────────────── */
+
+.createForm {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.formLabel { display: block; font-size: 0.82rem; color: var(--text-dim); margin: 0.75rem 0 0.3rem; }
+.formLabel:first-of-type { margin-top: 0; }
+.errorText { color: var(--danger); font-size: 0.88rem; margin: 0.5rem 0; }
+.btnPrimary {
+  display: inline-block;
+  padding: 0.5rem 1.25rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 1rem;
+}
+.btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btnPrimary:hover:not(:disabled) { opacity: 0.85; }
+
+.detailHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.successBanner {
+  background: rgba(82,190,128,0.12);
+  border: 1px solid var(--success);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  color: var(--success);
+  margin-bottom: 1rem;
+}
+.warnBanner {
+  background: rgba(240,185,11,0.1);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.88rem;
+}
+.confirmBox {
+  background: rgba(224,82,82,0.1);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.88rem;
+}
+
+.memberRow {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.charSelectList { display: flex; flex-direction: column; gap: 0.5rem; }
+.charSelectItem {
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  color: var(--text);
+  width: 100%;
+}
+.charSelectItem:hover { border-color: var(--accent); }
+
+.constraintBox {
+  margin-top: 1.25rem;
+  background: rgba(124,106,247,0.07);
+  border: 1px solid rgba(124,106,247,0.25);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}

@@ -61,6 +61,29 @@ export const playerApi = {
   getCampaignMessages: (id: string) => request<Message[]>(`/player/campaigns/${id}/messages`),
 
   listScenarios: () => request<ScenarioSummary[]>('/player/scenarios'),
+
+  // ── 跑团房间 ──────────────────────────────────────────────────────────────
+  listRooms: () => request<RoomSummary[]>('/player/rooms'),
+
+  createRoom: (data: CreateRoomPayload) =>
+    request<{ id: string }>('/player/rooms', { method: 'POST', body: JSON.stringify(data) }),
+
+  getRoom: (id: string) => request<RoomDetail>(`/player/rooms/${id}`),
+
+  deleteRoom: (id: string, force?: boolean) =>
+    request<{ ok: boolean }>(`/player/rooms/${id}`, { method: 'DELETE', body: force ? JSON.stringify({ force: true }) : undefined }),
+
+  joinRoom: (id: string) =>
+    request<{ ok: boolean }>(`/player/rooms/${id}/join`, { method: 'POST' }),
+
+  setRoomCharacter: (id: string, characterId: string | null) =>
+    request<{ ok: boolean }>(`/player/rooms/${id}/character`, { method: 'PUT', body: JSON.stringify({ characterId }) }),
+
+  startRoom: (id: string) =>
+    request<{ ok: boolean; message: string }>(`/player/rooms/${id}/start`, { method: 'POST' }),
+
+  updateRoomConstraints: (id: string, data: { scenarioName?: string; constraints: RoomConstraints }) =>
+    request<{ ok: boolean }>(`/player/rooms/${id}/constraints`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 // ─── Admin API ───────────────────────────────────────────────────────────────
@@ -116,6 +139,9 @@ export const adminApi = {
   listKpTemplates: () => request<KpTemplate[]>('/admin/kp-templates', {}, 'admin'),
 
   messagesStreamUrl: (groupId: number) => `/api/admin/sessions/${groupId}/messages/stream`,
+
+  listRooms: () => request<RoomSummary[]>('/admin/rooms', {}, 'admin'),
+  deleteRoom: (id: string) => request<{ ok: boolean }>(`/admin/rooms/${id}`, { method: 'DELETE' }, 'admin'),
 };
 
 // ─── 类型定义 ─────────────────────────────────────────────────────────────────
@@ -217,6 +243,52 @@ export interface ImportJob {
   error?: string;
   startedAt: string;
   finishedAt?: string;
+}
+
+export interface RoomConstraints {
+  era?: string;
+  allowedOccupations?: string[];
+  minStats?: Record<string, number>;
+}
+
+export interface CreateRoomPayload {
+  name: string;
+  groupId: number;
+  scenarioName?: string;
+  constraints?: RoomConstraints;
+}
+
+export interface RoomMember {
+  qqId: number;
+  joinedAt: string;
+  isCreator: boolean;
+  character: {
+    id: string;
+    name: string;
+    occupation: string | null;
+    hp: number | null;
+    san: number | null;
+    attributes: Record<string, number>;
+  } | null;
+}
+
+export interface RoomSummary {
+  id: string;
+  name: string;
+  groupId: number;
+  creatorQqId: number;
+  isCreator: boolean;
+  scenarioName: string | null;
+  constraints: RoomConstraints;
+  status: 'waiting' | 'running' | 'ended';
+  kpSessionId: string | null;
+  createdAt: string;
+  memberCount: number;
+}
+
+export interface RoomDetail extends RoomSummary {
+  members: RoomMember[];
+  warnings: string[];
 }
 
 export interface KpTemplate {

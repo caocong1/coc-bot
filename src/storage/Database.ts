@@ -153,6 +153,34 @@ export function migrateCoreSchema(db: Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_player_tokens_qq ON player_tokens(qq_id);
+
+    -- ── 跑团房间（预开团大厅）──────────────────────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS campaign_rooms (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      group_id INTEGER NOT NULL,
+      creator_qq_id INTEGER NOT NULL,
+      scenario_name TEXT,
+      constraints_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'waiting',
+      kp_session_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_rooms_group ON campaign_rooms(group_id);
+
+    CREATE TABLE IF NOT EXISTS campaign_room_members (
+      room_id TEXT NOT NULL,
+      qq_id INTEGER NOT NULL,
+      character_id TEXT,
+      joined_at TEXT NOT NULL,
+      PRIMARY KEY (room_id, qq_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_room_members_room ON campaign_room_members(room_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_room_members_qq ON campaign_room_members(qq_id);
   `);
 
   // 对已存在的旧表做安全迁移（列不存在时才执行，已有则忽略）

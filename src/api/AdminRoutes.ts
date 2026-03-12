@@ -115,6 +115,12 @@ export class AdminRoutes {
     // /kp-templates
     if (resource === 'kp-templates' && method === 'GET') return this.listKpTemplates();
 
+    // /rooms — 管理员可查看/删除任何房间
+    if (resource === 'rooms') {
+      if (method === 'GET' && !segments[1]) return this.listAllRooms();
+      if (method === 'DELETE' && segments[1]) return this.adminDeleteRoom(segments[1]);
+    }
+
     return Response.json({ error: 'Not Found' }, { status: 404 });
   }
 
@@ -531,5 +537,40 @@ export class AdminRoutes {
     return this.db.query<{ id: string }, number>(
       "SELECT id FROM kp_sessions WHERE group_id = ? AND status IN ('running', 'paused') ORDER BY updated_at DESC LIMIT 1",
     ).get(groupId);
+  }
+
+  // ─── 房间管理（管理员） ────────────────────────────────────────────────────
+
+  private listAllRooms(): Response {
+    const rooms = this.db.query<{
+      id: string; name: string; group_id: number; creator_qq_id: number;
+      scenario_name: string | null; status: string; created_at: string;
+    }, []>(
+      'SELECT id, name, group_id, creator_qq_id, scenario_name, status, created_at FROM campaign_rooms ORDER BY created_at DESC',
+    ).all();
+
+    return Response.json(rooms.map((r) => ({
+      id: r.id,
+      name: r.name,
+      groupId: r.group_id,
+      creatorQqId: r.creator_qq_id,
+      scenarioName: r.scenario_name,
+      status: r.status,
+      createdAt: r.created_at,
+      memberCount: this.db.query<{ cnt: number }, string>(
+        'SELECT COUNT(*) as cnt FROM campaign_room_members WHERE room_id = ?',
+      ).get(r.id)?.cnt ?? 0,
+    })));
+  }
+
+  private adminDeleteRoom(roomId: string): Response {
+    const room = this.db.query<{ status: string }, string>(
+      'SELECT status FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+
+    this.db.run('DELETE FROM campaign_room_members WHERE room_id = ?', [roomId]);
+    this.db.run('DELETE FROM campaign_rooms WHERE id = ?', [roomId]);
+    return Response.json({ ok: true });
   }
 }

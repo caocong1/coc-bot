@@ -32,7 +32,7 @@ export class ApiRouter {
   private admin: AdminRoutes;
 
   constructor(private readonly opts: ApiRouterOptions) {
-    this.player = new PlayerRoutes(opts.db, opts.tokenStore, opts.characterStore);
+    this.player = new PlayerRoutes(opts.db, opts.tokenStore, opts.characterStore, opts.campaignHandler, opts.napcat);
     this.admin = new AdminRoutes(opts.db, opts.campaignHandler, opts.adminSecret, opts.aiClient, opts.napcat);
   }
 

@@ -37,9 +37,43 @@ import { TokenStore } from '../storage/TokenStore';
 import { ApiRouter } from '../api/ApiRouter';
 import type { MessageContext } from '../shared/contracts/RuntimeContracts';
 import { enableTimestampedConsole } from '../shared/logging/ConsoleTimestamp';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 
 enableTimestampedConsole();
+
+/* ─── PID 管理：自动关掉上一个实例 ─── */
+
+const PID_FILE = 'data/bot.pid';
+
+function killExistingInstance() {
+  if (!existsSync(PID_FILE)) return;
+  try {
+    const oldPid = parseInt(readFileSync(PID_FILE, 'utf8').trim());
+    if (isNaN(oldPid)) return;
+    process.kill(oldPid, 0); // 先探测进程是否存在（不实际发送信号）
+    process.kill(oldPid);
+    console.log(`[Boot] 已关闭旧实例 (PID ${oldPid})`);
+    // 给旧进程一点时间释放端口
+    Bun.sleepSync(500);
+  } catch {
+    // 进程已不存在，忽略
+  }
+}
+
+function writePid() {
+  mkdirSync('data', { recursive: true });
+  writeFileSync(PID_FILE, String(process.pid));
+}
+
+function cleanupPid() {
+  try { unlinkSync(PID_FILE); } catch { /* ignore */ }
+}
+
+killExistingInstance();
+writePid();
+process.on('exit', cleanupPid);
+process.on('SIGINT', () => { cleanupPid(); process.exit(0); });
+process.on('SIGTERM', () => { cleanupPid(); process.exit(0); });
 
 /* ─── config ─── */
 
