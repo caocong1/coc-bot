@@ -1,0 +1,1112 @@
+[
+  {
+    "name": "经济车",
+    "skill": "汽车驾驶",
+    "mov": 13,
+    "build": 4,
+    "passengerArmor": 1,
+    "passengers": "3或4",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "≤2",
+    "era": [
+      "现代"
+    ],
+    "type": "机动车",
+    "notes": "规则书内的载具"
+  },
+  {
+    "name": "标准车",
+    "skill": "汽车驾驶",
+    "mov": 14,
+    "build": 5,
+    "passengerArmor": 2,
+    "passengers": "4",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "豪华车",
+    "skill": "汽车驾驶",
+    "mov": 15,
+    "build": 6,
+    "passengerArmor": 2,
+    "passengers": "4",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "跑车",
+    "skill": "汽车驾驶",
+    "mov": 16,
+    "build": 5,
+    "passengerArmor": 2,
+    "passengers": "1",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "——",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "敞篷小卡车",
+    "skill": "汽车驾驶",
+    "mov": 14,
+    "build": 6,
+    "passengerArmor": 2,
+    "passengers": "2+",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3/后斗≤4",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "6吨卡车",
+    "skill": "汽车驾驶",
+    "mov": 13,
+    "build": 7,
+    "passengerArmor": 2,
+    "passengers": "2+",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3/后斗≤4",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "半拖车",
+    "skill": "汽车驾驶",
+    "mov": 13,
+    "build": 9,
+    "passengerArmor": 2,
+    "passengers": "3+",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3/后斗≤6",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "轻摩托",
+    "skill": "汽车驾驶",
+    "mov": 13,
+    "build": 1,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "重摩托",
+    "skill": "汽车驾驶",
+    "mov": 16,
+    "build": 3,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "坦克",
+    "skill": "重型机械 或 专业训练",
+    "mov": 11,
+    "build": 20,
+    "passengerArmor": 24,
+    "passengers": "4",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "-1至2",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "type": "重型载具"
+  },
+  {
+    "name": "蒸汽列车",
+    "skill": "重型机械 或 专业训练",
+    "mov": 12,
+    "build": 12,
+    "passengerArmor": 1,
+    "passengers": "400+",
+    "drivableBuild": "-1至3",
+    "ridableBuild": "≤3，露天车厢≤4",
+    "era": [
+      "1920s"
+    ]
+  },
+  {
+    "name": "现代列车",
+    "skill": "重型机械 或 专业训练",
+    "mov": 15,
+    "build": 14,
+    "passengerArmor": 2,
+    "passengers": "400+",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "马（有骑手）",
+    "skill": "骑乘",
+    "mov": 11,
+    "build": 4,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "自从人类存在"
+    ],
+    "type": "其他载具"
+  },
+  {
+    "name": "四马马车",
+    "skill": "骑乘",
+    "mov": 10,
+    "build": 3,
+    "passengerArmor": 0,
+    "passengers": "6+",
+    "drivableBuild": "≤3",
+    "ridableBuild": "≤3/后斗≤4",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "自行车",
+    "skill": "骑乘",
+    "mov": 10,
+    "build": 0.5,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "划艇",
+    "skill": "驾驶：船",
+    "mov": 4,
+    "build": 2,
+    "passengerArmor": 0,
+    "passengers": "3",
+    "drivableBuild": "-2至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "远古开始"
+    ],
+    "type": "水上载具"
+  },
+  {
+    "name": "气垫船",
+    "skill": "驾驶：船",
+    "mov": 12,
+    "build": 4,
+    "passengerArmor": 0,
+    "passengers": "22",
+    "drivableBuild": "-2至3",
+    "ridableBuild": "≤2",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "摩托艇",
+    "skill": "驾驶：快艇",
+    "mov": 14,
+    "build": 3,
+    "passengerArmor": 0,
+    "passengers": "6",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "游轮",
+    "skill": "驾驶：船",
+    "mov": 11,
+    "build": 32,
+    "passengerArmor": "0（甲板上）",
+    "passengers": "至少2200",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤4",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "战列舰",
+    "skill": "驾驶：轮船",
+    "mov": 11,
+    "build": 65,
+    "passengerArmor": "0（甲板上）",
+    "passengers": "至少1800",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤4",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "航空母舰",
+    "skill": "驾驶：战舰",
+    "mov": 11,
+    "build": 75,
+    "passengerArmor": "0（甲板上）",
+    "passengers": "至少3200",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤6",
+    "era": [
+      "罕见/现代"
+    ]
+  },
+  {
+    "name": "潜水艇",
+    "skill": "驾驶：战舰",
+    "mov": 12,
+    "build": 24,
+    "passengerArmor": "0（甲板上）",
+    "passengers": "至少120",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤4",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "公共汽车",
+    "skill": "汽车驾驶",
+    "mov": 12,
+    "build": 6,
+    "passengerArmor": 2,
+    "passengers": "80",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "type": "地面载具"
+  },
+  {
+    "name": "双层公交车",
+    "skill": "汽车驾驶",
+    "mov": 12,
+    "build": 7,
+    "passengerArmor": 2,
+    "passengers": "200",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "大客车",
+    "skill": "汽车驾驶",
+    "mov": 12,
+    "build": 6,
+    "passengerArmor": 2,
+    "passengers": "50",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "纯电动汽车",
+    "skill": "汽车驾驶",
+    "mov": 14,
+    "build": 5,
+    "passengerArmor": 2,
+    "passengers": "3或4",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "≤2",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "电动摩托",
+    "skill": "汽车驾驶",
+    "mov": 11,
+    "build": 1,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "全地形车",
+    "skill": "汽车驾驶",
+    "mov": 14,
+    "build": 4,
+    "passengerArmor": 0,
+    "passengers": "2",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "吉普车",
+    "skill": "汽车驾驶",
+    "mov": 12,
+    "build": 6,
+    "passengerArmor": 2,
+    "passengers": "5",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "平衡车",
+    "skill": "敏捷",
+    "mov": "MOV+1",
+    "build": -1,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "滑板",
+    "skill": "敏捷",
+    "mov": "MOV+2",
+    "build": -1,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "暴走鞋",
+    "skill": "困难敏捷",
+    "mov": "MOV+3",
+    "build": -2,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "旱冰鞋",
+    "skill": "敏捷",
+    "mov": "MOV+3",
+    "build": -2,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "冰刀",
+    "skill": "敏捷",
+    "mov": "MOV+4",
+    "build": -2,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "驴",
+    "skill": "骑术",
+    "mov": 8,
+    "build": 4,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "自从人类存在"
+    ]
+  },
+  {
+    "name": "拖拉机",
+    "skill": "汽车驾驶",
+    "mov": "MOV+4",
+    "build": -2,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "工业用车（挖掘机、打桩机等）",
+    "skill": "重型机械操作、专业训练",
+    "mov": 10,
+    "build": 4,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "民用航空",
+    "skill": "重型机械 或 专业训练",
+    "mov": 225,
+    "build": 65,
+    "passengerArmor": 10,
+    "passengers": "300",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "type": "空中载具",
+    "notes": "无人机并不是载具，但是很常见所以写在这里。"
+  },
+  {
+    "name": "战斗机",
+    "skill": "专业训练",
+    "mov": 525,
+    "build": 45,
+    "passengerArmor": 15,
+    "passengers": "1",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "≤1",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "轰炸机",
+    "skill": "专业训练",
+    "mov": 225,
+    "build": 53,
+    "passengerArmor": 25,
+    "passengers": "2",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "≤1",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "私人飞机",
+    "skill": "重型机械 或 专业训练",
+    "mov": 175,
+    "build": 35,
+    "passengerArmor": 7,
+    "passengers": "4人以上",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "现代"
+    ],
+    "notes": "热气球不具备任何动力系统，移速和风力基本相同"
+  },
+  {
+    "name": "涡轮喷气机",
+    "skill": "重型机械 或 专业训练",
+    "mov": 450,
+    "build": 60,
+    "passengerArmor": 15,
+    "passengers": "2",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "≤1",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "货机",
+    "skill": "重型机械 或 专业训练",
+    "mov": 217,
+    "build": 64,
+    "passengerArmor": 10,
+    "passengers": "2",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "超音速飞机",
+    "skill": "专业训练",
+    "mov": 979,
+    "build": 35,
+    "passengerArmor": 25,
+    "passengers": "1",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "——",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "直升机",
+    "skill": "重型机械 或 专业训练",
+    "mov": 50,
+    "build": 20,
+    "passengerArmor": 4,
+    "passengers": "8",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "现代"
+    ],
+    "notes": "迄今为止人类最快的非宇航飞行器"
+  },
+  {
+    "name": "无人机",
+    "skill": "智力",
+    "mov": 4,
+    "build": -2,
+    "passengerArmor": 0,
+    "passengers": "——",
+    "drivableBuild": "——",
+    "ridableBuild": "——",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "热气球",
+    "skill": "重型机械 或 专业训练",
+    "mov": "上升速度：1.5",
+    "build": 6,
+    "passengerArmor": 0,
+    "passengers": "8",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "双翼机",
+    "skill": "重型机械 或 专业训练",
+    "mov": 76,
+    "build": 20,
+    "passengerArmor": 2,
+    "passengers": "1或2",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "≤1",
+    "era": [
+      "1920s"
+    ]
+  },
+  {
+    "name": "“掠夺者”无人飞机",
+    "skill": "计算机使用 Ω",
+    "mov": 6120,
+    "build": 35,
+    "passengerArmor": "——",
+    "passengers": "——",
+    "drivableBuild": "——",
+    "ridableBuild": "——",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "独木舟",
+    "skill": "驾驶：船",
+    "mov": 4,
+    "build": 3,
+    "passengerArmor": 0,
+    "passengers": "2",
+    "drivableBuild": "-1,0,1",
+    "ridableBuild": "-1,0,1",
+    "era": [
+      "古代"
+    ],
+    "type": "水上载具"
+  },
+  {
+    "name": "木筏",
+    "skill": "驾驶：船",
+    "mov": 2,
+    "build": 3,
+    "passengerArmor": 0,
+    "passengers": "4",
+    "drivableBuild": "-2至3",
+    "ridableBuild": "≤3",
+    "era": [
+      "古代"
+    ]
+  },
+  {
+    "name": "现代帆船",
+    "skill": "驾驶：帆船",
+    "mov": 7,
+    "build": 4,
+    "passengerArmor": 0,
+    "passengers": "13",
+    "drivableBuild": "-2至3",
+    "ridableBuild": "≤3",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "比赛帆船",
+    "skill": "驾驶：帆船",
+    "mov": 9,
+    "build": 3,
+    "passengerArmor": 0,
+    "passengers": "1",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "渡河小船",
+    "skill": "驾驶：船",
+    "mov": 5,
+    "build": 5,
+    "passengerArmor": 0,
+    "passengers": "12",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "古代至今"
+    ]
+  },
+  {
+    "name": "快艇",
+    "skill": "驾驶：快艇",
+    "mov": 13,
+    "build": 5,
+    "passengerArmor": 0,
+    "passengers": "9",
+    "drivableBuild": "-2至2",
+    "ridableBuild": "≤2",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "货轮",
+    "skill": "驾驶：轮船",
+    "mov": 8,
+    "build": 12,
+    "passengerArmor": "0（甲板上）",
+    "passengers": "15",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤6",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "客船",
+    "skill": "驾驶：轮船",
+    "mov": 10,
+    "build": 11,
+    "passengerArmor": "0（甲板上）",
+    "passengers": "600",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "海上移动钻井平台",
+    "skill": "重型机械操作",
+    "mov": 4,
+    "build": 90,
+    "passengerArmor": "0（甲板上）",
+    "passengers": "50左右",
+    "drivableBuild": "-1至3",
+    "ridableBuild": "≤5",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "地铁",
+    "skill": "重型机械操作、专业训练",
+    "mov": 30,
+    "build": 16,
+    "passengerArmor": 6,
+    "passengers": "1800",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "现代"
+    ],
+    "type": "固定路线载具"
+  },
+  {
+    "name": "有轨电车",
+    "skill": "重型机械操作、专业训练",
+    "mov": "18",
+    "build": 8,
+    "passengerArmor": 4,
+    "passengers": "400+",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "空中轨道列车",
+    "skill": "重型机械操作、专业训练",
+    "mov": 13,
+    "build": 6,
+    "passengerArmor": 2,
+    "passengers": "300",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "缆车",
+    "skill": "电子学 Ω",
+    "mov": 4,
+    "build": 4,
+    "passengerArmor": 2,
+    "passengers": "4",
+    "drivableBuild": "——",
+    "ridableBuild": "≤3",
+    "era": [
+      "1920s",
+      "现代"
+    ]
+  },
+  {
+    "name": "高速铁路",
+    "skill": "重型机械操作、专业训练",
+    "mov": 512,
+    "build": 35,
+    "passengerArmor": 3,
+    "passengers": "600",
+    "drivableBuild": "-1至2",
+    "ridableBuild": "≤3",
+    "era": [
+      "现代"
+    ]
+  },
+  {
+    "name": "术语解释",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "MOV（移动速度）：在追逐中载具的速度和可操作性（maneuverability）的衡量等级。这些等级是为了现代载具\n设定的，1920s 的载具需要减少大约 20%（尽管在 1920s 有能够超过 100MPH 的车）。",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "Build（体格）：对于载具的力量和尺寸的衡量等级。当降低到 0 时，载具就会无法运转。每满 10 点伤害降低载具\n1 点体格（小数点后舍去）；任何 10 以下的伤害会被无视。",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "如果载具的体格降低到开始的一半（小数点后舍去）或更低，它就受到损伤。所有的汽车驾驶技能（或其他合适的技能）都要应用一个惩罚骰。",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "如果在一次事故中载具承受了等同于它所有体格的伤害（小数点后舍去）载具会以一种令人非常印象深刻的方式完全的报废了。它可能爆炸、起火、滚动或以上几种的组合。所有载具上的乘客很可能会死。调查员是否拥有幸存的机会取决于守秘人：可以进行幸运骰。那些幸运的被扔出载具的人，尽管还是建议让他们承受至少 2d10 的伤害",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "如果载具的体格累积的受到损伤（例如：比载具初始体格值低的较小值（in increments of less than the vehicle’s starting build value））减到了 0，\n它便无法驾驶、慢慢停下来。根据情况（或许是幸运骰）这可能会导致异常交通事故，对驾驶员和每个乘客造成 1d10 损伤。",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "Armor for people（乘客护甲）：这个护甲等级是为了乘客和驾驶员提供的，表明载具提供的对外界攻击的护甲值",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "Passengers and crew（乘客和工作人员）：可以住宿的在在居上的人数。",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "追逐轮可选规则",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "选择一条道路",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "随机的险境和障碍",
+    "era": []
+  },
+  {
+    "name": "在调查员被追逐的情况下，KP应当将调查员附近的环境或能选择逃跑的路径告诉调查员\n\n这样调查员就可以选择一条更加简单或困难的通路，或是自己擅长并且可以拖住追逐者的道路。\n比如田径队员会选择无比杂乱的街道，或者游泳运动员会选择一条河流来甩掉追逐者。",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "通过本规则，KP可以为正在逃跑的调查员或追逐者造成一定困扰或便利。\n首先骰一个1D100然后按照右表来给追逐轮填些花样。\n暗骰搞事嘿嘿嘿",
+    "era": []
+  },
+  {
+    "name": "突发险境",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "这里看起来挺安全的，真的挺安全吗？",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "猛踩油门",
+    "era": []
+  },
+  {
+    "name": "一个地方一时安全不代表一世安全\n\n马路上突然冲出来的车，没有拴好的狗，高空坠物，泥石流，地震，甚至恐怖袭击都是可能出现的\n\n遛狗不拴狗等于狗遛狗",
+    "skill": "",
+    "mov": "在追逐轮内，无论何时，只要调查员或守秘人希望发生突发事件，那么kp就可以要求进行一次群体幸运骰。",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "通常情况下，载具都是可以通过踩油门、推动制动杆、添柴等各种方法进行加速的。\n这将可以使其移动力增加2-5倍",
+    "era": []
+  },
+  {
+    "name": "当调查员要求了突发事件之后，直到kp要求突发事件之前都不能再次要求，反之亦然。\n当追逐轮持续时间过长kp可以提升突发时间的难度。",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "交通事故",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "",
+    "drivableBuild": "",
+    "ridableBuild": "",
+    "era": []
+  },
+  {
+    "name": "事故",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "伤害",
+    "drivableBuild": "",
+    "ridableBuild": "举例",
+    "era": []
+  },
+  {
+    "name": "轻微事故：普通难度的险境一般都归在这里了，\n虽然可能就是轻轻擦一下或者刮掉一块漆，但是还是可能发生危险的",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "1D3-1\nbuild",
+    "drivableBuild": "",
+    "ridableBuild": "被其他载具从侧面或后面冲撞     擦到路灯柱     撞到杆子上     撞到人或小型生物",
+    "era": []
+  },
+  {
+    "name": "中等事故：一般都是困难难度的险境，可能导致严重的伤害，甚至会破坏汽车",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "1D6\nbuild",
+    "drivableBuild": "",
+    "ridableBuild": "撞到牛或鹿     和重型摩托或经济型轿车发生碰撞",
+    "era": []
+  },
+  {
+    "name": "轻微事故：大部分极难难度的险境，很可能完全摧毁汽车。",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "1D10\nbuild",
+    "drivableBuild": "",
+    "ridableBuild": "和标准车     灯柱发生正面冲撞",
+    "era": []
+  },
+  {
+    "name": "蓄意伤害：普就算是货运汽车也可能被完全摧毁，普通汽车几乎没有生路。",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "2D10\nbuild",
+    "drivableBuild": "",
+    "ridableBuild": "和货运汽车     长途公车     成熟的树木发生冲撞",
+    "era": []
+  },
+  {
+    "name": "马路杀手：如字面的意思，会杀死马路，还有上面的东西",
+    "skill": "",
+    "mov": "",
+    "build": "",
+    "passengerArmor": "",
+    "passengers": "5D10\nbuild",
+    "drivableBuild": "",
+    "ridableBuild": "和强大的破坏力、火车发生冲撞      被陨石砸中",
+    "era": []
+  }
+]

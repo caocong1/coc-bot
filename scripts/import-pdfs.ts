@@ -16,6 +16,7 @@ import { basename, extname, join, relative, resolve } from 'path';
 import { ChunkPipeline } from '../src/knowledge/chunking/ChunkPipeline';
 import { PdfTextExtractor } from '../src/knowledge/pdf/PdfTextExtractor';
 import { ImageLibrary, type ImageSource } from '../src/knowledge/images/ImageLibrary';
+import { DashScopeClient } from '../src/ai/client/DashScopeClient';
 
 /** 支持的文件扩展名 */
 const SUPPORTED_EXTS = new Set(['.pdf', '.txt', '.md', '.docx']);
@@ -166,6 +167,7 @@ function splitKpOnlyText(fullText: string): { scenarioText: string; keeperText: 
 
 interface DocxExtractResult {
   text: string;
+  html: string;
   images: Array<{ buffer: Buffer; mimeType: string; index: number }>;
 }
 
@@ -180,8 +182,8 @@ async function extractDocx(filePath: string): Promise<DocxExtractResult> {
   const extractedImages: Array<{ buffer: Buffer; mimeType: string; index: number }> = [];
   let imgIndex = 0;
 
-  // 提取图片（通过 HTML 转换的 convertImage 钩子）
-  await mammoth.convertToHtml({ path: filePath }, {
+  // 提取图片（通过 HTML 转换的 convertImage 钩子），同时保留 HTML 输出用于图文映射
+  const htmlResult = await mammoth.convertToHtml({ path: filePath }, {
     convertImage: mammoth.images.imgElement(async (image: { read: (enc?: string) => Promise<Buffer>; contentType: string }) => {
       const buffer = await image.read();
       extractedImages.push({ buffer, mimeType: image.contentType, index: imgIndex++ });
@@ -192,7 +194,7 @@ async function extractDocx(filePath: string): Promise<DocxExtractResult> {
   // 提取纯文本（更干净，不含 HTML 标签）
   const textResult = await mammoth.extractRawText({ path: filePath });
 
-  return { text: textResult.value, images: extractedImages };
+  return { text: textResult.value, html: htmlResult.value, images: extractedImages };
 }
 
 /** 纯文本文件直接读取，添加伪页标记（每 3000 字符一页）以兼容 ChunkPipeline */
@@ -214,6 +216,209 @@ function extractTextFile(filePath: string): { text: string; pages: number } {
   }
 
   return { text: parts.join('\n\n'), pages: pageNum - 1 };
+}
+
+// ─── 图文映射 & AI 图片描述 ─────────────────────────────────────────────────
+
+const DASHSCOPE_CHAT_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+
+/**
+ * 从 mammoth HTML 提取每张图片周围的文本上下文
+ */
+function extractImageContexts(html: string, imageCount: number): Map<number, string> {
+  const contexts = new Map<number, string>();
+  // 保留 img placeholder 作为锚点，去掉其他 HTML 标签
+  const plainWithPlaceholders = html
+    .replace(/<img[^>]*src="(__img_placeholder_\d+__)"[^>]*\/?>/g, '\n$1\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&[a-z]+;/g, ' ')
+    .replace(/\n{3,}/g, '\n\n');
+
+  for (let i = 0; i < imageCount; i++) {
+    const marker = `__img_placeholder_${i}__`;
+    const pos = plainWithPlaceholders.indexOf(marker);
+    if (pos === -1) continue;
+    const before = plainWithPlaceholders.slice(Math.max(0, pos - 500), pos).trim();
+    const after = plainWithPlaceholders.slice(pos + marker.length, pos + marker.length + 500).trim();
+    contexts.set(i, `${before}\n[图片位置]\n${after}`);
+  }
+  return contexts;
+}
+
+/**
+ * 调用 DashScope chat API（轻量，不依赖 DashScopeClient 类）
+ */
+async function dashscopeChat(
+  apiKey: string,
+  model: string,
+  messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }>,
+): Promise<string> {
+  const res = await fetch(DASHSCOPE_CHAT_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages, stream: false }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error(`[import] AI chat failed (${model}, ${res.status}): ${body}`);
+    return '';
+  }
+  const json = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+  return json.choices?.[0]?.message?.content?.trim() ?? '';
+}
+
+/**
+ * 为 docx 嵌入图片生成描述：AI 视觉识别 + 剧本文本上下文
+ */
+async function generateImageCaption(
+  apiKey: string,
+  imageBuffer: Buffer,
+  mimeType: string,
+  surroundingText: string,
+): Promise<string> {
+  const base64 = imageBuffer.toString('base64');
+  const dataUrl = `data:${mimeType};base64,${base64}`;
+
+  // Step 1: AI 视觉识别图片内容（辅助定位）
+  const visionDesc = await dashscopeChat(apiKey, 'qwen-vl-max', [{
+    role: 'user',
+    content: [
+      { type: 'image_url', image_url: { url: dataUrl } },
+      { type: 'text', text: '简短描述这张图片的内容（20字以内），只输出描述。' },
+    ],
+  }]);
+
+  if (!visionDesc) return '';
+
+  // Step 2: 结合剧本文本生成 caption
+  const caption = await dashscopeChat(apiKey, 'qwen3.5-flash', [{
+    role: 'user',
+    content: `你是 TRPG 模组图片标注助手。根据图片的视觉内容和周围的剧本文本，生成一句简短的中文图片标注（20字以内）。
+
+图片内容：${visionDesc}
+
+图片周围的剧本文本：
+${surroundingText}
+
+请输出标注（只输出标注文字，不要解释）：`,
+  }]);
+
+  return caption || visionDesc;
+}
+
+interface ImageSuggestion {
+  description: string;
+  label: string;
+}
+
+/**
+ * AI 分析剧本文本，找出适合配图但没有配图的场景，生成图片
+ */
+async function analyzeAndGenerateSceneImages(
+  apiKey: string,
+  text: string,
+  existingCaptions: string[],
+  fileId: string,
+  imageLibrary: ImageLibrary,
+): Promise<string[]> {
+  const generatedIds: string[] = [];
+  const textSnippet = text.slice(0, 8000);
+
+  const captionList = existingCaptions.length > 0
+    ? existingCaptions.map((c, i) => `- ${c}`).join('\n')
+    : '（暂无配图）';
+
+  const analysisPrompt = `你是 TRPG 模组图片分析助手。以下是一个克苏鲁跑团模组的文本内容，以及已有的配图列表。
+
+已有配图：
+${captionList}
+
+模组文本（节选）：
+${textSnippet}
+
+请分析模组文本，找出 2-5 个适合配图但目前没有的重要场景（如：关键地点、重要NPC、氛围场景）。
+
+以 JSON 数组格式输出，每项包含：
+- description: 场景的中文描述（用于 AI 生图，30-50字，描述画面内容、氛围、风格）
+- label: 图片标注（20字以内，用于展示给玩家）
+
+只输出 JSON 数组，不要解释。如果已有配图已覆盖所有重要场景，输出空数组 []。`;
+
+  const result = await dashscopeChat(apiKey, 'qwen3.5-plus', [
+    { role: 'user', content: analysisPrompt },
+  ]);
+
+  if (!result) return generatedIds;
+
+  // 解析 JSON
+  let suggestions: ImageSuggestion[] = [];
+  try {
+    // 提取 JSON（可能被 markdown code block 包裹）
+    const jsonMatch = result.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      suggestions = JSON.parse(jsonMatch[0]) as ImageSuggestion[];
+    }
+  } catch (e) {
+    console.error(`[import] 解析 AI 图片建议失败: ${e}`);
+    return generatedIds;
+  }
+
+  if (suggestions.length === 0) {
+    console.log('[import] AI 认为无需补充配图');
+    return generatedIds;
+  }
+
+  console.log(`[import] AI 建议生成 ${suggestions.length} 张场景图`);
+
+  const client = new DashScopeClient(apiKey);
+  const imgDir = resolve(`data/knowledge/images/${fileId}`);
+  mkdirSync(imgDir, { recursive: true });
+
+  for (const suggestion of suggestions) {
+    try {
+      console.log(`[import] 生成图片: ${suggestion.label} — ${suggestion.description}`);
+
+      // 优化提示词 → 生成图片
+      const optimizedPrompt = await client.optimizeImagePrompt(suggestion.description);
+      const imageUrl = await client.generateImage(optimizedPrompt);
+
+      // 下载图片
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) {
+        console.error(`[import] 下载生成图片失败: ${imgRes.status}`);
+        continue;
+      }
+      const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+
+      // 保存到文件系统
+      const imgId = ImageLibrary.generateId();
+      const imgFilename = `${imgId}.jpg`;
+      const imgAbsPath = join(imgDir, imgFilename);
+      const imgRelPath = `data/knowledge/images/${fileId}/${imgFilename}`;
+      writeFileSync(imgAbsPath, imgBuffer);
+
+      // 写入 ImageLibrary
+      imageLibrary.upsert({
+        id: imgId,
+        source: 'generated' as ImageSource,
+        relativePath: imgRelPath,
+        mimeType: 'image/jpeg',
+        caption: suggestion.label,
+        playerVisible: true,
+        sourceFileId: fileId,
+        generatedPrompt: suggestion.description,
+        optimizedPrompt,
+        createdAt: new Date().toISOString(),
+      });
+
+      generatedIds.push(imgId);
+      console.log(`[import] 图片生成完成: ${imgId} — ${suggestion.label}`);
+    } catch (e) {
+      console.error(`[import] 生成图片失败 (${suggestion.label}): ${e}`);
+    }
+  }
+
+  return generatedIds;
 }
 
 async function processFile(
@@ -253,6 +458,10 @@ async function processFile(
     const imgDir = resolve(`data/knowledge/images/${id}`);
     mkdirSync(imgDir, { recursive: true });
 
+    // 建立图文映射（用于 AI 生成 caption）
+    const imageContexts = extractImageContexts(result.html, result.images.length);
+    const apiKey = process.env.DASHSCOPE_API_KEY;
+
     for (const img of result.images) {
       const imgExt = img.mimeType.includes('png') ? '.png' : '.jpg';
       const imgId = ImageLibrary.generateId();
@@ -261,13 +470,22 @@ async function processFile(
       const imgRelPath = `data/knowledge/images/${id}/${imgFilename}`;
 
       writeFileSync(imgAbsPath, img.buffer);
+
+      // AI 生成图片描述（基于剧本文本 + 视觉识别辅助）
+      let caption = '';
+      if (apiKey) {
+        const ctx = imageContexts.get(img.index) ?? '';
+        caption = await generateImageCaption(apiKey, img.buffer, img.mimeType, ctx);
+        if (caption) console.log(`[import] image ${imgId} caption: ${caption}`);
+      }
+
       imageLibrary.upsert({
         id: imgId,
         source: 'docx' as ImageSource,
         relativePath: imgRelPath,
         mimeType: img.mimeType,
-        caption: '',
-        playerVisible: false,
+        caption,
+        playerVisible: !!caption,
         sourceFileId: id,
         createdAt: new Date().toISOString(),
       });
@@ -314,6 +532,27 @@ async function processFile(
   const chunkFileName = `${id}.chunks.json`;
   const chunkFullPath = join(chunkOutputDir, chunkFileName);
   writeFileSync(chunkFullPath, JSON.stringify(chunks, null, 2) + '\n', 'utf-8');
+
+  // AI 分析剧本文本，为缺少配图的场景自动生成图片（所有格式通用）
+  const aiApiKey = process.env.DASHSCOPE_API_KEY;
+  if (aiApiKey && (category === 'scenario' || hasSplit)) {
+    const existingCaptions = imageIds
+      .map(imgId => imageLibrary.getById(imgId))
+      .filter((img): img is NonNullable<typeof img> => !!img && !!img.caption)
+      .map(img => img.caption);
+
+    try {
+      const generatedIds = await analyzeAndGenerateSceneImages(
+        aiApiKey, extractedText, existingCaptions, id, imageLibrary,
+      );
+      imageIds.push(...generatedIds);
+      if (generatedIds.length > 0) {
+        console.log(`[import] AI generated ${generatedIds.length} scene images for ${relPath}`);
+      }
+    } catch (e) {
+      console.error(`[import] AI scene image generation failed: ${e}`);
+    }
+  }
 
   console.log(`[import] done: ${relPath} pages=${pages} chars=${extractedText.length} chunks=${chunks.length}`);
 
@@ -362,7 +601,11 @@ async function main(): Promise<void> {
   // ── 单文件合并模式（Web 上传触发）──────────────────────────────────────────
   if (options.singleFile) {
     const filePath = resolve(options.singleFile);
-    const relPath = basename(filePath);
+    // Use parentDir/basename as relPath so same-named files in different modules don't collide
+    const parentDir = basename(resolve(filePath, '..'));
+    const relPath = parentDir === '.' || parentDir === 'uploads'
+      ? basename(filePath)
+      : `${parentDir}/${basename(filePath)}`;
     let entry: ImportedFileEntry;
     let exitCode = 0;
     try {
@@ -376,7 +619,8 @@ async function main(): Promise<void> {
 
     // 合并到现有 manifest（不覆盖其他已有条目）
     const existing = loadManifest(manifestPath);
-    const others = existing.files.filter((f) => f.sourceRelativePath !== relPath);
+    const absPath = resolve(filePath);
+    const others = existing.files.filter((f) => f.sourceRelativePath !== relPath && resolve(f.sourcePath) !== absPath);
     existing.files = [...others, entry];
     existing.generatedAt = new Date().toISOString();
     writeFileSync(manifestPath, JSON.stringify(existing, null, 2) + '\n', 'utf-8');

@@ -159,7 +159,7 @@ export function migrateCoreSchema(db: Database): void {
     CREATE TABLE IF NOT EXISTS campaign_rooms (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      group_id INTEGER NOT NULL,
+      group_id INTEGER,
       creator_qq_id INTEGER NOT NULL,
       scenario_name TEXT,
       constraints_json TEXT NOT NULL DEFAULT '{}',
@@ -175,12 +175,52 @@ export function migrateCoreSchema(db: Database): void {
       room_id TEXT NOT NULL,
       qq_id INTEGER NOT NULL,
       character_id TEXT,
+      ready_at TEXT,
       joined_at TEXT NOT NULL,
       PRIMARY KEY (room_id, qq_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_campaign_room_members_room ON campaign_room_members(room_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_room_members_qq ON campaign_room_members(qq_id);
+
+    -- ── 模组管理 ────────────────────────────────────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS scenario_modules (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      era TEXT,
+      allowed_occupations TEXT NOT NULL DEFAULT '[]',
+      min_stats TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS scenario_module_files (
+      id TEXT PRIMARY KEY,
+      module_id TEXT NOT NULL REFERENCES scenario_modules(id),
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      file_type TEXT NOT NULL DEFAULT 'document',
+      label TEXT,
+      description TEXT,
+      char_count INTEGER NOT NULL DEFAULT 0,
+      chunk_count INTEGER NOT NULL DEFAULT 0,
+      import_status TEXT NOT NULL DEFAULT 'pending',
+      import_error TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_scenario_module_files_module ON scenario_module_files(module_id);
+
+    -- ── 用户设置（.set 默认骰 / .nn 称呼）────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id  INTEGER NOT NULL,
+      scope    TEXT    NOT NULL DEFAULT 'global', -- 'global' 或 '{group_id}'
+      key      TEXT    NOT NULL,
+      value    TEXT    NOT NULL,
+      PRIMARY KEY (user_id, scope, key)
+    );
   `);
 
   // 对已存在的旧表做安全迁移（列不存在时才执行，已有则忽略）
@@ -191,4 +231,101 @@ export function migrateCoreSchema(db: Database): void {
   try {
     db.exec('ALTER TABLE kp_sessions ADD COLUMN current_segment_id TEXT;');
   } catch { /* 列已存在，忽略 */ }
+
+  try {
+    db.exec('ALTER TABLE campaign_rooms ADD COLUMN module_id TEXT;');
+  } catch { /* 列已存在，忽略 */ }
+
+  try {
+    db.exec("ALTER TABLE campaign_rooms ADD COLUMN constraints_json TEXT NOT NULL DEFAULT '{}';");
+  } catch { /* 列已存在，忽略 */ }
+
+  try {
+    db.exec('ALTER TABLE player_tokens ADD COLUMN group_id INTEGER;');
+  } catch { /* 列已存在，忽略 */ }
+
+  try {
+    db.exec('ALTER TABLE campaign_room_members ADD COLUMN ready_at TEXT;');
+  } catch { /* 列已存在，忽略 */ }
+
+  try {
+    db.exec("ALTER TABLE campaign_rooms ADD COLUMN kp_template_id TEXT NOT NULL DEFAULT 'serious';");
+  } catch { /* 列已存在，忽略 */ }
+
+  try {
+    db.exec("ALTER TABLE campaign_rooms ADD COLUMN kp_custom_prompts TEXT NOT NULL DEFAULT '';");
+  } catch { /* 列已存在，忽略 */ }
+
+  // ── 游戏内时间轴 ─────────────────────────────────────────────────────────
+  try {
+    db.exec('ALTER TABLE kp_sessions ADD COLUMN ingame_time TEXT;');
+  } catch { /* 列已存在，忽略 */ }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS kp_timeline_events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      ingame_time TEXT NOT NULL,
+      delta_minutes INTEGER,
+      description TEXT NOT NULL,
+      trigger TEXT NOT NULL DEFAULT 'ai',
+      message_id TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_kp_timeline_session ON kp_timeline_events(session_id, created_at);
+  `);
+
+  // ── 自定义 KP 模板表 ──────────────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS kp_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      tone INTEGER NOT NULL DEFAULT 5,
+      flexibility INTEGER NOT NULL DEFAULT 5,
+      guidance INTEGER NOT NULL DEFAULT 5,
+      lethality INTEGER NOT NULL DEFAULT 5,
+      pacing INTEGER NOT NULL DEFAULT 5,
+      custom_prompts TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  // campaign_rooms.group_id: NOT NULL → nullable（SQLite 不支持 ALTER COLUMN，需重建表）
+  try {
+    const info = db.query("PRAGMA table_info(campaign_rooms)").all() as Array<{ name: string; notnull: number }>;
+    const col = info.find((c) => c.name === 'group_id');
+    if (col && col.notnull === 1) {
+      // 动态获取现有列名，安全拷贝数据
+      const cols = info.map((c) => c.name);
+      const targetCols = ['id', 'name', 'group_id', 'creator_qq_id', 'scenario_name', 'module_id', 'constraints_json', 'status', 'kp_session_id', 'created_at', 'updated_at'];
+      const existingCols = targetCols.filter((c) => cols.includes(c));
+      const selectCols = existingCols.join(', ');
+
+      db.exec(`
+        CREATE TABLE campaign_rooms_new (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          group_id INTEGER,
+          creator_qq_id INTEGER NOT NULL,
+          scenario_name TEXT,
+          module_id TEXT,
+          constraints_json TEXT NOT NULL DEFAULT '{}',
+          status TEXT NOT NULL DEFAULT 'waiting',
+          kp_session_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO campaign_rooms_new (${selectCols}) SELECT ${selectCols} FROM campaign_rooms;
+        DROP TABLE campaign_rooms;
+        ALTER TABLE campaign_rooms_new RENAME TO campaign_rooms;
+        CREATE INDEX IF NOT EXISTS idx_campaign_rooms_group ON campaign_rooms(group_id);
+      `);
+      console.log('[DB] campaign_rooms.group_id migrated to nullable');
+    }
+  } catch (err) {
+    console.error('[DB] campaign_rooms nullable migration failed:', err);
+  }
 }

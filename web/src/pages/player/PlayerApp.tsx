@@ -6,6 +6,7 @@ import Campaigns from './Campaigns';
 import CampaignDetail from './CampaignDetail';
 import Scenarios from './Scenarios';
 import Manual from './Manual';
+import Reference from './Reference';
 import Rooms from './Rooms';
 import RoomDetailPage from './RoomDetail';
 import { playerApi } from '../../api';
@@ -15,6 +16,7 @@ const NAV = [
   { label: '跑团房间', href: '/player/rooms', icon: '🎭' },
   { label: '我的团', href: '/player/campaigns', icon: '📜' },
   { label: '模组列表', href: '/player/scenarios', icon: '📖' },
+  { label: '参考资料', href: '/player/reference', icon: '📚' },
   { label: '操作手册', href: '/player/manual', icon: '📋' },
 ];
 
@@ -35,7 +37,7 @@ const PlayerApp: Component = () => {
       <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'min-height': '100vh', 'text-align': 'center', padding: '2rem' }}>
         <div>
           <p style={{ 'font-size': '1.5rem', 'margin-bottom': '1rem' }}>🔑 需要登录</p>
-          <p style={{ color: 'var(--text-dim)' }}>请在 QQ 中发送 <code style={{ background: 'var(--surface)', padding: '0.1em 0.4em', 'border-radius': '4px' }}>.web login</code> 获取专属链接</p>
+          <p style={{ color: 'var(--text-dim)' }}>请<strong>私聊机器人</strong>发送 <code style={{ background: 'var(--surface)', padding: '0.1em 0.4em', 'border-radius': '4px' }}>.web login</code> 获取专属链接</p>
         </div>
       </div>
     );
@@ -64,6 +66,9 @@ const PlayerApp: Component = () => {
   } else if (path === '/player/scenarios') {
     page = Scenarios;
     title = '模组列表';
+  } else if (path === '/player/reference') {
+    page = Reference;
+    title = '参考资料';
   } else if (path === '/player/manual') {
     page = Manual;
     title = '操作手册';

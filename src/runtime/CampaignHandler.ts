@@ -8,11 +8,11 @@
  *  - 发送 KP 回复到群聊
  *
  * 命令：
- *   .campaign start [模板ID]   — 开团（生成 AI 多段开场白）
- *   .campaign pause            — 暂停（保存状态，不清历史）
- *   .campaign resume           — 继续（生成 AI 回顾摘要）
- *   .campaign stop             — 彻底结束
- *   .campaign load <文件名>    — 加载模组全文
+ *   .room start [模板ID]   — 开团（生成 AI 多段开场白）
+ *   .room pause            — 暂停（保存状态，不清历史）
+ *   .room resume           — 继续（生成 AI 回顾摘要）
+ *   .room stop             — 彻底结束
+ *   .room load <文件名>       — 加载模组全文
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -34,10 +34,14 @@ const KP_MODEL = 'qwen3.5-plus';
 export interface CampaignOutput {
   text: string | null;
   images: KPImage[];
+  /** 消息已排队等待合并处理 */
+  queued?: boolean;
 }
 
 interface ManifestEntry {
   id: string;
+  /** 原始文件的绝对路径 */
+  sourcePath?: string;
   /** 原始文件的相对路径（含文件名） */
   sourceRelativePath: string;
   /** 提取出的纯文本路径 data/knowledge/raw/{id}.txt */
@@ -58,7 +62,7 @@ export interface CampaignHandlerOptions {
   aiClient: DashScopeClient;
   store: CharacterStore;
   modeResolver: ModeResolver;
-  /** 每个群的 KP 模板 ID，默认 'serious' */
+  /** 每个群的 KP 模板 ID，默认 'classic' */
   defaultTemplateId?: string;
 }
 
@@ -82,12 +86,18 @@ export class CampaignHandler {
   /** groupId → 活跃 session */
   private readonly sessions = new Map<number, GroupSession>();
 
+  /** per-group 并发锁 + 消息缓冲 */
+  private readonly groupLocks = new Map<number, {
+    processing: boolean;
+    pending: Array<{ userId: number; displayName: string; text: string }>;
+  }>();
+
   constructor(options: CampaignHandlerOptions) {
     this.db = options.db;
     this.aiClient = options.aiClient;
     this.store = options.store;
     this.modeResolver = options.modeResolver;
-    this.defaultTemplateId = options.defaultTemplateId ?? 'serious';
+    this.defaultTemplateId = options.defaultTemplateId ?? 'classic';
   }
 
   // ─── 开 / 暂停 / 继续 / 结团 ────────────────────────────────────────────────
@@ -97,9 +107,9 @@ export class CampaignHandler {
    * 若该群已有暂停中的 session，提示先 resume 或 stop。
    * @returns 多段开场白，逐条发到群聊
    */
-  async startSession(groupId: number, templateId?: string): Promise<string[]> {
+  async startSession(groupId: number, templateId?: string, roomId?: string): Promise<string[]> {
     if (this.sessions.has(groupId)) {
-      return ['当前已有进行中的跑团，请先使用 .campaign pause 或 .campaign stop 结束。'];
+      return ['当前已有进行中的跑团，请先使用 .room pause 或 .room stop 结束。'];
     }
 
     // 检查是否有暂停中的 session
@@ -107,12 +117,24 @@ export class CampaignHandler {
     if (paused) {
       return [
         '⚠️ 该群有暂停中的跑团记录。\n' +
-        '• 使用 .campaign resume 继续上次跑团\n' +
-        '• 使用 .campaign stop 彻底结束后再开新团',
+        '• 使用 .room resume 继续上次跑团\n' +
+        '• 使用 .room stop 彻底结束后再开新团',
       ];
     }
 
-    const tid = templateId ?? this.defaultTemplateId;
+    // 从房间读取 KP 配置（模板 + 自定义提示词）
+    let tid = templateId ?? this.defaultTemplateId;
+    let customPrompts = '';
+    if (roomId) {
+      const roomKp = this.db.query<{ kp_template_id: string; kp_custom_prompts: string }, string>(
+        'SELECT kp_template_id, kp_custom_prompts FROM campaign_rooms WHERE id = ?',
+      ).get(roomId);
+      if (roomKp) {
+        tid = roomKp.kp_template_id || tid;
+        customPrompts = roomKp.kp_custom_prompts || '';
+      }
+    }
+
     const sessionId = `session-${groupId}-${Date.now()}`;
     const campaignId = `campaign-${groupId}`;
 
@@ -125,15 +147,35 @@ export class CampaignHandler {
     );
 
     const state = new SessionState(this.db, sessionId, campaignId, groupId);
-    const pipeline = new KPPipeline(this.aiClient, state, this.store, this.knowledge, { templateId: tid });
+    const pipeline = new KPPipeline(this.aiClient, state, this.store, this.knowledge, { templateId: tid, customPrompts, db: this.db });
 
     this.sessions.set(groupId, { sessionId, campaignId, state, pipeline });
     this.modeResolver.setGroupMode(groupId, 'campaign', campaignId);
 
-    console.log(`[Campaign] 开团: group=${groupId} session=${sessionId} template=${tid}`);
+    // 关联 room ↔ session + 自动加载模组
+    if (roomId) {
+      this.db.run(
+        'UPDATE campaign_rooms SET kp_session_id = ?, updated_at = ? WHERE id = ?',
+        [sessionId, new Date().toISOString(), roomId],
+      );
 
-    // 获取当前群所有激活的 PC
-    const characters = this.store.getGroupActiveCharacters(groupId);
+      const loadErr = this.autoLoadRoomModule(roomId, state);
+      if (loadErr) {
+        // 模组加载失败，回滚 session
+        this.sessions.delete(groupId);
+        this.modeResolver.setGroupMode(groupId, 'dice');
+        this.db.run("UPDATE kp_sessions SET status = 'ended', ended_at = ?, updated_at = ? WHERE id = ?", [now, now, sessionId]);
+        this.db.run('UPDATE campaign_rooms SET kp_session_id = NULL, updated_at = ? WHERE id = ?', [now, roomId]);
+        throw new Error(loadErr);
+      }
+    }
+
+    console.log(`[Campaign] 开团: group=${groupId} session=${sessionId} template=${tid} room=${roomId ?? 'none'}`);
+
+    // 获取 PC：优先从房间成员取，回退到群激活的 PC
+    const characters = roomId
+      ? this.store.getRoomCharacters(roomId)
+      : this.store.getGroupActiveCharacters(groupId);
 
     // 生成多段开场白
     return this.generateRichOpening(state, tid, characters);
@@ -146,16 +188,22 @@ export class CampaignHandler {
     const session = this.sessions.get(groupId);
     if (!session) return '当前没有进行中的跑团。';
 
+    const now = new Date().toISOString();
     this.db.run(
       `UPDATE kp_sessions SET status = 'paused', updated_at = ? WHERE id = ?`,
-      [new Date().toISOString(), session.sessionId],
+      [now, session.sessionId],
+    );
+    // 同步房间状态
+    this.db.run(
+      "UPDATE campaign_rooms SET status = 'paused', updated_at = ? WHERE kp_session_id = ?",
+      [now, session.sessionId],
     );
 
     this.sessions.delete(groupId);
     this.modeResolver.setGroupMode(groupId, 'dice');
 
     console.log(`[Campaign] 暂停: group=${groupId} session=${session.sessionId}`);
-    return '⏸️ 跑团已暂停，所有进度已保存。\n下次使用 .campaign resume 继续，所有对话和线索都在。';
+    return '⏸️ 跑团已暂停，所有进度已保存。\n下次使用 .room resume 继续，所有对话和线索都在。';
   }
 
   /**
@@ -168,19 +216,36 @@ export class CampaignHandler {
 
     const row = this.findPausedSession(groupId);
     if (!row) {
-      return ['没有找到可以继续的跑团记录。使用 .campaign start 开始新的跑团。'];
+      return ['没有找到可以继续的跑团记录。使用 .room start 开始新的跑团。'];
     }
 
     // 恢复状态
+    const now = new Date().toISOString();
     this.db.run(
       `UPDATE kp_sessions SET status = 'running', updated_at = ? WHERE id = ?`,
-      [new Date().toISOString(), row.id],
+      [now, row.id],
     );
+    // 同步房间状态
+    this.db.run(
+      "UPDATE campaign_rooms SET status = 'running', updated_at = ? WHERE kp_session_id = ?",
+      [now, row.id],
+    );
+
+    // 从关联房间读取最新的 KP 设定（暂停期间可能修改过）
+    let tid = row.kp_template_id;
+    let customPrompts = '';
+    const linkedRoom = this.db.query<{ kp_template_id: string; kp_custom_prompts: string }, string>(
+      'SELECT kp_template_id, kp_custom_prompts FROM campaign_rooms WHERE kp_session_id = ?',
+    ).get(row.id);
+    if (linkedRoom) {
+      tid = linkedRoom.kp_template_id || tid;
+      customPrompts = linkedRoom.kp_custom_prompts || '';
+    }
 
     const state = new SessionState(this.db, row.id, row.campaign_id, groupId);
     const pipeline = new KPPipeline(
       this.aiClient, state, this.store, this.knowledge,
-      { templateId: row.kp_template_id },
+      { templateId: tid, customPrompts, db: this.db },
     );
 
     this.sessions.set(groupId, {
@@ -200,12 +265,18 @@ export class CampaignHandler {
    * 彻底结束跑团。
    */
   stopSession(groupId: number): string {
+    const now = new Date().toISOString();
+
     // 先尝试结束内存中的 session
     const session = this.sessions.get(groupId);
     if (session) {
       this.db.run(
         `UPDATE kp_sessions SET status = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`,
-        [new Date().toISOString(), new Date().toISOString(), session.sessionId],
+        [now, now, session.sessionId],
+      );
+      this.db.run(
+        "UPDATE campaign_rooms SET status = 'ended', updated_at = ? WHERE kp_session_id = ?",
+        [now, session.sessionId],
       );
       this.sessions.delete(groupId);
       this.modeResolver.setGroupMode(groupId, 'dice');
@@ -218,7 +289,11 @@ export class CampaignHandler {
     if (paused) {
       this.db.run(
         `UPDATE kp_sessions SET status = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`,
-        [new Date().toISOString(), new Date().toISOString(), paused.id],
+        [now, now, paused.id],
+      );
+      this.db.run(
+        "UPDATE campaign_rooms SET status = 'ended', updated_at = ? WHERE kp_session_id = ?",
+        [now, paused.id],
       );
       console.log(`[Campaign] 结束暂停团: group=${groupId} session=${paused.id}`);
       return '📖 已结束暂停中的跑团记录。';
@@ -233,7 +308,7 @@ export class CampaignHandler {
   loadScenario(groupId: number, filename: string): string {
     const session = this.sessions.get(groupId);
     if (!session) {
-      return '当前没有进行中的跑团，请先使用 .campaign start 开团。';
+      return '当前没有进行中的跑团，请先使用 .room start 开团。';
     }
 
     if (!existsSync(MANIFEST_PATH)) {
@@ -285,19 +360,160 @@ export class CampaignHandler {
     return `📖 模组已加载：${label}${imgHint}\n守秘人正在阅读模组，场景分析在后台进行，稍后即可开团。`;
   }
 
+  /**
+   * 开团时自动加载房间关联的模组文件。
+   * @returns 错误信息（失败时），null 表示成功
+   */
+  private autoLoadRoomModule(roomId: string, state: SessionState): string | null {
+    const room = this.db.query<{ module_id: string | null }, string>(
+      'SELECT module_id FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room?.module_id) {
+      return '⚠️ 该房间未关联模组，无法开团。请先在房间设置中选择模组。';
+    }
+
+    // 找到该模组的 document 类文件
+    const moduleFile = this.db.query<{ filename: string }, string>(
+      "SELECT filename FROM scenario_module_files WHERE module_id = ? AND file_type = 'document' AND import_status = 'done' ORDER BY created_at LIMIT 1",
+    ).get(room.module_id);
+    if (!moduleFile) {
+      return '⚠️ 模组文件未导入或导入失败，请在管理端检查模组文件状态。';
+    }
+
+    // 通过 filename 在 manifest 中查找
+    if (!existsSync(MANIFEST_PATH)) {
+      return '⚠️ 知识库索引不存在，请先运行 bun run build-indexes 构建索引。';
+    }
+
+    try {
+      const raw = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8')) as { files?: ManifestEntry[] } | ManifestEntry[];
+      const manifestFiles = Array.isArray(raw) ? raw : (raw.files ?? []);
+      // 优先用绝对路径精确匹配，回退到文件名匹配
+      const moduleAbsPath = resolve(moduleFile.filename);
+      const moduleBaseName = moduleFile.filename.replace(/\\/g, '/').split('/').pop() ?? moduleFile.filename;
+      const entry = manifestFiles.find((e) => {
+        // 精确匹配：sourcePath（绝对路径）
+        if (e.sourcePath && resolve(e.sourcePath) === moduleAbsPath) return true;
+        // 回退：文件名匹配
+        const entryBase = e.sourceRelativePath.replace(/\\/g, '/').split('/').pop() ?? e.sourceRelativePath;
+        return entryBase === moduleBaseName;
+      });
+      if (!entry) {
+        return `⚠️ 在知识库中找不到模组文件「${moduleFile.filename}」，请重新导入模组。`;
+      }
+
+      const rawPath = resolve(entry.textPath);
+      const label = entry.sourceRelativePath.split(/[\\/]/).pop() ?? entry.sourceRelativePath;
+      const ok = state.setScenario(rawPath, label);
+      if (!ok) {
+        return `⚠️ 模组文件不存在：${entry.textPath}，请重新导入模组。`;
+      }
+
+      console.log(`[Campaign] 自动加载房间模组: room=${roomId} file=${label}`);
+      this.loadScenarioImages(state, entry.id ?? '');
+      this.segmentModuleAsync(state).catch((err) => {
+        console.error('[Campaign] 模组分段失败:', err);
+      });
+      return null;
+    } catch {
+      return '⚠️ 知识库索引文件损坏，请重新构建索引。';
+    }
+  }
+
   // ─── 消息处理 ───────────────────────────────────────────────────────────────
+
+  /**
+   * 通过 session → room → member → character 解析玩家的 PC 名
+   */
+  private resolvePcName(sessionId: string, userId: number, fallback: string): string {
+    const row = this.db.query<{ name: string }, [string, number]>(
+      `SELECT c.name FROM campaign_room_members m
+         JOIN campaign_rooms r ON r.id = m.room_id
+         JOIN characters c ON c.id = m.character_id
+       WHERE r.kp_session_id = ? AND m.qq_id = ?
+       LIMIT 1`,
+    ).get(sessionId, userId);
+    return row?.name ?? fallback;
+  }
+
+  /**
+   * 检查 userId 是否为当前 session 关联房间的成员。
+   * 无关联房间（独立 session）时返回 true（不限制）。
+   */
+  private isSessionMember(sessionId: string, userId: number): boolean {
+    const room = this.db.query<{ id: string }, string>(
+      'SELECT id FROM campaign_rooms WHERE kp_session_id = ?',
+    ).get(sessionId);
+    if (!room) return true; // 无关联房间，不限制
+
+    const member = this.db.query<{ qq_id: number }, [string, number]>(
+      'SELECT qq_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
+    ).get(room.id, userId);
+    return !!member;
+  }
 
   async handlePlayerMessage(
     groupId: number,
     userId: number,
     displayName: string,
     text: string,
+    onThinking?: () => void,
   ): Promise<CampaignOutput> {
     const session = this.sessions.get(groupId);
     if (!session) return { text: null, images: [] };
 
-    session.state.trackPlayer(userId);
+    // 非房间成员完全忽略
+    if (!this.isSessionMember(session.sessionId, userId)) {
+      return { text: null, images: [] };
+    }
 
+    session.state.trackPlayer(userId);
+    const pcName = this.resolvePcName(session.sessionId, userId, displayName);
+
+    // 并发锁：如果正在处理中，将消息排队
+    let lock = this.groupLocks.get(groupId);
+    if (!lock) {
+      lock = { processing: false, pending: [] };
+      this.groupLocks.set(groupId, lock);
+    }
+
+    if (lock.processing) {
+      lock.pending.push({ userId, displayName: pcName, text });
+      return { text: null, images: [], queued: true };
+    }
+
+    lock.processing = true;
+
+    try {
+      // 处理当前消息
+      let result = await this.processPlayerInput(session, userId, pcName, text, onThinking);
+
+      // drain loop：处理积压消息
+      while (lock.pending.length > 0) {
+        const batch = lock.pending.splice(0);
+        // 将积压消息写入历史并合并为一条
+        const merged = batch.map((m) => `${m.displayName}：${m.text}`).join('\n');
+        const mergedResult = await this.processPlayerInput(
+          session, batch[0].userId, batch[0].displayName, merged, undefined,
+        );
+        // 用最新结果替换（KP 会看到合并后的完整上下文）
+        if (mergedResult.text) result = mergedResult;
+      }
+
+      return result;
+    } finally {
+      lock.processing = false;
+    }
+  }
+
+  /** 内部：实际调用 pipeline 处理单条输入 */
+  private async processPlayerInput(
+    session: GroupSession,
+    userId: number,
+    displayName: string,
+    text: string,
+    onThinking?: () => void,
+  ): Promise<CampaignOutput> {
     const input: KPInput = {
       kind: 'player_message',
       userId,
@@ -305,11 +521,11 @@ export class CampaignHandler {
       content: text,
     };
 
-    const output = await session.pipeline.process(input);
+    const output = await session.pipeline.process(input, onThinking);
 
     if (output.debug) {
       console.log(
-        `[Campaign] group=${groupId} user=${userId} ` +
+        `[Campaign] user=${userId} ` +
         `intervention=${output.debug.interventionReason} ` +
         `respond=${output.shouldRespond}`,
       );
@@ -320,24 +536,63 @@ export class CampaignHandler {
     return { text: reply, images: output.images ?? [] };
   }
 
+  async handleForceKP(
+    groupId: number,
+    userId: number,
+    displayName: string,
+    text: string,
+    onThinking?: () => void,
+  ): Promise<CampaignOutput> {
+    const session = this.sessions.get(groupId);
+    if (!session) return { text: '当前没有进行中的跑团。', images: [] };
+
+    // 非房间成员完全忽略
+    if (!this.isSessionMember(session.sessionId, userId)) {
+      return { text: null, images: [] };
+    }
+
+    const pcName = this.resolvePcName(session.sessionId, userId, displayName);
+
+    const input: KPInput = {
+      kind: 'force_kp',
+      userId,
+      displayName: pcName,
+      content: text || '（玩家请求 KP 继续推进剧情）',
+    };
+
+    console.log(`[Campaign] group=${groupId} user=${userId} force_kp text="${text.slice(0, 30)}"`);
+    const output = await session.pipeline.process(input, onThinking);
+    const reply = output.shouldRespond ? output.text : null;
+    if (reply) session.state.advanceSegmentIfTitleMatches(reply);
+    return { text: reply, images: output.images ?? [] };
+  }
+
   async handleDiceResult(
     groupId: number,
     rollerId: number,
     rollerName: string,
     resultText: string,
+    onThinking?: () => void,
   ): Promise<CampaignOutput> {
     const session = this.sessions.get(groupId);
     if (!session) return { text: null, images: [] };
 
+    // 非房间成员完全忽略
+    if (!this.isSessionMember(session.sessionId, rollerId)) {
+      return { text: null, images: [] };
+    }
+
+    const pcName = this.resolvePcName(session.sessionId, rollerId, rollerName);
+
     const input: KPInput = {
       kind: 'dice_result',
       userId: rollerId,
-      displayName: rollerName,
+      displayName: pcName,
       content: resultText,
       diceRollerId: rollerId,
     };
 
-    const output = await session.pipeline.process(input);
+    const output = await session.pipeline.process(input, onThinking);
     const reply = output.shouldRespond ? output.text : null;
     if (reply) session.state.advanceSegmentIfTitleMatches(reply);
     return { text: reply, images: output.images ?? [] };
@@ -379,22 +634,26 @@ export class CampaignHandler {
         ).join('\n')
       : '（调查员尚未登记角色卡）';
 
-    const moduleHint = scenarioText
-      ? `\n\n模组文件：${scenarioLabel ?? '未知'}\n开篇内容（前3000字）：\n${scenarioText.slice(0, 3000)}`
-      : '';
+    const moduleHint =
+      `\n\n【重要】你必须严格按照以下模组内容来构建开场，不要编造模组中不存在的设定、地点或事件。\n` +
+      `模组文件：${scenarioLabel ?? '未知'}\n开篇内容（前3000字）：\n${(scenarioText ?? '').slice(0, 3000)}`;
 
     const systemPrompt =
       `你是一位经验丰富的克苏鲁的呼唤（CoC 7th）守秘人（KP）。` +
       `你的风格是洛夫克拉夫特式恐怖，沉浸、克制、充满氛围。\n\n` +
+      `【核心要求】开场叙述必须严格基于所提供的模组内容，包括时代、地点、事件。禁止编造模组中不存在的场景或设定。\n\n` +
       `请为本次跑团撰写一段分三部分的开场叙述，各部分之间用 === 分隔（只写三个等号的独立行，不要其他文字）：\n\n` +
       `【第一部分】时代背景与场景导入（100-150字）\n` +
-      `  用第二人称把玩家带入 1920 年代的具体场景，描述时间、地点、氛围、当下状态。\n\n` +
+      `  根据模组内容中描述的时代和地点，用第二人称把玩家带入具体场景，描述时间、地点、氛围、当下状态。\n\n` +
       `【第二部分】调查员登场（每人 50-80字）\n` +
       `  根据以下角色卡，为每位调查员写一段简短的登场描写，融入场景中，以第三人称描述。\n` +
       `  若没有角色卡，写「调查员们陆续抵达，各怀心思……」之类的占位描写。\n\n` +
       `【第三部分】事件导火索（80-120字）\n` +
-      `  引出让调查员聚集在一起的事件/委托/谜题，留下悬念，以「……」结尾，暗示未知正在等待。\n\n` +
-      `绝对不要暴露任何 [KP ONLY] 守密信息。`;
+      `  根据模组内容，引出让调查员聚集在一起的事件/委托/谜题，留下悬念，以「……」结尾，暗示未知正在等待。\n\n` +
+      `绝对不要暴露任何 [KP ONLY] 守密信息。\n\n` +
+      `【时间标记】请在第一部分的末尾附加一个时间标记来设定故事开始的游戏内时间，` +
+      `格式为 [SET_TIME:YYYY-MM-DDTHH:MM]，例如 [SET_TIME:1925-03-14T09:00]。` +
+      `根据模组内容决定具体的年代和时间点。`;
 
     const userContent =
       `本次跑团调查员：\n${pcBlock}` +
@@ -405,9 +664,25 @@ export class CampaignHandler {
       return [`⚔️ 跑团模式已开启（模板：${templateId}）\n守秘人已就位，请各位调查员就位。`];
     }
 
+    // 提取并应用时间标记
+    const setTimeRe = /\[SET_TIME:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})\]/g;
+    let cleaned = raw;
+    let timeSet = false;
+    for (const m of raw.matchAll(setTimeRe)) {
+      if (!timeSet) {
+        state.setIngameTime(m[1], '开场设定时间', 'ai');
+        timeSet = true;
+      }
+      cleaned = cleaned.replace(m[0], '');
+    }
+    if (!timeSet) {
+      // AI 未输出时间标记，使用默认值
+      state.setIngameTime('1925-03-15T10:00', '默认开场时间', 'system');
+    }
+
     // 按 === 分割，过滤空白段
-    const parts = raw.split(/^===$/m).map((s) => s.trim()).filter(Boolean);
-    return parts.length > 0 ? parts : [raw];
+    const parts = cleaned.split(/^===$/m).map((s) => s.trim()).filter(Boolean);
+    return parts.length > 0 ? parts : [cleaned.trim()];
   }
 
   /**
@@ -420,12 +695,14 @@ export class CampaignHandler {
   private async generateSessionRecap(state: SessionState): Promise<string[]> {
     const snapshot = state.snapshot();
 
+    console.log(`[Campaign] recap context: ${snapshot.summaries.length} summaries, ${snapshot.recentMessages.length} msgs, ${snapshot.discoveredClues.length} clues`);
+
     const summaryText = snapshot.summaries.length > 0
       ? snapshot.summaries.map((s, i) => `摘要${i + 1}：${s}`).join('\n\n')
       : '（暂无历史摘要）';
 
-    // 取最近 10 条消息作为参考
-    const recentText = snapshot.recentMessages.slice(-10)
+    // 取最近 15 条消息作为参考（增加上下文量）
+    const recentText = snapshot.recentMessages.slice(-15)
       .map((m) => {
         const who = m.role === 'kp' ? 'KP' : (m.displayName ?? `玩家${m.userId}`);
         return `${who}：${m.content}`;
@@ -442,32 +719,58 @@ export class CampaignHandler {
 
     const systemPrompt =
       `你是一位克苏鲁的呼唤守秘人，玩家们因现实原因中断了跑团，现在重新回来继续。\n` +
-      `请撰写一段「回顾与继续」叙述，分两部分，用 === 分隔（只写三个等号的独立行）：\n\n` +
+      `你必须撰写一段详细的「回顾与继续」叙述，总字数不少于200字。\n` +
+      `分两部分，用 === 分隔（必须在独立行写三个等号）：\n\n` +
       `【第一部分】上次回顾（150-250字）\n` +
       `  以旁白口吻，用沉浸式语言总结调查员们上次的冒险进展：` +
       `去了哪里、发现了什么线索、经历了什么危险、目前面临的谜题。` +
-      `语气应带有一丝悬念和紧迫感。\n\n` +
+      `语气应带有一丝悬念和紧迫感。即使信息较少也要基于已知内容展开描写。\n\n` +
       `【第二部分】重返场景（80-120字）\n` +
       `  以第二人称描述调查员们重新聚焦于当前场景，` +
-      `唤起紧张氛围，以「……你们准备好了吗？」或类似句子结尾，邀请玩家继续行动。`;
+      `唤起紧张氛围，以「……你们准备好了吗？」或类似句子结尾，邀请玩家继续行动。\n\n` +
+      `注意：不要只写一句话就结束，必须写出完整的两部分内容。`;
+
+    const timeText = snapshot.ingameTime
+      ? `== 当前游戏内时间 ==\n${snapshot.ingameTime}`
+      : '';
 
     const userContent =
       `== 历史摘要 ==\n${summaryText}\n\n` +
       `== 最近对话 ==\n${recentText || '（无）'}\n\n` +
       `== 已发现线索 ==\n${clueText}\n\n` +
-      `== 当前场景 ==\n${sceneText}`;
+      `== 当前场景 ==\n${sceneText}` +
+      (timeText ? `\n\n${timeText}` : '');
 
     const raw = await this.streamToString(KP_MODEL, systemPrompt, userContent);
+
+    console.log(`[Campaign] recap AI response: ${raw.length} chars`);
+
+    // 构建最近对话附录（无论 AI 结果如何都附上）
+    const messages = snapshot.recentMessages;
+    let tailText = '';
+    if (messages.length > 0) {
+      const tail = messages.slice(-5).map((m) => {
+        const who = m.role === 'kp' ? '🎭 KP' : `🧑 ${m.displayName ?? `玩家${m.userId}`}`;
+        return `${who}：${m.content}`;
+      });
+      tailText = '📜 上次最后的对话：\n\n' + tail.join('\n\n');
+    }
 
     const fallback = [
       '欢迎回来，调查员们。让我们继续上次未竟的调查……',
       sceneText !== '（场景未设置）' ? sceneText : '守秘人已就位，请继续行动。',
     ];
+    if (tailText) fallback.push(tailText);
 
-    if (!raw) return fallback;
+    if (!raw || raw.length < 80) return fallback;
 
     const parts = raw.split(/^===$/m).map((s) => s.trim()).filter(Boolean);
-    return parts.length > 0 ? parts : fallback;
+    if (parts.length === 0) return fallback;
+
+    // 始终附上最近对话
+    if (tailText) parts.push(tailText);
+
+    return parts;
   }
 
   // ─── 私有：工具 ────────────────────────────────────────────────────────────
@@ -599,10 +902,11 @@ export class CampaignHandler {
   }
 
   private findPausedSession(groupId: number): PausedSessionRow | null {
+    // 查找 paused 或 running（服务重启后 running 的 session 也需要恢复）
     return this.db
       .query<PausedSessionRow, [number]>(
         `SELECT id, campaign_id, kp_template_id FROM kp_sessions
-          WHERE group_id = ? AND status = 'paused'
+          WHERE group_id = ? AND status IN ('paused', 'running')
           ORDER BY updated_at DESC LIMIT 1`,
       )
       .get(groupId) ?? null;

@@ -10,6 +10,8 @@
 
 import { roll, rollD100 } from '../dice/DiceEngine';
 import { CheckResolver, type CheckResult } from './CheckResolver';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 
 /* ─── 类型 ─── */
 
@@ -30,9 +32,29 @@ export interface SanCheckResult {
   detail: string;
 }
 
+/* ─── 从 JSON 加载参考数据（带硬编码回退）─── */
+
+function loadJsonSafe<T>(filename: string, fallback: T): T {
+  try {
+    const p = join(process.cwd(), 'data', 'reference', filename);
+    if (!existsSync(p)) return fallback;
+    return JSON.parse(readFileSync(p, 'utf-8'));
+  } catch { return fallback; }
+}
+
+interface SymptomEntry { id: number; description: string; }
+
+const _insanityData = loadJsonSafe<{ immediate: SymptomEntry[] }>(
+  'insanity-symptoms.json',
+  { immediate: [] },
+);
+
+const _phobias = loadJsonSafe<SymptomEntry[]>('phobias.json', []);
+const _manias = loadJsonSafe<SymptomEntry[]>('manias.json', []);
+
 /* ─── 临时疯狂症状表 ─── */
 
-const TEMPORARY_INSANITY: string[] = [
+const TEMPORARY_INSANITY_FALLBACK: string[] = [
   '失忆：调查员回过神来，发现自己身处陌生环境，不记得发生过什么。',
   '假性残疾：调查员陷入心因性失明、失聪或肢体失灵。',
   '暴力倾向：调查员陷入狂暴，攻击周围的一切。',
@@ -44,6 +66,10 @@ const TEMPORARY_INSANITY: string[] = [
   '恐惧症：调查员获得一个新的恐惧症。',
   '躁狂症：调查员获得一个新的躁狂症。',
 ];
+
+const TEMPORARY_INSANITY: string[] = _insanityData.immediate.length >= 10
+  ? _insanityData.immediate.sort((a, b) => a.id - b.id).map((s) => s.description)
+  : TEMPORARY_INSANITY_FALLBACK;
 
 const SUMMARY_INSANITY: string[] = [
   '失忆：调查员发现自己身处陌生环境，不记得这段时间发生过什么。',
@@ -57,6 +83,14 @@ const SUMMARY_INSANITY: string[] = [
   '产生恐惧症。',
   '产生躁狂症。',
 ];
+
+const PHOBIAS: string[] = _phobias.length >= 100
+  ? _phobias.sort((a, b) => a.id - b.id).map((p) => p.description)
+  : [];
+
+const MANIAS: string[] = _manias.length >= 100
+  ? _manias.sort((a, b) => a.id - b.id).map((m) => m.description)
+  : [];
 
 /* ─── 解算器 ─── */
 
@@ -115,26 +149,53 @@ export class SanityResolver {
 
   /**
    * 临时疯狂症状（即时症状）
+   * 第 9 条（恐惧症）和第 10 条（躁狂症）额外掷 D100 确定具体症状
    */
   rollTemporaryInsanity(): { index: number; symptom: string; duration: string } {
     const index = Math.floor(Math.random() * TEMPORARY_INSANITY.length);
     const rounds = roll('1d10').total;
+    let symptom = TEMPORARY_INSANITY[index];
+
+    // index 8 = 恐惧症（第9条），index 9 = 躁狂症（第10条）
+    if (index === 8 && PHOBIAS.length > 0) {
+      const d100 = rollD100();
+      const phobia = PHOBIAS[(d100 - 1) % PHOBIAS.length];
+      symptom += `\n  → D100=${d100}：${phobia}`;
+    } else if (index === 9 && MANIAS.length > 0) {
+      const d100 = rollD100();
+      const mania = MANIAS[(d100 - 1) % MANIAS.length];
+      symptom += `\n  → D100=${d100}：${mania}`;
+    }
+
     return {
       index: index + 1,
-      symptom: TEMPORARY_INSANITY[index],
+      symptom,
       duration: `${rounds} 轮`,
     };
   }
 
   /**
    * 总结疯狂症状
+   * 第 9 条（恐惧症）和第 10 条（躁狂症）额外掷 D100 确定具体症状
    */
   rollSummaryInsanity(): { index: number; symptom: string; duration: string } {
     const index = Math.floor(Math.random() * SUMMARY_INSANITY.length);
     const hours = roll('1d10').total;
+    let symptom = SUMMARY_INSANITY[index];
+
+    if (index === 8 && PHOBIAS.length > 0) {
+      const d100 = rollD100();
+      const phobia = PHOBIAS[(d100 - 1) % PHOBIAS.length];
+      symptom += `\n  → D100=${d100}：${phobia}`;
+    } else if (index === 9 && MANIAS.length > 0) {
+      const d100 = rollD100();
+      const mania = MANIAS[(d100 - 1) % MANIAS.length];
+      symptom += `\n  → D100=${d100}：${mania}`;
+    }
+
     return {
       index: index + 1,
-      symptom: SUMMARY_INSANITY[index],
+      symptom,
       duration: `${hours} 小时`,
     };
   }

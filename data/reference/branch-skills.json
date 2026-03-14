@@ -1,0 +1,408 @@
+{
+  "artCraft": [
+    {
+      "name": "表演",
+      "baseValue": 5
+    },
+    {
+      "name": "美术",
+      "baseValue": 5
+    },
+    {
+      "name": "摄影",
+      "baseValue": 5
+    },
+    {
+      "name": "伪造",
+      "baseValue": 5
+    },
+    {
+      "name": "文学",
+      "baseValue": 5
+    },
+    {
+      "name": "书法",
+      "baseValue": 5
+    },
+    {
+      "name": "乐理",
+      "baseValue": 5
+    },
+    {
+      "name": "厨艺",
+      "baseValue": 5
+    },
+    {
+      "name": "裁缝",
+      "baseValue": 5
+    },
+    {
+      "name": "理发",
+      "baseValue": 5
+    },
+    {
+      "name": "建筑",
+      "baseValue": 5
+    },
+    {
+      "name": "舞蹈",
+      "baseValue": 5
+    },
+    {
+      "name": "酿酒",
+      "baseValue": 5
+    },
+    {
+      "name": "捕鱼",
+      "baseValue": 5
+    },
+    {
+      "name": "歌唱",
+      "baseValue": 5
+    },
+    {
+      "name": "制陶",
+      "baseValue": 5
+    },
+    {
+      "name": "雕塑",
+      "baseValue": 5
+    },
+    {
+      "name": "杂技",
+      "baseValue": 5
+    },
+    {
+      "name": "风水",
+      "baseValue": 5
+    },
+    {
+      "name": "技术制图",
+      "baseValue": 5
+    },
+    {
+      "name": "耕作",
+      "baseValue": 5
+    },
+    {
+      "name": "打字",
+      "baseValue": 5
+    },
+    {
+      "name": "速记",
+      "baseValue": 5
+    },
+    {
+      "name": "木匠",
+      "baseValue": 5
+    },
+    {
+      "name": "莫里斯舞",
+      "baseValue": 5
+    },
+    {
+      "name": "歌剧歌唱",
+      "baseValue": 5
+    },
+    {
+      "name": "粉刷匠与油漆工",
+      "baseValue": 5
+    },
+    {
+      "name": "吹制玻璃管",
+      "baseValue": 5
+    }
+  ],
+  "science": [
+    {
+      "name": "地质学",
+      "baseValue": 1
+    },
+    {
+      "name": "化学",
+      "baseValue": 1
+    },
+    {
+      "name": "生物学",
+      "baseValue": 1
+    },
+    {
+      "name": "数学",
+      "baseValue": 1
+    },
+    {
+      "name": "天文学",
+      "baseValue": 1
+    },
+    {
+      "name": "物理学",
+      "baseValue": 1
+    },
+    {
+      "name": "药学",
+      "baseValue": 1
+    },
+    {
+      "name": "植物学",
+      "baseValue": 1
+    },
+    {
+      "name": "动物学",
+      "baseValue": 1
+    },
+    {
+      "name": "密码学",
+      "baseValue": 1
+    },
+    {
+      "name": "工程学",
+      "baseValue": 1
+    },
+    {
+      "name": "气象学",
+      "baseValue": 1
+    },
+    {
+      "name": "司法科学",
+      "baseValue": 1
+    },
+    {
+      "name": "身无分文",
+      "baseValue": 0
+    },
+    {
+      "name": "拮据",
+      "baseValue": 1
+    },
+    {
+      "name": "标准",
+      "baseValue": 10
+    },
+    {
+      "name": "小康",
+      "baseValue": 50
+    },
+    {
+      "name": "富裕",
+      "baseValue": 90
+    },
+    {
+      "name": "富豪",
+      "baseValue": 99
+    },
+    {
+      "name": "身无分文",
+      "baseValue": 0
+    },
+    {
+      "name": "拮据",
+      "baseValue": 1
+    },
+    {
+      "name": "标准",
+      "baseValue": 10
+    },
+    {
+      "name": "小康",
+      "baseValue": 50
+    },
+    {
+      "name": "富裕",
+      "baseValue": 90
+    },
+    {
+      "name": "富豪",
+      "baseValue": 99
+    }
+  ],
+  "fighting": [
+    {
+      "name": "鞭子",
+      "baseValue": 5
+    },
+    {
+      "name": "电锯",
+      "baseValue": 10
+    },
+    {
+      "name": "斗殴",
+      "baseValue": 25
+    },
+    {
+      "name": "斧",
+      "baseValue": 15
+    },
+    {
+      "name": "剑",
+      "baseValue": 20
+    },
+    {
+      "name": "绞具",
+      "baseValue": 15
+    },
+    {
+      "name": "链枷",
+      "baseValue": 10
+    },
+    {
+      "name": "矛",
+      "baseValue": 20
+    },
+    {
+      "name": "飞行器",
+      "baseValue": 1
+    },
+    {
+      "name": "船",
+      "baseValue": 1
+    }
+  ],
+  "shooting": [
+    {
+      "name": "步枪/霰弹枪",
+      "baseValue": 25
+    },
+    {
+      "name": "冲锋枪",
+      "baseValue": 15
+    },
+    {
+      "name": "弓",
+      "baseValue": 15
+    },
+    {
+      "name": "喷射器",
+      "baseValue": 10
+    },
+    {
+      "name": "机枪",
+      "baseValue": 10
+    },
+    {
+      "name": "手枪",
+      "baseValue": 20
+    },
+    {
+      "name": "重武器",
+      "baseValue": 10
+    }
+  ],
+  "skillLevels": [
+    {
+      "level": 0,
+      "description": "并不知晓有这种学问或技能的存在。"
+    },
+    {
+      "level": 1,
+      "description": "完完全全的门外汉，仅仅是知道有这种技能而已"
+    },
+    {
+      "level": 5,
+      "description": "经过了最基础的了解，可以说出一两个专业名词，但是实际操作几乎不可能。"
+    },
+    {
+      "level": 11,
+      "description": "自行摸索的自学或经过一段不认真的教育（指学习与教课双方）之后获取的知识。"
+    },
+    {
+      "level": 20,
+      "description": "非常有天赋或非常努力的人可以在短时间内达到这种程度，再或者一些知识渊博的人也能得到这个级别的知识。"
+    },
+    {
+      "level": 26,
+      "description": "一定时间内经过了系统式的教育或名师指导。对这方面拥有了一个初步的了解，专业性上比普通人都要强，\n但是实际操作依旧非常困难。"
+    },
+    {
+      "level": 40,
+      "description": "对这方面拥有很高的热情，但基础知识或学习时间依旧没有达到标准。\n这阶段很可能是一个瓶颈期"
+    },
+    {
+      "level": 50,
+      "description": "已经可以以此为生但依旧不是非常熟练\n如果以该技能为职业至少要达到50"
+    },
+    {
+      "level": 51,
+      "description": "不断精进的技术，虽然放到同行里一抓一大把但是基本上已经可以独当一面了。"
+    },
+    {
+      "level": 71,
+      "description": "在一定范围内你具有了比较高的知名度，虽然不至于成为权威但是已经是一个很好  的咨询对象了。\n对于这个技能你无论怎么操作都非常得心应手（除了更加精进的钻研自己  的技术或说服流氓同行）"
+    },
+    {
+      "level": 81,
+      "description": "该专业的权威，即使你仅靠这方面的技能也能得到很多人的重视与保护。"
+    },
+    {
+      "level": 91,
+      "description": "伟人级别，如果你有时间有精力，绝对可以创造一个不可磨灭的瑰宝留给后世子孙。"
+    },
+    {
+      "level": 100,
+      "description": "在当代，和这方面有关的事情你已经无所不知了，如果出现了一种你不认识的东西，这种东西就会被称为：新大陆"
+    },
+    {
+      "level": 101,
+      "description": "对于这方面拥有全新的解释或发现，并且已经初步了解了这些新知识。"
+    },
+    {
+      "level": 111,
+      "description": "超越本时代几乎所有人，能和你平起平坐的应该不会超过十个人。拥有着大量的发明创造，\n甚至在之后很长一段时间内都会不分国界的被世人记住"
+    },
+    {
+      "level": 150,
+      "description": "初步进入了超时代的知识领域，即使穿越也可以成为该领域的专家 \n从这个阶段开始和其相关的领域知识也会一并提高，并且可能是超时代的"
+    },
+    {
+      "level": 500,
+      "description": "在这方面上几乎所有知识的获取，已经没有任何成长的必要了，再获取的知识也不过是一些鸡毛蒜皮的小事"
+    },
+    {
+      "level": 0,
+      "description": "100"
+    },
+    {
+      "level": 1,
+      "description": "CR × 100"
+    },
+    {
+      "level": 10,
+      "description": "CR × 200"
+    },
+    {
+      "level": 50,
+      "description": "CR × 500"
+    },
+    {
+      "level": 90,
+      "description": "CR × 3000"
+    },
+    {
+      "level": 99,
+      "description": "100万"
+    },
+    {
+      "level": 0,
+      "description": "5先令"
+    },
+    {
+      "level": 1,
+      "description": "CR × 1"
+    },
+    {
+      "level": 10,
+      "description": "CR × 10"
+    },
+    {
+      "level": 50,
+      "description": "CR × 12"
+    },
+    {
+      "level": 90,
+      "description": "CR × 50"
+    },
+    {
+      "level": 99,
+      "description": "15万"
+    }
+  ]
+}

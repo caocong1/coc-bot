@@ -26,7 +26,15 @@ import { CharacterStore } from '../commands/sheet/CharacterStore';
 import { HelpCommand } from '../commands/HelpCommand';
 import { JrrpCommand } from '../commands/fun/JrrpCommand';
 import { RegenCommand } from '../commands/fun/RegenCommand';
+import { NameCommand } from '../commands/fun/NameCommand';
+import { GuguCommand } from '../commands/fun/GuguCommand';
 import { WebCommand } from '../commands/web/WebCommand';
+import { RoomCommand } from '../commands/room/RoomCommand';
+import { ModCommand } from '../commands/module/ModCommand';
+import { InitCommand } from '../commands/dice/InitCommand';
+import { SetCommand } from '../commands/sheet/SetCommand';
+import { NnCommand } from '../commands/sheet/NnCommand';
+import { UserSettingsStore } from '../storage/UserSettingsStore';
 import { DashScopeClient } from '../ai/client/DashScopeClient';
 import { CheckResolver } from '../rules/coc7/CheckResolver';
 import { SanityResolver } from '../rules/coc7/SanityResolver';
@@ -107,18 +115,19 @@ const db = openDatabase();
 migrateCoreSchema(db);
 
 // 启动时把上次意外中断（status='running'）的 session 改为 'paused'，
-// 让玩家可以用 .campaign resume 接回，而不是永久卡住
+// 让玩家可以用 .room resume 接回，而不是永久卡住
 const orphaned = db.run(
   `UPDATE kp_sessions SET status = 'paused', updated_at = ? WHERE status = 'running'`,
   [new Date().toISOString()],
 );
 if (orphaned.changes > 0) {
-  console.log(`[Bot] 检测到 ${orphaned.changes} 个未正常结束的跑团，已标记为暂停，可用 .campaign resume 继续`);
+  console.log(`[Bot] 检测到 ${orphaned.changes} 个未正常结束的跑团，已标记为暂停，可用 .room resume 继续`);
 }
 
 // storage（注入共享 db，避免双连接）
 const characterStore = new CharacterStore(db);
 const tokenStore = new TokenStore(db);
+const userSettings = new UserSettingsStore(db);
 tokenStore.cleanup(); // 清理过期 token
 
 // mode
@@ -146,7 +155,7 @@ const parser = new CommandParser();
 const registry = new CommandRegistry();
 
 // 注册所有命令
-registry.register(new DiceCommand());
+registry.register(new DiceCommand(userSettings));
 registry.register(new CheckCommand(checkResolver, characterStore));
 registry.register(new SanCheckCommand(sanityResolver, characterStore));
 registry.register(new InsanityCommand(sanityResolver));
@@ -160,8 +169,15 @@ registry.register(new StCommand(characterStore));
 registry.register(new PcCommand(characterStore));
 registry.register(new JrrpCommand(aiClient));
 registry.register(new RegenCommand(aiClient, actionClient));
+registry.register(new NameCommand());
+registry.register(new GuguCommand(aiClient));
+registry.register(new InitCommand());
+registry.register(new SetCommand(userSettings));
+registry.register(new NnCommand(userSettings));
 registry.register(new HelpCommand(registry));
 registry.register(new WebCommand(tokenStore));
+registry.register(new RoomCommand(db, tokenStore, campaignHandler, actionClient));
+registry.register(new ModCommand(db));
 
 /* ─── message handling ─── */
 
@@ -206,17 +222,48 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
   // Campaign 模式下非命令消息交给 AI KP
   if (!cmd) {
     if (mode === 'campaign' && campaignHandler && ctx.groupId) {
+      const gid = ctx.groupId;
+      let thinkingMsgId = 0;
+      const onThinking = () => {
+        // 发送"思考中"提示，不阻塞 AI 生成
+        actionClient.sendGroupMessage(gid, '💭 KP 正在思考...').then((id) => { thinkingMsgId = id; }).catch(() => {});
+      };
       const output = await campaignHandler.handlePlayerMessage(
-        ctx.groupId,
+        gid,
         ctx.userId,
         senderName ?? String(ctx.userId),
         ctx.plainText,
+        onThinking,
       ).catch((err) => {
         console.error('[Bot] campaign handler error:', err);
-        return { text: null, images: [] as Array<{ absPath: string; caption: string; id: string }> };
+        return { text: null, images: [] as Array<{ absPath: string; caption: string; id: string }>, queued: false };
       });
-      await sendCampaignOutput(ctx.groupId, output.text, output.images);
+      // 排队的消息不撤回提示、不发送输出（由合并处理负责）
+      if (output.queued) return;
+      // 撤回"思考中"提示
+      if (thinkingMsgId) actionClient.deleteMsg(thinkingMsgId).catch(() => {});
+      await sendCampaignOutput(gid, output.text, output.images);
     }
+    return;
+  }
+
+  // .kp [内容] — 强制 KP 介入
+  if (cmd.name === 'kp' && ctx.groupId) {
+    if (!campaignHandler) return;
+    const gid = ctx.groupId;
+    const extraText = cmd.args?.join(' ').trim() ?? '';
+    let thinkingMsgId = 0;
+    const onThinking = () => {
+      actionClient.sendGroupMessage(gid, '💭 KP 正在思考...').then((id) => { thinkingMsgId = id; }).catch(() => {});
+    };
+    const output = await campaignHandler.handleForceKP(
+      gid, ctx.userId, senderName ?? String(ctx.userId), extraText, onThinking,
+    ).catch((err) => {
+      console.error('[Bot] forceKP error:', err);
+      return { text: null, images: [] as Array<{ absPath: string; caption: string; id: string }> };
+    });
+    if (thinkingMsgId) actionClient.deleteMsg(thinkingMsgId).catch(() => {});
+    await sendCampaignOutput(gid, output.text, output.images);
     return;
   }
 
@@ -234,7 +281,7 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
       await actionClient.sendGroupMessage(ctx.groupId, '⏳ 守秘人正在准备开场，请稍候...');
       const parts = await campaignHandler.startSession(ctx.groupId, templateId).catch((err) => {
         console.error('[Bot] startSession error:', err);
-        return [`⚔️ 跑团模式已开启（模板：${templateId ?? 'serious'}）\n守秘人已就位，请各位调查员就位。`];
+        return [`⚔️ 跑团模式已开启（模板：${templateId ?? 'classic'}）\n守秘人已就位，请各位调查员就位。`];
       });
       await sendMessages(ctx.groupId, parts);
       return;
@@ -269,7 +316,7 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
     if (subCmd === 'load') {
       const filename = cmd.args?.slice(1).join(' ').trim();
       if (!filename) {
-        await actionClient.sendGroupMessage(ctx.groupId, '用法：.campaign load <模组文件名>\n示例：.campaign load 调查员手册');
+        await actionClient.sendGroupMessage(ctx.groupId, '用法：.campaign load <模组文件名>\n示例：.campaign load 调查员手册（内部命令）');
         return;
       }
       const reply = campaignHandler.loadScenario(ctx.groupId, filename);
@@ -277,16 +324,7 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
       return;
     }
 
-    await actionClient.sendGroupMessage(
-      ctx.groupId,
-      '用法：\n' +
-      '  .campaign start [模板]  — 开始新跑团\n' +
-      '  .campaign pause         — 暂停（保存进度）\n' +
-      '  .campaign resume        — 继续上次跑团\n' +
-      '  .campaign stop          — 彻底结束\n' +
-      '  .campaign load <文件名> — 加载模组\n' +
-      '可用模板：serious / humorous / creative / freeform / strict / old-school',
-    );
+    // 未知子命令，不回复（内部指令）
     return;
   }
 
@@ -305,20 +343,27 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
     const result = await handler.handle(commandCtx, cmd);
     await sendResult(ctx, result);
 
-    // Campaign 模式下骰子命令结果反馈给 AI KP
-    if (mode === 'campaign' && campaignHandler && ctx.groupId) {
+    // Campaign 模式下骰子命令结果反馈给 AI KP（错误结果不触发）
+    if (mode === 'campaign' && campaignHandler && ctx.groupId && !result.error) {
       const diceCommands = new Set(['r', 'ra', 'rc', 'sc', 'rb', 'rp']);
       if (diceCommands.has(cmd.name)) {
+        const diceGid = ctx.groupId;
+        let diceThinkingId = 0;
+        const onDiceThinking = () => {
+          actionClient.sendGroupMessage(diceGid, '💭 KP 正在思考...').then((id) => { diceThinkingId = id; }).catch(() => {});
+        };
         const diceOutput = await campaignHandler.handleDiceResult(
-          ctx.groupId,
+          diceGid,
           ctx.userId,
           senderName ?? String(ctx.userId),
           result.text,
+          onDiceThinking,
         ).catch((err) => {
           console.error('[Bot] campaign dice feedback error:', err);
           return { text: null, images: [] as Array<{ absPath: string; caption: string; id: string }> };
         });
-        await sendCampaignOutput(ctx.groupId, diceOutput.text, diceOutput.images);
+        if (diceThinkingId) actionClient.deleteMsg(diceThinkingId).catch(() => {});
+        await sendCampaignOutput(diceGid, diceOutput.text, diceOutput.images);
       }
     }
   } catch (err) {
@@ -362,8 +407,10 @@ transport.on('message', (raw) => {
     return;
   }
 
-  // 提取发送者昵称供命令使用
-  const senderName = (event.sender?.card as string) || (event.sender?.nickname as string) || undefined;
+  // 提取发送者昵称：优先用 .nn 设置的称呼，否则用群名片/QQ昵称
+  const qqName = (event.sender?.card as string) || (event.sender?.nickname as string) || undefined;
+  const nnName = ctx.userId ? userSettings.getNickname(ctx.userId, ctx.groupId) : null;
+  const senderName = nnName ?? qqName;
 
   console.log(`[Bot] 解析: text="${ctx.plainText}" isCmd=${ctx.isCommand} cmd=${ctx.commandName ?? 'none'}`);
 

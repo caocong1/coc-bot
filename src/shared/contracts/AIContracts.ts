@@ -1,17 +1,16 @@
 /**
- * KP 模板参数
+ * KP 模板参数（5 维度）
  */
 export interface KPTemplateParams {
   name: string;
   description: string;
-  humorLevel: number;           // 0-10
-  rulesStrictness: number;       // 0-10
-  narrativeFlexibility: number;   // 0-10
-  clueGenerosity: number;         // 0-10
-  improvisationLevel: number;      // 0-10
-  toneKeywords: string[];
-  forbiddenBehaviors: string[];
+  tone: number;              // 基调 1-10（轻松搞笑 ↔ 严肃恐怖）
+  flexibility: number;       // 灵活度 1-10（规则严守 ↔ 叙事/RP优先）
+  guidance: number;          // 引导度 1-10（自行摸索 ↔ 手把手）
+  lethality: number;         // 致命度 1-10（温和安全 ↔ 致命陷阱）
+  pacing: number;            // 节奏 1-10（慢热沉浸 ↔ 快节奏紧张）
   defaultPromptBlock: string;
+  customPrompts?: string;    // 模板级自定义设定语
 }
 
 /**

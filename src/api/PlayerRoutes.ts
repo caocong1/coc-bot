@@ -28,6 +28,9 @@ import type { TokenStore } from '../storage/TokenStore';
 import type { CharacterStore } from '../commands/sheet/CharacterStore';
 import type { CampaignHandler } from '../runtime/CampaignHandler';
 import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { parseExcelCharacter } from '../import/ExcelCharacterParser';
 
 export class PlayerRoutes {
   constructor(
@@ -39,10 +42,16 @@ export class PlayerRoutes {
   ) {}
 
   async handle(req: Request, subPath: string): Promise<Response | null> {
-    const qqId = this.authenticate(req);
-    if (qqId === null) {
+    // 公开参考数据端点（无需认证）
+    if (subPath.startsWith('/reference/') && req.method === 'GET') {
+      return this.getReference(subPath.replace('/reference/', ''));
+    }
+
+    const auth = this.authenticate(req);
+    if (auth === null) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const { qqId, groupId: tokenGroupId } = auth;
 
     const method = req.method;
     const segments = subPath.replace(/^\//, '').split('/');
@@ -52,11 +61,12 @@ export class PlayerRoutes {
 
     // GET /me
     if (resource === 'me' && method === 'GET') {
-      return this.getMe(qqId);
+      return this.getMe(qqId, tokenGroupId);
     }
 
     // /characters
     if (resource === 'characters') {
+      if (method === 'POST' && resourceId === 'import-excel') return this.importExcelCharacter(req);
       if (method === 'GET' && !resourceId) return this.listCharacters(qqId);
       if (method === 'POST') return this.createCharacter(qqId, req);
       if (method === 'PUT' && resourceId) return this.updateCharacter(qqId, resourceId, req);
@@ -72,38 +82,63 @@ export class PlayerRoutes {
       }
     }
 
-    // /scenarios
+    // /scenarios (旧) 和 /modules (新)
     if (resource === 'scenarios' && method === 'GET') return this.listScenarios();
+    if (resource === 'modules' && method === 'GET') return this.listModules();
 
     // /rooms
     if (resource === 'rooms') {
       if (method === 'GET' && !resourceId) return this.listRooms(qqId);
-      if (method === 'POST' && !resourceId) return this.createRoom(qqId, req);
+      if (method === 'POST' && !resourceId) return this.createRoom(qqId, req, tokenGroupId);
       if (method === 'GET' && resourceId && !sub2) return this.getRoom(qqId, resourceId);
       if (method === 'DELETE' && resourceId && !sub2) return this.deleteRoom(qqId, resourceId);
       if (method === 'POST' && resourceId && sub2 === 'join') return this.joinRoom(qqId, resourceId);
       if (method === 'PUT' && resourceId && sub2 === 'character') return this.setRoomCharacter(qqId, resourceId, req);
-      if (method === 'POST' && resourceId && sub2 === 'start') return this.startRoom(qqId, resourceId);
+      if (method === 'POST' && resourceId && sub2 === 'start') return this.startRoom(qqId, resourceId, req);
+      if (method === 'POST' && resourceId && sub2 === 'ready') return this.readyRoom(qqId, resourceId);
+      if (method === 'POST' && resourceId && sub2 === 'cancel-review') return this.cancelReview(qqId, resourceId);
       if (method === 'PATCH' && resourceId && sub2 === 'constraints') return this.updateConstraints(qqId, resourceId, req);
+      if (method === 'GET' && resourceId && sub2 === 'messages') return this.getRoomMessages(qqId, resourceId);
+      if (method === 'GET' && resourceId && sub2 === 'time') return this.getRoomTime(qqId, resourceId);
     }
 
     return Response.json({ error: 'Not Found' }, { status: 404 });
   }
 
-  private authenticate(req: Request): number | null {
+  private authenticate(req: Request): { qqId: number; groupId: number | null } | null {
     const auth = req.headers.get('Authorization');
     if (!auth?.startsWith('Bearer ')) return null;
     const token = auth.slice('Bearer '.length).trim();
     return this.tokenStore.verify(token);
   }
 
+  // ─── Excel Import ─────────────────────────────────────────────────────────
+
+  private async importExcelCharacter(req: Request): Promise<Response> {
+    try {
+      const formData = await req.formData();
+      const file = formData.get('file') as File | null;
+      if (!file) return Response.json({ error: '未提供文件' }, { status: 400 });
+      if (!file.name.endsWith('.xlsx')) {
+        return Response.json({ error: '仅支持 .xlsx 格式' }, { status: 400 });
+      }
+
+      const buffer = await file.arrayBuffer();
+      const result = parseExcelCharacter(buffer);
+      return Response.json(result);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '解析失败';
+      return Response.json({ error: msg }, { status: 400 });
+    }
+  }
+
   // ─── Characters ────────────────────────────────────────────────────────────
 
-  private getMe(qqId: number): Response {
+  private getMe(qqId: number, groupId: number | null): Response {
     const chars = this.db.query<{ id: string }, number>(
       'SELECT id FROM characters WHERE player_id = ?',
     ).all(qqId);
-    return Response.json({ qqId, characterCount: chars.length });
+    return Response.json({ qqId, groupId, characterCount: chars.length });
   }
 
   private listCharacters(qqId: number): Response {
@@ -288,22 +323,27 @@ export class PlayerRoutes {
     })));
   }
 
-  // ─── Scenarios ─────────────────────────────────────────────────────────────
+  // ─── Scenarios / Modules ───────────────────────────────────────────────────
 
   private listScenarios(): Response {
-    try {
-      const manifestPath = './data/knowledge/manifest.json';
-      const manifest = JSON.parse(new TextDecoder().decode(
-        new Uint8Array(require('fs').readFileSync(manifestPath)),
-      )) as Array<{ name: string; description?: string }>;
+    // 从 scenario_modules 表读取，兼容旧 /scenarios 端点
+    return this.listModules();
+  }
 
-      return Response.json(manifest.map((m) => ({
-        name: m.name,
-        description: m.description ?? '',
-      })));
-    } catch {
-      return Response.json([]);
-    }
+  private listModules(): Response {
+    const modules = this.db.query<{
+      id: string; name: string; description: string | null; era: string | null;
+      allowed_occupations: string; min_stats: string; created_at: string;
+    }, []>('SELECT id, name, description, era, allowed_occupations, min_stats, created_at FROM scenario_modules ORDER BY created_at DESC').all();
+
+    return Response.json(modules.map((m) => ({
+      id: m.id,
+      name: m.name,
+      description: m.description ?? '',
+      era: m.era,
+      allowedOccupations: JSON.parse(m.allowed_occupations) as string[],
+      minStats: JSON.parse(m.min_stats) as Record<string, number>,
+    })));
   }
 
   // ─── Rooms ─────────────────────────────────────────────────────────────────
@@ -311,7 +351,7 @@ export class PlayerRoutes {
   private listRooms(qqId: number): Response {
     // 返回：该玩家创建的 + 该玩家加入的
     const rooms = this.db.query<{
-      id: string; name: string; group_id: number; creator_qq_id: number;
+      id: string; name: string; group_id: number | null; creator_qq_id: number;
       scenario_name: string | null; constraints_json: string; status: string;
       kp_session_id: string | null; created_at: string;
     }, [number, number]>(`
@@ -329,7 +369,7 @@ export class PlayerRoutes {
     })));
   }
 
-  private async createRoom(qqId: number, req: Request): Promise<Response> {
+  private async createRoom(qqId: number, req: Request, _tokenGroupId: number | null): Promise<Response> {
     let body: Record<string, unknown>;
     try {
       body = await req.json() as Record<string, unknown>;
@@ -338,27 +378,35 @@ export class PlayerRoutes {
     }
 
     const name = (body.name as string)?.trim();
-    const groupId = body.groupId as number;
     if (!name) return Response.json({ error: '房间名不能为空' }, { status: 400 });
-    if (!groupId) return Response.json({ error: '请指定 QQ 群号' }, { status: 400 });
 
-    // 检查该群是否已有 waiting/running 的房间
-    const existing = this.db.query<{ id: string }, [number, string, string]>(
-      `SELECT id FROM campaign_rooms WHERE group_id = ? AND status IN (?, ?)`,
-    ).get(groupId, 'waiting', 'running');
-    if (existing) {
-      return Response.json({ error: '该群已有进行中的跑团房间，请先删除或等待结束' }, { status: 409 });
-    }
-
-    const id = crypto.randomUUID().slice(0, 8); // 短 ID，方便复制
+    const id = this.generateShortRoomId();
     const now = new Date().toISOString();
 
+    // 若传入 moduleId，从模组自动读取 scenarioName 和约束
+    let scenarioName = (body.scenarioName as string | null) ?? null;
+    let constraints = body.constraints ?? {};
+    const moduleId = (body.moduleId as string | null) ?? null;
+    if (moduleId) {
+      const mod = this.db.query<{
+        name: string; allowed_occupations: string; min_stats: string; era: string | null;
+      }, string>('SELECT name, allowed_occupations, min_stats, era FROM scenario_modules WHERE id = ?').get(moduleId);
+      if (mod) {
+        scenarioName = mod.name;
+        constraints = {
+          era: mod.era ?? undefined,
+          allowedOccupations: JSON.parse(mod.allowed_occupations),
+          minStats: JSON.parse(mod.min_stats),
+        };
+      }
+    }
+
     this.db.run(
-      `INSERT INTO campaign_rooms (id, name, group_id, creator_qq_id, scenario_name, constraints_json, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`,
-      [id, name, groupId, qqId,
-        (body.scenarioName as string | null) ?? null,
-        JSON.stringify(body.constraints ?? {}),
+      `INSERT INTO campaign_rooms (id, name, group_id, creator_qq_id, module_id, scenario_name, constraints_json, status, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, 'waiting', ?, ?)`,
+      [id, name, qqId, moduleId,
+        scenarioName,
+        JSON.stringify(constraints),
         now, now],
     );
 
@@ -373,7 +421,7 @@ export class PlayerRoutes {
 
   private getRoom(qqId: number, roomId: string): Response {
     const room = this.db.query<{
-      id: string; name: string; group_id: number; creator_qq_id: number;
+      id: string; name: string; group_id: number | null; creator_qq_id: number;
       scenario_name: string | null; constraints_json: string; status: string;
       kp_session_id: string | null; created_at: string;
     }, string>(
@@ -383,9 +431,9 @@ export class PlayerRoutes {
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
 
     const members = this.db.query<{
-      qq_id: number; character_id: string | null; joined_at: string;
+      qq_id: number; character_id: string | null; ready_at: string | null; joined_at: string;
     }, string>(
-      'SELECT qq_id, character_id, joined_at FROM campaign_room_members WHERE room_id = ? ORDER BY joined_at',
+      'SELECT qq_id, character_id, ready_at, joined_at FROM campaign_room_members WHERE room_id = ? ORDER BY joined_at',
     ).all(roomId);
 
     // 获取每个成员的角色卡摘要
@@ -409,7 +457,7 @@ export class PlayerRoutes {
           };
         }
       }
-      return { qqId: m.qq_id, joinedAt: m.joined_at, character, isCreator: m.qq_id === room.creator_qq_id };
+      return { qqId: m.qq_id, joinedAt: m.joined_at, readyAt: m.ready_at, character, isCreator: m.qq_id === room.creator_qq_id };
     });
 
     // PC 合规性检查（软验证）
@@ -508,51 +556,90 @@ export class PlayerRoutes {
     return Response.json({ ok: true });
   }
 
-  private async startRoom(qqId: number, roomId: string): Promise<Response> {
-    if (!this.campaignHandler || !this.actionClient) {
-      return Response.json({ error: '服务未配置，无法从 Web 开团' }, { status: 503 });
-    }
-
+  /** Web 端开始审卡（waiting → reviewing） */
+  /** Web 端开始审卡（waiting → reviewing） */
+  private async startRoom(qqId: number, roomId: string, _req: Request): Promise<Response> {
     const room = this.db.query<{
-      group_id: number; status: string; constraints_json: string;
-    }, string>(
-      'SELECT group_id, status, constraints_json FROM campaign_rooms WHERE id = ?',
-    ).get(roomId);
+      status: string;
+    }, string>('SELECT status FROM campaign_rooms WHERE id = ?').get(roomId);
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
-    if (room.status !== 'waiting') {
-      return Response.json({ error: '该房间已开始或已结束' }, { status: 409 });
-    }
 
-    const member = this.db.query<{ qq_id: number }, [string, number]>(
+    // 检查成员身份
+    const isMember = this.db.query<{ qq_id: number }, [string, number]>(
       'SELECT qq_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
     ).get(roomId, qqId);
-    if (!member) return Response.json({ error: '你不在该房间中' }, { status: 403 });
+    if (!isMember) return Response.json({ error: '只有房间成员才能操作' }, { status: 403 });
 
-    const groupId = room.group_id;
+    if (room.status === 'reviewing') return Response.json({ ok: true, status: 'reviewing', message: '已在审卡阶段' });
+    if (room.status !== 'waiting') return Response.json({ error: '该房间已开始或已结束' }, { status: 409 });
+
     const now = new Date().toISOString();
+    this.db.run("UPDATE campaign_rooms SET status = 'reviewing', updated_at = ? WHERE id = ?", [now, roomId]);
+    // 重置所有成员 ready 状态
+    this.db.run('UPDATE campaign_room_members SET ready_at = NULL WHERE room_id = ?', [roomId]);
+    return Response.json({ ok: true, status: 'reviewing', message: '已进入审卡阶段' });
+  }
 
-    // 更新房间状态
-    this.db.run(
-      "UPDATE campaign_rooms SET status = 'running', updated_at = ? WHERE id = ?",
-      [now, roomId],
-    );
+  /** Web 端标记 ready */
+  private readyRoom(qqId: number, roomId: string): Response {
+    const room = this.db.query<{
+      status: string; group_id: number | null;
+    }, string>('SELECT status, group_id FROM campaign_rooms WHERE id = ?').get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    if (room.status !== 'reviewing') return Response.json({ error: '该房间不在审卡阶段' }, { status: 409 });
 
-    // 发提示后异步开团
-    this.actionClient.sendGroupMessage(groupId, '⏳ 守秘人正在准备，请稍候...').catch(() => {});
+    const member = this.db.query<{ ready_at: string | null }, [string, number]>(
+      'SELECT ready_at FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
+    ).get(roomId, qqId);
+    if (!member) return Response.json({ error: '你不在该房间中' }, { status: 403 });
+    if (member.ready_at) return Response.json({ ok: true, message: '你已经准备就绪了' });
 
-    this.campaignHandler.startSession(groupId).then(async (parts) => {
-      for (const part of parts) {
-        await this.actionClient!.sendGroupMessage(groupId, part);
-        await new Promise<void>((r) => setTimeout(r, 800));
-      }
-    }).catch((err) => {
-      console.error('[PlayerRoutes] Web 开团失败:', err);
-      this.actionClient!.sendGroupMessage(groupId, `⚠️ 开团失败：${String(err)}`).catch(() => {});
-      // 回滚房间状态
-      this.db.run("UPDATE campaign_rooms SET status = 'waiting', updated_at = ? WHERE id = ?", [new Date().toISOString(), roomId]);
-    });
+    const now = new Date().toISOString();
+    this.db.run('UPDATE campaign_room_members SET ready_at = ? WHERE room_id = ? AND qq_id = ?', [now, roomId, qqId]);
 
-    return Response.json({ ok: true, message: '开团指令已发送' });
+    // 检查全员 ready
+    const members = this.db.query<{ ready_at: string | null }, string>(
+      'SELECT ready_at FROM campaign_room_members WHERE room_id = ?',
+    ).all(roomId);
+    const readyCount = members.filter((m) => m.ready_at !== null).length;
+    const allReady = readyCount >= members.length;
+
+    if (allReady && room.group_id && this.campaignHandler && this.actionClient) {
+      // 自动开团
+      const groupId = room.group_id;
+      this.db.run("UPDATE campaign_rooms SET status = 'running', updated_at = ? WHERE id = ?", [now, roomId]);
+      this.actionClient.sendGroupMessage(groupId, '✅ 全员就绪！守秘人正在准备，请稍候...').catch(() => {});
+
+      this.campaignHandler.startSession(groupId, undefined, roomId).then(async (parts) => {
+        for (const part of parts) {
+          await this.actionClient!.sendGroupMessage(groupId, part);
+          await new Promise<void>((r) => setTimeout(r, 800));
+        }
+      }).catch((err) => {
+        console.error('[PlayerRoutes] Web 开团失败:', err);
+        this.actionClient!.sendGroupMessage(groupId, `⚠️ 开团失败：${String(err)}`).catch(() => {});
+        this.db.run("UPDATE campaign_rooms SET status = 'reviewing', updated_at = ? WHERE id = ?", [new Date().toISOString(), roomId]);
+      });
+
+      return Response.json({ ok: true, allReady: true, message: '全员就绪，开团中...' });
+    }
+
+    return Response.json({ ok: true, readyCount, total: members.length, allReady });
+  }
+
+  /** Web 端取消审卡（reviewing → waiting） */
+  private cancelReview(qqId: number, roomId: string): Response {
+    const room = this.db.query<{
+      creator_qq_id: number; status: string;
+    }, string>('SELECT creator_qq_id, status FROM campaign_rooms WHERE id = ?').get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    if (room.creator_qq_id !== qqId) return Response.json({ error: '只有房间创建者才能取消审卡' }, { status: 403 });
+    if (room.status !== 'reviewing') return Response.json({ error: '该房间不在审卡阶段' }, { status: 409 });
+
+    const now = new Date().toISOString();
+    this.db.run("UPDATE campaign_rooms SET status = 'waiting', updated_at = ? WHERE id = ?", [now, roomId]);
+    this.db.run('UPDATE campaign_room_members SET ready_at = NULL WHERE room_id = ?', [roomId]);
+    return Response.json({ ok: true, message: '已取消审卡' });
   }
 
   private async updateConstraints(qqId: number, roomId: string, req: Request): Promise<Response> {
@@ -578,10 +665,81 @@ export class PlayerRoutes {
     return Response.json({ ok: true });
   }
 
+  // ─── Room Messages ─────────────────────────────────────────────────────────
+
+  private getRoomMessages(qqId: number, roomId: string): Response {
+    // 验证是房间成员
+    const member = this.db.query<{ qq_id: number }, [string, number]>(
+      'SELECT qq_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
+    ).get(roomId, qqId);
+    if (!member) return Response.json({ error: '不是该房间成员' }, { status: 403 });
+
+    // 找 session
+    const room = this.db.query<{ kp_session_id: string | null }, string>(
+      'SELECT kp_session_id FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room?.kp_session_id) return Response.json([]);
+
+    const messages = this.db.query<{
+      id: string; role: string; display_name: string | null; content: string; timestamp: string;
+    }, string>(
+      'SELECT id, role, display_name, content, timestamp FROM kp_messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 200',
+    ).all(room.kp_session_id).reverse();
+
+    return Response.json(messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      displayName: m.display_name,
+      content: m.content,
+      timestamp: m.timestamp,
+    })));
+  }
+
+  // ─── Room Time ─────────────────────────────────────────────────────────────
+
+  private getRoomTime(qqId: number, roomId: string): Response {
+    const member = this.db.query<{ qq_id: number }, [string, number]>(
+      'SELECT qq_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
+    ).get(roomId, qqId);
+    if (!member) return Response.json({ error: '不是该房间成员' }, { status: 403 });
+
+    const room = this.db.query<{ kp_session_id: string | null }, string>(
+      'SELECT kp_session_id FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room?.kp_session_id) return Response.json({ ingameTime: null });
+
+    const session = this.db.query<{ ingame_time: string | null }, string>(
+      'SELECT ingame_time FROM kp_sessions WHERE id = ?',
+    ).get(room.kp_session_id);
+
+    return Response.json({ ingameTime: session?.ingame_time ?? null });
+  }
+
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
+  private static readonly SHORT_ID_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+  private generateShortRoomId(): string {
+    const chars = PlayerRoutes.SHORT_ID_CHARS;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      let id = '';
+      for (let i = 0; i < 4; i++) {
+        id += chars[Math.floor(Math.random() * chars.length)];
+      }
+      const exists = this.db.query<{ id: string }, string>(
+        'SELECT id FROM campaign_rooms WHERE id = ?',
+      ).get(id);
+      if (!exists) return id;
+    }
+    // fallback: 6 位
+    const chars2 = PlayerRoutes.SHORT_ID_CHARS;
+    let id = '';
+    for (let i = 0; i < 6; i++) id += chars2[Math.floor(Math.random() * chars2.length)];
+    return id;
+  }
+
   private formatRoom(r: {
-    id: string; name: string; group_id: number; creator_qq_id: number;
+    id: string; name: string; group_id: number | null; creator_qq_id: number;
     scenario_name: string | null; constraints_json: string; status: string;
     kp_session_id: string | null; created_at: string;
   }, viewerQqId: number) {
@@ -653,6 +811,29 @@ export class PlayerRoutes {
       }
     }
     return activeCharIds;
+  }
+
+  // ─── Reference Data ────────────────────────────────────────────────────────
+
+  private static readonly REFERENCE_FILES: Record<string, string> = {
+    weapons: 'weapons.json',
+    armor: 'armor.json',
+    vehicles: 'vehicles.json',
+    insanity: 'insanity-symptoms.json',
+    phobias: 'phobias.json',
+    manias: 'manias.json',
+    attributes: 'attribute-descriptions.json',
+    'branch-skills': 'branch-skills.json',
+    occupations: 'occupations.json',
+  };
+
+  private getReference(key: string): Response {
+    const filename = PlayerRoutes.REFERENCE_FILES[key];
+    if (!filename) return Response.json({ error: 'Unknown reference' }, { status: 404 });
+    const filePath = join(process.cwd(), 'data', 'reference', filename);
+    if (!existsSync(filePath)) return Response.json({ error: 'Reference data not available' }, { status: 404 });
+    const data = JSON.parse(readFileSync(filePath, 'utf-8'));
+    return Response.json(data);
   }
 }
 

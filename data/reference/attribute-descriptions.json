@@ -1,0 +1,262 @@
+{
+  "attributes": {
+    "STR": [
+      {
+        "value": 0,
+        "description": "衰弱：没法站起来甚至端起一杯茶｡"
+      },
+      {
+        "value": 15,
+        "description": "弱者,虚弱｡"
+      },
+      {
+        "value": 50,
+        "description": "普通人水平｡"
+      },
+      {
+        "value": 90,
+        "description": "你见过的力气最大的人"
+      },
+      {
+        "value": 99,
+        "description": "世界水平(奥赛举重冠军)｡人类极限｡"
+      },
+      {
+        "value": 140,
+        "description": "超越人类之力(例如大猩猩或马)｡"
+      },
+      {
+        "value": "200+",
+        "description": "怪物之力"
+      }
+    ],
+    "CON": [
+      {
+        "value": 0,
+        "description": "死亡"
+      },
+      {
+        "value": 1,
+        "description": "病弱｡卧床不起,没有协助就无法自已｡"
+      },
+      {
+        "value": 15,
+        "description": "健康堪忧。经常需要躺下休息，常年病痛缠身"
+      },
+      {
+        "value": 50,
+        "description": "普通人水平"
+      },
+      {
+        "value": 90,
+        "description": "抖落身上的液氮,强壮而精神｡"
+      },
+      {
+        "value": 99,
+        "description": "铁之刚体｡可以承受住最强的疼痛｡人类极限｡"
+      },
+      {
+        "value": 140,
+        "description": "超越人类之体格(大象)｡"
+      },
+      {
+        "value": "200+",
+        "description": "怪物之体,免疫大部分地球疾病"
+      }
+    ],
+    "SIZ": [
+      {
+        "value": 0,
+        "description": "没人知道他去了哪"
+      },
+      {
+        "value": 1,
+        "description": "婴儿(1~10斤)"
+      },
+      {
+        "value": 15,
+        "description": "孩童,或身短体瘦(矮人)(15kg)｡"
+      },
+      {
+        "value": 65,
+        "description": "普通人类体型(中等身高和体重)(75kg)｡"
+      },
+      {
+        "value": 80,
+        "description": "非常高,强健的体格或非常胖(110kg)｡"
+      },
+      {
+        "value": 99,
+        "description": "某方面已经是超大号了(150kg)｡"
+      },
+      {
+        "value": 150,
+        "description": "马或牛(436kg)｡"
+      },
+      {
+        "value": 180,
+        "description": "有记录的最重的人类(634kg)"
+      },
+      {
+        "value": "200+",
+        "description": "872kg"
+      }
+    ],
+    "DEX": [
+      {
+        "value": 0,
+        "description": "没有协助无法行动"
+      },
+      {
+        "value": 15,
+        "description": "缓慢笨拙难以行动自如"
+      },
+      {
+        "value": 50,
+        "description": "普通人水平"
+      },
+      {
+        "value": 90,
+        "description": "高速而灵活,可以达成超凡的技艺(例如伟大的舞者)｡"
+      },
+      {
+        "value": 99,
+        "description": "世界级运动员｡人类极限｡"
+      },
+      {
+        "value": 120,
+        "description": "超越人类之敏捷"
+      },
+      {
+        "value": "200+",
+        "description": "闪电之速,可以在人类反应过来之前完成系列动作｡"
+      }
+    ],
+    "APP": [
+      {
+        "value": 0,
+        "description": "如此的难看｡他人会对你报以恐惧､厌恶和怜悯｡"
+      },
+      {
+        "value": 15,
+        "description": "挫｡估计是因为受伤事故或先天如此｡"
+      },
+      {
+        "value": 50,
+        "description": "普通人水平｡"
+      },
+      {
+        "value": 90,
+        "description": "你见过的最漂亮的人,有着天然的吸引力｡"
+      },
+      {
+        "value": 99,
+        "description": "魅力和酷的巅峰(超级名模或世界影星)｡人类极限｡"
+      }
+    ],
+    "INT": [
+      {
+        "value": 0,
+        "description": "没有智商,无法理解周遭的世界｡"
+      },
+      {
+        "value": 15,
+        "description": "学得很慢,只能理解最常用的数字,或阅读学前级的书"
+      },
+      {
+        "value": 50,
+        "description": "普通人水平｡"
+      },
+      {
+        "value": 90,
+        "description": "超凡之脑,可以理解多门语言或法则｡"
+      },
+      {
+        "value": 99,
+        "description": "天才(爱因斯坦､达芬奇､特斯拉等等)｡人类极限｡"
+      },
+      {
+        "value": 140,
+        "description": "超越人类之智"
+      },
+      {
+        "value": "210+",
+        "description": "怪物之智,可以理解并操作多重次元"
+      }
+    ],
+    "POW": [
+      {
+        "value": 0,
+        "description": "0：弱者的心,没有意志力,没有魔法潜能｡"
+      },
+      {
+        "value": 15,
+        "description": "意志力弱,经常成为高智力或高意志人士的人的玩物"
+      },
+      {
+        "value": 50,
+        "description": "普通人"
+      },
+      {
+        "value": 90,
+        "description": "坚强的心,对沟通不可视之物和魔法有着高潜质｡"
+      },
+      {
+        "value": 100,
+        "description": "钢铁之心,与灵能领域和不可视世界有着强烈的链接｡"
+      },
+      {
+        "value": 140,
+        "description": "超越人类,基本上是异界存在"
+      },
+      {
+        "value": "210+",
+        "description": "怪物的魔法潜质和力量,超越凡人之理解力"
+      }
+    ],
+    "EDU": [
+      {
+        "value": 0,
+        "description": "新生儿｡"
+      },
+      {
+        "value": 15,
+        "description": "任何方面都没有受过教育｡"
+      },
+      {
+        "value": 60,
+        "description": "高中毕业｡"
+      },
+      {
+        "value": 70,
+        "description": "大学毕业"
+      },
+      {
+        "value": 80,
+        "description": "研究生毕业"
+      },
+      {
+        "value": 90,
+        "description": "博士学位,教授｡"
+      },
+      {
+        "value": 96,
+        "description": "某研究领域的世界级权威｡"
+      },
+      {
+        "value": 99,
+        "description": "人类极限｡"
+      }
+    ]
+  },
+  "explanations": {
+    "STR": "力量是调查员肌肉能力的量化。",
+    "CON": "体质意味着健康、生气和活力。",
+    "SIZ": "体型值将身高和体重整合成了一个数字。",
+    "DEX": "高敏捷的调查员更为迅捷灵敏，肉体更加柔韧。",
+    "APP": "外貌统括了肉体吸引力和人格魅力。",
+    "INT": "智力表示为调查员学习力、理解力、信息分析力和解密能力的优劣度。",
+    "POW": "意志正是心意的力量；意志越高，学习和抵抗魔法的资质就越高。",
+    "EDU": "教育表明了调查员在全日制学习中花费了多长时间。"
+  }
+}

@@ -27,7 +27,7 @@ import type { Character } from '@shared/types/Character';
 /** 进入流水线的输入 */
 export interface KPInput {
   /** 消息来源类型 */
-  kind: 'player_message' | 'dice_result' | 'system_event';
+  kind: 'player_message' | 'dice_result' | 'system_event' | 'force_kp';
   userId: number;
   /** 显示名（玩家昵称或角色名） */
   displayName: string;
@@ -49,6 +49,8 @@ export interface KPOutput {
   shouldRespond: boolean;
   /** 最终发送到群聊的文本（已去除 [SHOW_IMAGE:] 标记） */
   text: string;
+  /** AI 调用失败时为 true，text 包含错误提示 */
+  error?: boolean;
   /**
    * AI KP 决定展示的图片列表（从文本中提取的 [SHOW_IMAGE:id] 标记解析而来）。
    * 调用方负责按顺序发送，800ms 间隔。
@@ -64,30 +66,35 @@ export interface KPOutput {
 }
 
 export interface KPPipelineOptions {
-  /** KP 人格模板 ID，默认 'serious' */
+  /** KP 人格模板 ID，默认 'classic' */
   templateId?: string;
+  /** 房间级自定义 KP 提示词，追加到人格层 */
+  customPrompts?: string;
   /** 沉默阈值：连续几条玩家互 RP 消息后，KP 最多插一句氛围 */
   silenceThreshold?: number;
   /** 是否启用守密人输出过滤（默认 true） */
   enableGuardrail?: boolean;
   /** 触发摘要压缩的消息条数阈值（默认 40） */
   summaryTriggerCount?: number;
+  /** 数据库实例（用于加载自定义模板） */
+  db?: import('bun:sqlite').Database;
 }
 
 // ─── 实现 ─────────────────────────────────────────────────────────────────────
 
 const KP_MODEL = 'qwen3.5-plus';
-const GUARDRAIL_MODEL = 'qwen-plus'; // 过滤用轻量模型即可
+const GUARDRAIL_MODEL = 'qwen3.5-flash'; // 过滤用轻量模型即可
 
 export class KPPipeline {
   private readonly client: DashScopeClient;
   private readonly contextBuilder = new ContextBuilder();
-  private readonly templateRegistry = new KPTemplateRegistry();
+  private readonly templateRegistry: KPTemplateRegistry;
   private readonly knowledge: KnowledgeService;
   private readonly state: SessionState;
   private readonly store: CharacterStore;
 
   private readonly templateId: string;
+  private readonly customPrompts: string;
   private readonly silenceThreshold: number;
   private readonly enableGuardrail: boolean;
   private readonly summaryTriggerCount: number;
@@ -106,13 +113,15 @@ export class KPPipeline {
     this.state = state;
     this.store = store;
     this.knowledge = knowledge;
-    this.templateId = options.templateId ?? 'serious';
+    this.templateRegistry = new KPTemplateRegistry(options.db);
+    this.templateId = options.templateId ?? 'classic';
+    this.customPrompts = options.customPrompts ?? '';
     this.silenceThreshold = options.silenceThreshold ?? 5;
     this.enableGuardrail = options.enableGuardrail ?? true;
     this.summaryTriggerCount = options.summaryTriggerCount ?? 40;
   }
 
-  async process(input: KPInput): Promise<KPOutput> {
+  async process(input: KPInput, onThinking?: () => void): Promise<KPOutput> {
     // 1. 将输入消息写入历史
     const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     this.state.addMessage({
@@ -130,12 +139,16 @@ export class KPPipeline {
     }
 
     // 2. 判断是否介入
-    const intervention = this.decideIntervention(input);
+    const intervention = await this.decideIntervention(input);
     if (!intervention.shouldIntervene) {
       this.silentCount += 1;
       return { shouldRespond: false, text: '', debug: { interventionReason: intervention.reason, layerStats: {}, draftLength: 0, filteredLength: 0 } };
     }
     this.silentCount = 0;
+
+    // 通知调用方：KP 决定介入，AI 即将开始生成
+    console.log(`[KPPipeline] 介入决策: reason=${intervention.reason}, 开始 AI 生成...`);
+    onThinking?.();
 
     // 3. 并行 RAG 检索
     const query = input.content.slice(0, 200); // 检索用前200字够了
@@ -152,7 +165,7 @@ export class KPPipeline {
 
     // 5. 组装上下文
     const template = this.templateRegistry.get(this.templateId)
-      ?? this.templateRegistry.get('serious')!;
+      ?? this.templateRegistry.get('classic')!;
 
     // 模组全文（优先）/ RAG 降级
     const scenarioFullText = this.state.getScenarioText() ?? undefined;
@@ -175,22 +188,35 @@ export class KPPipeline {
         currentSegmentId,
         maxRecentMessages: 30,
         scenarioImages: scenarioImages.length > 0 ? scenarioImages : undefined,
+        customPrompts: this.customPrompts || undefined,
       },
     );
 
     // 6. 生成草稿
+    const t0 = Date.now();
+    console.log(`[KPPipeline] 调用 AI 草稿生成 (model=${KP_MODEL}, reason=${intervention.reason})...`);
     const draft = await this.generateDraft(systemPrompt, messages, intervention.reason);
+    console.log(`[KPPipeline] 草稿生成完成: ${draft.length}字, 耗时${Date.now() - t0}ms`);
     if (!draft) {
       return { shouldRespond: false, text: '', debug: { interventionReason: intervention.reason, layerStats, draftLength: 0, filteredLength: 0 } };
     }
+    if (draft === KPPipeline.DRAFT_ERROR) {
+      return { shouldRespond: true, text: '⚠️ KP 暂时无法回应，请稍后再试', error: true, debug: { interventionReason: intervention.reason, layerStats, draftLength: 0, filteredLength: 0 } };
+    }
 
     // 7. 提取 [SHOW_IMAGE:xxx] 标记（在 guardrail 之前，防止被过滤模型删除）
-    const { cleanText: draftClean, imageIds } = extractShowImageMarkers(draft);
+    const { cleanText: draftNoImg, imageIds } = extractShowImageMarkers(draft);
+
+    // 7.5 提取 [TIME_ADVANCE:Xm] 和 [SET_TIME:...] 标记
+    const { cleanText: draftClean, timeMarkers } = extractTimeMarkers(draftNoImg);
 
     // 8. 守密人过滤（仅过滤文字部分）
+    const t1 = Date.now();
+    if (this.enableGuardrail) console.log(`[KPPipeline] 调用守密人过滤 (model=${GUARDRAIL_MODEL})...`);
     const filteredText = this.enableGuardrail
       ? await this.applyGuardrail(draftClean, snapshot.discoveredClues.map((c) => c.title))
       : draftClean;
+    if (this.enableGuardrail) console.log(`[KPPipeline] 过滤完成: ${filteredText.length}字, 耗时${Date.now() - t1}ms`);
 
     // 9. 解析图片 ID → 实际路径（仅 playerVisible=true 的图片）
     const images: KPImage[] = [];
@@ -201,7 +227,7 @@ export class KPPipeline {
       }
     }
 
-    const finalText = filteredText;
+    const finalText = this.enhanceCheckRequests(filteredText, characters);
 
     // 10. 写入 KP 回复到历史
     const kpMsgId = `kp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -211,6 +237,18 @@ export class KPPipeline {
       content: finalText,
       timestamp: new Date(),
     });
+
+    // 10.5 应用时间标记到会话状态
+    for (const marker of timeMarkers) {
+      if (marker.type === 'advance') {
+        const mins = parseInt(marker.value, 10);
+        if (mins > 0 && mins <= 1440) {
+          this.state.advanceIngameTime(mins, `推进 ${mins} 分钟`, 'ai', kpMsgId);
+        }
+      } else if (marker.type === 'set') {
+        this.state.setIngameTime(marker.value, '设定时间', 'ai', kpMsgId);
+      }
+    }
 
     // 11. 检查是否需要触发摘要压缩
     this.maybeTriggerSummary();
@@ -230,9 +268,14 @@ export class KPPipeline {
 
   // ─── 介入判断 ───────────────────────────────────────────────────────────────
 
-  private decideIntervention(
+  private async decideIntervention(
     input: KPInput,
-  ): { shouldIntervene: boolean; reason: string } {
+  ): Promise<{ shouldIntervene: boolean; reason: string }> {
+    // 强制 KP 介入（.kp 命令）
+    if (input.kind === 'force_kp') {
+      return { shouldIntervene: true, reason: 'force_kp' };
+    }
+
     // 骰子结果 → 必须接话
     if (input.kind === 'dice_result') {
       return { shouldIntervene: true, reason: 'dice_result' };
@@ -256,24 +299,10 @@ export class KPPipeline {
       return { shouldIntervene: true, reason: 'direct_kp_query' };
     }
 
-    // 有等待骰子 且 当前消息看起来是投骰后行动（只是保险，实际骰子结果走 dice_result）
+    // 有等待骰子 且 当前消息看起来是投骰后行动
     if (this.state.pendingRolls.length > 0 &&
         /^[\d]+$/.test(text.replace(/\s/g, ''))) {
       return { shouldIntervene: true, reason: 'pending_roll_response' };
-    }
-
-    // 包含明确行动动词 → 可能需要检定
-    const actionKeywords = [
-      '我想', '我要', '我试', '我尝试', '我去', '我检查', '我搜', '我查',
-      '我攻击', '我射击', '我躲', '我跑', '我撬', '我问', '我说', '我对',
-    ];
-    if (actionKeywords.some((kw) => text.includes(kw))) {
-      return { shouldIntervene: true, reason: 'player_action' };
-    }
-
-    // 玩家在对 NPC 说话（用引号/书名号包裹对话，或直接说"对XXX说"）
-    if (/对.{1,10}说/.test(text) || /"[^"]{1,50}"/.test(text) || /「[^」]{1,50}」/.test(text)) {
-      return { shouldIntervene: true, reason: 'npc_dialogue' };
     }
 
     // 超过沉默阈值 → 插入氛围描写
@@ -281,11 +310,68 @@ export class KPPipeline {
       return { shouldIntervene: true, reason: 'atmosphere_nudge' };
     }
 
-    // 纯玩家互 RP → 沉默观察
-    return { shouldIntervene: false, reason: 'player_rp_watching' };
+    // ── AI 意图分类（替代关键词匹配）──
+    try {
+      const result = await this.classifyIntent(text);
+      console.log(`[KPPipeline] AI 意图分类: text="${text.slice(0, 30)}" → ${result.intent} (${result.shouldIntervene ? '介入' : '观望'})`);
+      return { shouldIntervene: result.shouldIntervene, reason: result.intent };
+    } catch (err) {
+      console.error('[KPPipeline] AI 意图分类失败，降级为介入:', err);
+      // 分类失败 → 保守策略：介入（宁可多回复也别漏）
+      return { shouldIntervene: true, reason: 'classify_fallback' };
+    }
+  }
+
+  // ─── AI 意图分类（快速模型）────────────────────────────────────────────────
+
+  private async classifyIntent(text: string): Promise<{ shouldIntervene: boolean; intent: string }> {
+    const prompt = `你是一个 TRPG（跑团）游戏中的意图分类器。判断玩家在群聊中发送的这条消息是否需要 KP（守秘人）回应。
+
+需要 KP 回应的情况：
+- 玩家执行动作（打开门、检查房间、走过去、拿起物品等）
+- 玩家对 NPC 说话或提问
+- 玩家描述自己角色的行为
+- 玩家询问环境/场景信息
+- 任何推进剧情的言行
+
+不需要 KP 回应的情况：
+- 玩家之间的闲聊（跟剧情无关）
+- 纯表情/emoji
+- 玩家之间讨论策略但没有实际行动
+- 与游戏无关的杂谈
+
+只回答一个 JSON：{"act":true} 或 {"act":false}
+不要输出任何其他内容。`;
+
+    const t0 = Date.now();
+    const response = await this.client.chat(
+      'qwen3.5-flash',
+      [
+        { role: 'system', content: prompt },
+        { role: 'user', content: text },
+      ],
+    );
+    console.log(`[KPPipeline] 意图分类耗时: ${Date.now() - t0}ms`);
+
+    // 解析 AI 回复
+    const cleaned = response
+      .replace(/^<think>[\s\S]*?<\/think>\s*/m, '')
+      .trim();
+    const match = cleaned.match(/\{\s*"act"\s*:\s*(true|false)\s*\}/);
+    if (match) {
+      const shouldAct = match[1] === 'true';
+      return { shouldIntervene: shouldAct, intent: shouldAct ? 'ai_action' : 'ai_watching' };
+    }
+
+    // 无法解析 → 保守介入
+    console.warn(`[KPPipeline] 意图分类返回无法解析: "${cleaned}"`);
+    return { shouldIntervene: true, intent: 'ai_parse_fallback' };
   }
 
   // ─── 草稿生成 ───────────────────────────────────────────────────────────────
+
+  /** 错误标记：两次重试均失败 */
+  static readonly DRAFT_ERROR = '__DRAFT_ERROR__';
 
   private async generateDraft(
     systemPrompt: string,
@@ -301,21 +387,35 @@ export class KPPipeline {
       });
     }
 
-    return new Promise<string>((resolve, reject) => {
-      let buffer = '';
-      this.client.streamChat(
-        KP_MODEL,
-        [{ role: 'system', content: systemPrompt }, ...finalMessages],
-        {
-          onToken: (token) => { buffer += token; },
-          onDone: () => resolve(buffer.trim()),
-          onError: (err) => {
-            console.error('[KPPipeline] 草稿生成失败:', err);
-            resolve(''); // 失败静默，不让整个流水线崩
+    const attempt = (): Promise<string> =>
+      new Promise<string>((resolve) => {
+        let buffer = '';
+        this.client.streamChat(
+          KP_MODEL,
+          [{ role: 'system', content: systemPrompt }, ...finalMessages],
+          {
+            onToken: (token) => { buffer += token; },
+            onDone: () => resolve(buffer.trim()),
+            onError: (err) => {
+              console.error('[KPPipeline] 草稿生成失败:', err);
+              resolve('');
+            },
           },
-        },
-      );
-    });
+        );
+      });
+
+    // 第一次尝试
+    const first = await attempt();
+    if (first) return first;
+
+    // 自动重试一次
+    console.log('[KPPipeline] 草稿生成失败，自动重试...');
+    const second = await attempt();
+    if (second) return second;
+
+    // 两次都失败 → 返回错误标记
+    console.error('[KPPipeline] 草稿生成两次均失败');
+    return KPPipeline.DRAFT_ERROR;
   }
 
   // ─── 守密人过滤 ─────────────────────────────────────────────────────────────
@@ -424,6 +524,74 @@ export class KPPipeline {
 
     return result;
   }
+
+  // ─── 检定请求增强：自动附带 PC 技能/属性值 ─────────────────────────────────
+
+  private enhanceCheckRequests(text: string, characters: Character[]): string {
+    if (characters.length === 0) return text;
+
+    const ATTR_MAP: Record<string, string> = {
+      '力量': 'str', '体质': 'con', '体型': 'siz', '敏捷': 'dex',
+      '外貌': 'app', '智力': 'int', '意志': 'pow', '教育': 'edu',
+    };
+
+    // 收集所有需要查值的技能/属性名
+    const skillNames = new Set<string>();
+
+    // 匹配：需要【xxx】检定
+    for (const m of text.matchAll(/需要【(.+?)】检定/g)) {
+      skillNames.add(m[1]);
+    }
+    // 匹配：.ra xxx
+    for (const m of text.matchAll(/\.ra\s+(?:困难|极难)?\s*(\S+)/g)) {
+      skillNames.add(m[1]);
+    }
+    // 匹配：.sc（SAN 检定）
+    if (/\.sc\s+/.test(text)) {
+      skillNames.add('理智');
+    }
+
+    if (skillNames.size === 0) return text;
+
+    // 为每个技能构建 PC 值列表
+    const appendLines: string[] = [];
+    for (const skillName of skillNames) {
+      const values: string[] = [];
+      for (const c of characters) {
+        const v = this.findCharValue(c, skillName);
+        if (v !== null) {
+          values.push(`${c.name} ${v}`);
+        }
+      }
+      if (values.length > 0) {
+        appendLines.push(`📊 ${skillName}：${values.join(' | ')}`);
+      }
+    }
+
+    if (appendLines.length === 0) return text;
+    return text + '\n\n' + appendLines.join('\n');
+  }
+
+  private findCharValue(char: Character, skillName: string): number | null {
+    // 属性匹配
+    const ATTR_MAP: Record<string, string> = {
+      '力量': 'str', '体质': 'con', '体型': 'siz', '敏捷': 'dex',
+      '外貌': 'app', '智力': 'int', '意志': 'pow', '教育': 'edu',
+      '理智': '_san',
+    };
+    const attrKey = ATTR_MAP[skillName];
+    if (attrKey === '_san') return char.derived?.san ?? null;
+    if (attrKey && char.attributes?.[attrKey] !== undefined) return char.attributes[attrKey];
+
+    // 精确匹配 skills
+    if (char.skills?.[skillName] !== undefined) return char.skills[skillName];
+
+    // 模糊匹配 skills（如"侦查" vs "spot_hidden"对应的中文名可能不同）
+    for (const [k, v] of Object.entries(char.skills ?? {})) {
+      if (k.includes(skillName) || skillName.includes(k)) return v;
+    }
+    return null;
+  }
 }
 
 // ─── 模块级工具函数 ───────────────────────────────────────────────────────────
@@ -439,4 +607,24 @@ function extractShowImageMarkers(text: string): { cleanText: string; imageIds: s
     return '';
   }).trim();
   return { cleanText, imageIds };
+}
+
+/** 时间标记类型 */
+interface TimeMarker {
+  type: 'advance' | 'set';
+  value: string; // 分钟数（advance）或 ISO 时间（set）
+}
+
+/** 从 AI 回复中提取 [TIME_ADVANCE:Xm] 和 [SET_TIME:...] 标记 */
+function extractTimeMarkers(text: string): { cleanText: string; timeMarkers: TimeMarker[] } {
+  const markers: TimeMarker[] = [];
+  let clean = text.replace(/\[TIME_ADVANCE:(\d+)m\]/g, (_, mins: string) => {
+    markers.push({ type: 'advance', value: mins });
+    return '';
+  });
+  clean = clean.replace(/\[SET_TIME:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})\]/g, (_, time: string) => {
+    markers.push({ type: 'set', value: time });
+    return '';
+  });
+  return { cleanText: clean.trim(), timeMarkers: markers };
 }

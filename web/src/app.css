@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+/* ─── 自定义主题（映射现有暗色设计系统）─── */
+@theme {
+  --color-bg: #0f1117;
+  --color-surface: #1a1d27;
+  --color-surface-hover: #222639;
+  --color-border: #2d3148;
+  --color-accent: #7c6af7;
+  --color-accent-dim: #4a3fa8;
+  --color-accent-light: #9b8cff;
+  --color-text: #e2e4f0;
+  --color-text-dim: #8b8fa8;
+  --color-danger: #e05252;
+  --color-success: #52c47a;
+  --color-warn: #d4a93c;
+  --font-family-sans: 'Segoe UI', system-ui, sans-serif;
+  --font-family-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+
+/* ─── 全局基础样式 ─── */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    @apply bg-bg text-text font-sans min-h-screen antialiased;
+  }
+
+  #root {
+    @apply flex flex-col min-h-screen;
+  }
+
+  /* 统一滚动条 */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-dim);
+  }
+
+  /* 统一 focus 样式 */
+  input:focus, select:focus, textarea:focus, button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  }
+
+  /* 统一输入框基础样式 */
+  input, select, textarea {
+    @apply bg-bg border border-border rounded-md px-3 py-2 text-text text-sm transition-colors duration-200;
+  }
+  input:focus, select:focus, textarea:focus {
+    @apply border-accent;
+  }
+  input::placeholder, textarea::placeholder {
+    @apply text-text-dim/50;
+  }
+}

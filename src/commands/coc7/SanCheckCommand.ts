@@ -27,7 +27,7 @@ export class SanCheckCommand implements CommandHandler {
 
   async handle(ctx: CommandContext, cmd: ParsedCommand): Promise<CommandResult> {
     if (cmd.args.length === 0) {
-      return { text: '格式：.sc 成功损失/失败损失 [当前SAN值]' };
+      return { text: '格式：.sc 成功损失/失败损失 [当前SAN值]', error: true };
     }
 
     const lossArg = cmd.args[0];
@@ -53,7 +53,7 @@ export class SanCheckCommand implements CommandHandler {
     }
 
     if (currentSan === undefined) {
-      return { text: '请指定当前 SAN 值，或先用 .st 录入角色卡。用法：.sc 1/1d6 70' };
+      return { text: '请指定当前 SAN 值，或先用 .st 录入角色卡。用法：.sc 1/1d6 70', error: true };
     }
 
     const result = this.sanityResolver.sanCheck({

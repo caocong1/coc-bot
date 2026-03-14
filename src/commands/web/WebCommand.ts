@@ -25,12 +25,15 @@ export class WebCommand {
     const sub = (cmd.args[0] ?? '').toLowerCase();
 
     if (sub === 'login') {
+      if (ctx.messageType === 'group') {
+        return {
+          text: '🔑 请私聊我发送 .web login 获取登录链接（群内不回复，避免 token 泄露）。',
+        };
+      }
       const token = this.tokenStore.generate(ctx.userId);
       const url = `${WEB_BASE_URL}/player?token=${token}`;
       return {
         text: `🔑 你的专属登录链接（24小时有效）：\n${url}\n\n请勿分享给他人，链接包含你的个人凭证。`,
-        private: true,
-        publicHint: ctx.messageType === 'group' ? '🔑 登录链接已私发给你。' : undefined,
       };
     }
 

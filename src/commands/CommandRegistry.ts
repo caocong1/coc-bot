@@ -25,6 +25,8 @@ export interface CommandResult {
   private?: boolean;
   /** 群内附带的公开提示（暗骰时） */
   publicHint?: string;
+  /** 命令执行失败（格式错误等），不应触发 AI 介入 */
+  error?: boolean;
 }
 
 /**

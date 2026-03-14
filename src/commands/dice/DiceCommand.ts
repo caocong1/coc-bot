@@ -2,17 +2,18 @@
  * 掷骰命令：.r
  *
  * 支持格式：
- *  .r              默认 1d100
+ *  .r              默认骰（用户 .set 设置，默认 1d100）
  *  .r 3d6+2        表达式
  *  .r 3#1d6        多轮
  *  .rb2            奖励骰
  *  .rp             惩罚骰
- *  .rh             暗骰
+ *  .rh             暗骰（结果私聊）
  *  .r 3d6k2        取最高
  */
 
 import type { CommandHandler, CommandContext, CommandResult } from '../CommandRegistry';
 import type { ParsedCommand } from '../CommandParser';
+import type { UserSettingsStore } from '../../storage/UserSettingsStore';
 import { roll, rollBonus, rollPenalty, rollMultiple } from '../../rules/dice/DiceEngine';
 
 export class DiceCommand implements CommandHandler {
@@ -20,11 +21,15 @@ export class DiceCommand implements CommandHandler {
   aliases = ['roll', 'dice', 'rb', 'rp', 'rh'];
   description = '掷骰：.r 1d100 / .r 3d6+2 / .r 3#1d6 / .rb2 / .rp / .rh';
 
+  constructor(private readonly settings?: UserSettingsStore) {}
+
   async handle(ctx: CommandContext, cmd: ParsedCommand): Promise<CommandResult> {
     const isHidden = cmd.name === 'rh';
-    const expression = cmd.rawArgs || '1d100';
+    const defaultFaces = this.settings?.getDefaultDice(ctx.userId) ?? 100;
+    const defaultExpr = `1d${defaultFaces}`;
+
     const reason = this.extractReason(cmd.args);
-    const diceExpr = this.extractDiceExpr(cmd.args) || '1d100';
+    const diceExpr = this.extractDiceExpr(cmd.args) || defaultExpr;
 
     let text: string;
 
@@ -62,7 +67,6 @@ export class DiceCommand implements CommandHandler {
   }
 
   private extractDiceExpr(args: string[]): string {
-    // 第一个看起来像骰子表达式的参数
     for (const arg of args) {
       if (/[\dd+\-*/kKbBpP]/.test(arg)) return arg;
     }
@@ -70,7 +74,6 @@ export class DiceCommand implements CommandHandler {
   }
 
   private extractReason(args: string[]): string {
-    // 找出第一个纯中文/日文参数作为原因
     const reasons = args.filter(a => /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]/.test(a));
     return reasons.join(' ');
   }

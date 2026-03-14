@@ -1,13 +1,16 @@
 import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import solidPlugin from 'vite-plugin-solid';
 
 export default defineConfig({
-  plugins: [solidPlugin()],
+  plugins: [tailwindcss(), solidPlugin()],
   server: {
-    port: 5173,
+    host: true,
+    port: 28766,
     proxy: {
       '/api': 'http://localhost:28765',
     },
+    allowedHosts: ['home.love2c.cc'],
   },
   build: {
     outDir: '../dist/web',

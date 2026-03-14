@@ -1,10 +1,11 @@
 /**
  * KP 模板注册表
- * 
+ *
  * 管理内置和自定义的 KP 人格模板
  */
 
 import type { KPTemplateParams } from '@shared/contracts/AIContracts';
+import type { Database as BunDB } from 'bun:sqlite';
 
 /**
  * KP 模板
@@ -14,142 +15,175 @@ export interface KPTemplate extends KPTemplateParams {
   builtin: boolean;
 }
 
+/** 旧 ID → 新 ID 映射 */
+const LEGACY_MAPPING: Record<string, string> = {
+  'serious': 'classic',
+  'old-school': 'hardboiled',
+  'strict': 'hardboiled',
+  'humorous': 'classic',
+  'creative': 'storyteller',
+  'freeform': 'storyteller',
+  'babysitter': 'nurturing',
+  'killer': 'hardboiled',
+};
+
 /**
  * KP 模板注册表
  */
 export class KPTemplateRegistry {
-  private templates: Map<string, KPTemplate> = new Map();
-  
-  constructor() {
+  private builtinTemplates: Map<string, KPTemplate> = new Map();
+  private db?: BunDB;
+
+  constructor(db?: BunDB) {
+    this.db = db;
     this.registerBuiltinTemplates();
   }
-  
+
   /**
    * 注册内置模板
    */
   private registerBuiltinTemplates(): void {
-    // 认真型
-    this.register({
-      id: 'serious',
-      name: '认真',
-      description: '严谨认真，注重规则和逻辑',
-      builtin: true,
-      humorLevel: 2,
-      rulesStrictness: 9,
-      narrativeFlexibility: 5,
-      clueGenerosity: 6,
-      improvisationLevel: 4,
-      toneKeywords: ['严谨', '认真', '逻辑'],
-      forbiddenBehaviors: ['过度幽默', '随意改规则'],
-      defaultPromptBlock: '你是一位严谨认真的守秘人，注重规则的准确性和逻辑的严密性。',
-    });
-    
-    // 古板型
-    this.register({
-      id: 'old-school',
-      name: '古板',
-      description: '传统守旧，规则至上',
-      builtin: true,
-      humorLevel: 1,
-      rulesStrictness: 10,
-      narrativeFlexibility: 3,
-      clueGenerosity: 4,
-      improvisationLevel: 2,
-      toneKeywords: ['传统', '守旧', '规则至上'],
-      forbiddenBehaviors: ['随意改规则', '过度即兴'],
-      defaultPromptBlock: '你是一位传统守旧的守秘人，严格遵守规则书，不轻易妥协。',
-    });
-    
-    // 搞怪型
-    this.register({
-      id: 'humorous',
-      name: '搞怪',
-      description: '幽默风趣，轻松愉快',
-      builtin: true,
-      humorLevel: 8,
-      rulesStrictness: 5,
-      narrativeFlexibility: 7,
-      clueGenerosity: 7,
-      improvisationLevel: 8,
-      toneKeywords: ['幽默', '风趣', '轻松'],
-      forbiddenBehaviors: ['过度严肃', '死板'],
-      defaultPromptBlock: '你是一位幽默风趣的守秘人，善于营造轻松愉快的氛围，但不会破坏恐怖感。',
-    });
-    
-    // 创意型
-    this.register({
-      id: 'creative',
-      name: '创意',
-      description: '富有创意，善于即兴发挥',
-      builtin: true,
-      humorLevel: 6,
-      rulesStrictness: 6,
-      narrativeFlexibility: 9,
-      clueGenerosity: 8,
-      improvisationLevel: 9,
-      toneKeywords: ['创意', '即兴', '灵活'],
-      forbiddenBehaviors: ['死板', '缺乏想象力'],
-      defaultPromptBlock: '你是一位富有创意的守秘人，善于即兴发挥和灵活应对玩家的行动。',
-    });
-    
-    // 自由型
-    this.register({
-      id: 'freeform',
-      name: '自由',
-      description: '自由灵活，注重叙事',
-      builtin: true,
-      humorLevel: 5,
-      rulesStrictness: 4,
-      narrativeFlexibility: 10,
-      clueGenerosity: 8,
-      improvisationLevel: 9,
-      toneKeywords: ['自由', '灵活', '叙事'],
-      forbiddenBehaviors: ['过度拘泥规则', '限制玩家'],
-      defaultPromptBlock: '你是一位自由灵活的守秘人，注重叙事和玩家体验，规则服务于故事。',
-    });
-    
-    // 严格型
-    this.register({
-      id: 'strict',
-      name: '严格',
-      description: '严格执行规则，不轻易妥协',
-      builtin: true,
-      humorLevel: 2,
-      rulesStrictness: 10,
-      narrativeFlexibility: 4,
-      clueGenerosity: 5,
-      improvisationLevel: 3,
-      toneKeywords: ['严格', '规则', '公正'],
-      forbiddenBehaviors: ['随意改规则', '偏袒玩家'],
-      defaultPromptBlock: '你是一位严格的守秘人，严格执行规则，保持公正，不轻易妥协。',
-    });
+    const templates: KPTemplate[] = [
+      {
+        id: 'classic',
+        name: '经典',
+        description: '均衡的守秘人风格，适合大多数模组',
+        builtin: true,
+        tone: 6,
+        flexibility: 5,
+        guidance: 5,
+        lethality: 5,
+        pacing: 5,
+        defaultPromptBlock: '你是一位经验丰富的守秘人，在规则与叙事之间保持平衡，营造恰到好处的悬疑氛围。',
+      },
+      {
+        id: 'nurturing',
+        name: '新手友好',
+        description: '耐心引导，低危险，适合新手玩家',
+        builtin: true,
+        tone: 4,
+        flexibility: 7,
+        guidance: 9,
+        lethality: 2,
+        pacing: 4,
+        defaultPromptBlock: '你是一位温和耐心的守秘人，善于引导新手玩家，主动给出方向性提示，确保每个人都能享受游戏。',
+      },
+      {
+        id: 'hardboiled',
+        name: '硬核',
+        description: '严格规则，高致命，不给提示',
+        builtin: true,
+        tone: 8,
+        flexibility: 3,
+        guidance: 3,
+        lethality: 8,
+        pacing: 6,
+        defaultPromptBlock: '你是一位冷酷严格的守秘人，严格执行规则，陷阱致命，怪物凶残。愚蠢的行动将付出惨痛代价。',
+      },
+      {
+        id: 'storyteller',
+        name: '演绎',
+        description: '沉浸角色扮演，好 RP 有奖励',
+        builtin: true,
+        tone: 5,
+        flexibility: 9,
+        guidance: 6,
+        lethality: 4,
+        pacing: 4,
+        defaultPromptBlock: '你是一位注重角色扮演的守秘人，鼓励玩家深入演绎角色。精彩的 RP 可以获得额外信息或降低检定难度，NPC 对话生动有性格。',
+      },
+      {
+        id: 'cosmic',
+        name: '宇宙恐怖',
+        description: '极致克苏鲁恐怖氛围，慢热压迫',
+        builtin: true,
+        tone: 10,
+        flexibility: 5,
+        guidance: 4,
+        lethality: 7,
+        pacing: 3,
+        defaultPromptBlock: '你是一位专注宇宙恐怖的守秘人，擅长营造洛夫克拉夫特式的未知恐惧。通过感官细节、环境异常、心理压迫渲染恐怖，让玩家感受到人类在宇宙面前的渺小与无力。',
+      },
+    ];
+
+    for (const t of templates) {
+      this.builtinTemplates.set(t.id, t);
+    }
   }
-  
+
   /**
-   * 注册模板
-   */
-  register(template: KPTemplate): void {
-    this.templates.set(template.id, template);
-  }
-  
-  /**
-   * 获取模板
+   * 获取模板（内置 → 数据库 → legacy 映射）
    */
   get(id: string): KPTemplate | undefined {
-    return this.templates.get(id);
+    // 1. 内置
+    const builtin = this.builtinTemplates.get(id);
+    if (builtin) return builtin;
+
+    // 2. 数据库自定义
+    if (this.db) {
+      const row = this.db.query<{
+        id: string; name: string; description: string;
+        tone: number; flexibility: number; guidance: number;
+        lethality: number; pacing: number; custom_prompts: string;
+      }, string>(
+        'SELECT id, name, description, tone, flexibility, guidance, lethality, pacing, custom_prompts FROM kp_templates WHERE id = ?',
+      ).get(id);
+      if (row) return this.rowToTemplate(row);
+    }
+
+    // 3. Legacy 映射
+    const mapped = LEGACY_MAPPING[id];
+    if (mapped) return this.builtinTemplates.get(mapped);
+
+    return undefined;
   }
-  
+
   /**
-   * 获取所有模板
+   * 获取所有模板（内置 + 数据库自定义）
    */
   getAll(): KPTemplate[] {
-    return Array.from(this.templates.values());
+    const result = Array.from(this.builtinTemplates.values());
+
+    if (this.db) {
+      const rows = this.db.query<{
+        id: string; name: string; description: string;
+        tone: number; flexibility: number; guidance: number;
+        lethality: number; pacing: number; custom_prompts: string;
+      }, []>(
+        'SELECT id, name, description, tone, flexibility, guidance, lethality, pacing, custom_prompts FROM kp_templates ORDER BY created_at',
+      ).all();
+      for (const row of rows) {
+        result.push(this.rowToTemplate(row));
+      }
+    }
+
+    return result;
   }
-  
+
   /**
    * 获取内置模板
    */
   getBuiltin(): KPTemplate[] {
-    return Array.from(this.templates.values()).filter(t => t.builtin);
+    return Array.from(this.builtinTemplates.values());
+  }
+
+  private rowToTemplate(row: {
+    id: string; name: string; description: string;
+    tone: number; flexibility: number; guidance: number;
+    lethality: number; pacing: number; custom_prompts: string;
+  }): KPTemplate {
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      builtin: false,
+      tone: row.tone,
+      flexibility: row.flexibility,
+      guidance: row.guidance,
+      lethality: row.lethality,
+      pacing: row.pacing,
+      defaultPromptBlock: '',
+      customPrompts: row.custom_prompts || undefined,
+    };
   }
 }

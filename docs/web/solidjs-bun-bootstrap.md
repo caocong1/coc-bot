@@ -135,38 +135,55 @@ export function useRealtimeUpdates(campaignId: string) {
 }
 ```
 
-## 页面结构
+## 实际项目结构
 
-### 一级页面
-
-- `/overview` - 总览仪表板
-- `/campaigns` - 团列表
-- `/campaigns/:id` - 团详情
-- `/sessions` - Session 列表
-- `/sessions/:id` - Session 详情
-- `/investigators` - 调查员列表
-- `/investigators/:id` - 调查员详情
-- `/knowledge` - 知识库
-- `/ai-studio` - AI KP 工作室
-- `/templates` - 模板库
-- `/operations` - 运营管理
-
-### 组件组织
+> 注意：Web 应用位于项目根目录的 `web/` 子目录（不是 `src/web/`），有独立的 `package.json`。
 
 ```
-src/web/app/components/
-├── session/
-│   └── TranscriptViewer.tsx
-├── pc/
-│   └── PCStatePanel.tsx
-├── knowledge/
-│   ├── CluePanel.tsx
-│   └── NPCPanel.tsx
-├── ai/
-│   ├── KPTemplateSwitcher.tsx
-│   └── PromptLayerEditor.tsx
-└── live/
-    └── RuntimeOverridePanel.tsx
+web/
+├── src/
+│   ├── pages/
+│   │   ├── player/           # 玩家端
+│   │   │   ├── Player.tsx          # 布局 + 侧边栏导航
+│   │   │   ├── Player.module.css
+│   │   │   ├── Characters.tsx      # PC 列表
+│   │   │   ├── CharacterForm.tsx   # 两步车卡向导
+│   │   │   ├── Scenarios.tsx       # 可用模组列表
+│   │   │   ├── Rooms.tsx           # 跑团房间列表 + 创建
+│   │   │   └── RoomDetail.tsx      # 房间详情（成员/PC/约束）
+│   │   └── admin/            # 管理端
+│   │       ├── Admin.tsx           # 布局 + 侧边栏
+│   │       ├── Admin.module.css
+│   │       ├── Sessions.tsx        # 会话监控 + 实时消息流
+│   │       ├── ScenarioManager.tsx # 模组管理（CRUD + 文件 + 图片）
+│   │       ├── KnowledgeManager.tsx# 知识库上传
+│   │       ├── RoomManager.tsx     # 房间管理（管理员视角）
+│   │       └── KpTemplates.tsx     # KP 模板列表
+│   ├── api.ts                # 统一 API 客户端（playerApi / adminApi）
+│   └── index.tsx             # 应用入口 + 路由
+├── public/
+│   └── index.html
+├── package.json
+└── vite.config.ts
+```
+
+### 路由结构
+
+```
+/                           → 重定向到 /player
+/player                     → 玩家端（侧边栏布局）
+  /player/characters        → PC 列表
+  /player/characters/new    → 新建 PC（两步向导）
+  /player/characters/:id    → 编辑 PC
+  /player/scenarios         → 可用模组
+  /player/rooms             → 跑团房间列表
+  /player/rooms?id=:id      → 房间详情
+/admin                      → 管理端（侧边栏布局）
+  /admin/sessions           → 会话监控
+  /admin/scenarios          → 模组管理
+  /admin/knowledge          → 知识库
+  /admin/rooms              → 房间管理
+  /admin/kp-templates       → KP 模板
 ```
 
 ## 状态管理

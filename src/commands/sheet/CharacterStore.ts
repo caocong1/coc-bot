@@ -5,7 +5,7 @@
  * 第一版使用内存存储，后续迁移到 SQLite。
  */
 
-import type { Character, CharacterAttributes, CharacterDerived } from '../../shared/types/Character';
+import type { Character, CharacterAttributes, CharacterDerived, CharacterAssets, InventoryItem, CharacterWeapon, CharacterArmor, CharacterVehicle, Spell, Companion, Experience, MythosEncounter } from '../../shared/types/Character';
 import { type Database } from 'bun:sqlite';
 import { migrateCoreSchema, openDatabase } from '../../storage/Database';
 
@@ -38,6 +38,18 @@ interface CharacterPayload {
   attributes: CharacterAttributes;
   derived: CharacterDerived;
   skills: Record<string, number>;
+  backstory?: Record<string, string>;
+  assets?: CharacterAssets;
+  inventory?: InventoryItem[];
+  weapons?: CharacterWeapon[];
+  armor?: CharacterArmor;
+  vehicle?: CharacterVehicle;
+  spells?: Spell[];
+  companions?: Companion[];
+  experiences?: Experience[];
+  phobiasAndManias?: string[];
+  woundsAndScars?: string;
+  mythosEncounters?: MythosEncounter[];
 }
 
 interface CharacterRow {
@@ -143,6 +155,31 @@ export class CharacterStore {
           result.push(char);
         }
       }
+    }
+    return result;
+  }
+
+  /**
+   * 返回房间成员绑定的角色卡。
+   * 优先取 campaign_room_members.character_id，否则取玩家的激活角色卡。
+   */
+  getRoomCharacters(roomId: string): Character[] {
+    if (!this.db) return [];
+    const rows = this.db.query<{ qq_id: number; character_id: string | null }, string>(
+      'SELECT qq_id, character_id FROM campaign_room_members WHERE room_id = ?',
+    ).all(roomId);
+
+    const result: Character[] = [];
+    for (const row of rows) {
+      let char: Character | undefined;
+      if (row.character_id) {
+        char = this.characters.get(row.character_id);
+      }
+      if (!char) {
+        // fallback: 玩家的全局激活角色卡
+        char = this.getActiveCharacter(row.qq_id);
+      }
+      if (char) result.push(char);
     }
     return result;
   }
@@ -333,6 +370,19 @@ export class CharacterStore {
           skills: payload.skills,
           createdAt: new Date(row.created_at),
           updatedAt: new Date(row.updated_at),
+          // 扩展字段
+          backstory: payload.backstory,
+          assets: payload.assets,
+          inventory: payload.inventory,
+          weapons: payload.weapons,
+          armor: payload.armor,
+          vehicle: payload.vehicle,
+          spells: payload.spells,
+          companions: payload.companions,
+          experiences: payload.experiences,
+          phobiasAndManias: payload.phobiasAndManias,
+          woundsAndScars: payload.woundsAndScars,
+          mythosEncounters: payload.mythosEncounters,
         };
         this.characters.set(character.id, character);
       } catch (err) {

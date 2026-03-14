@@ -21,7 +21,8 @@
   "dependencies": {
     "@types/bun": "latest",
     "mammoth": "^1.11.0",
-    "pdfjs-dist": "^5.5.207"
+    "pdfjs-dist": "^5.5.207",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

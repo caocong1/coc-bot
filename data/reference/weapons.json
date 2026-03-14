@@ -1,0 +1,1511 @@
+[
+  {
+    "name": "弓箭",
+    "skill": "弓",
+    "damage": "1D6+半DB",
+    "range": "30码",
+    "impale": false,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "97",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "7/75",
+    "type": "常规武器"
+  },
+  {
+    "name": "黄铜指虎",
+    "skill": "斗殴",
+    "damage": "1D3+1+DB",
+    "range": "接触",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "1/10"
+  },
+  {
+    "name": "长鞭",
+    "skill": "鞭子",
+    "damage": "1D3+半DB",
+    "range": "10步",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s"
+    ],
+    "price": "5/50"
+  },
+  {
+    "name": "燃烧的火把",
+    "skill": "斗殴",
+    "damage": "1D6+燃烧",
+    "range": "接触",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "0.05/0.5"
+  },
+  {
+    "name": "电锯",
+    "skill": "电锯",
+    "damage": "2D8",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "95",
+    "era": [
+      "现代"
+    ],
+    "price": "——/300"
+  },
+  {
+    "name": "包皮铁棍(甩棍、护身短棒)",
+    "skill": "斗殴",
+    "damage": "1D8+DB",
+    "range": "接触",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "2/15"
+  },
+  {
+    "name": "大型棍状物(棒球棍、板球棒、拨火棍等)",
+    "skill": "斗殴",
+    "damage": "1D8+DB",
+    "range": "接触",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "3/35"
+  },
+  {
+    "name": "小型棍状物(警棍等)",
+    "skill": "斗殴",
+    "damage": "1D6+DB",
+    "range": "接触",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "3/35"
+  },
+  {
+    "name": "弩",
+    "skill": "弓",
+    "damage": "1D8+2",
+    "range": "50码",
+    "impale": true,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "96",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "10/100"
+  },
+  {
+    "name": "绞具",
+    "skill": "绞具",
+    "damage": "1D6+DB",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "0.5/3"
+  },
+  {
+    "name": "手斧/镰刀",
+    "skill": "斧",
+    "damage": "1D6+1+DB",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "3/9"
+  },
+  {
+    "name": "大型刀具(大砍刀等)",
+    "skill": "斗殴",
+    "damage": "1D8+DB",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "4/50"
+  },
+  {
+    "name": "中型刀具(切肉菜刀等)",
+    "skill": "斗殴",
+    "damage": "1D4+2+DB",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "2/15"
+  },
+  {
+    "name": "小型刀具(弹簧折叠刀等)",
+    "skill": "斗殴",
+    "damage": "1D4+DB",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "2/6"
+  },
+  {
+    "name": "220v通电导线",
+    "skill": "斗殴",
+    "damage": "2D8+眩晕",
+    "range": "接触",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "95",
+    "era": [
+      "现代"
+    ],
+    "price": "——"
+  },
+  {
+    "name": "催泪瓦斯",
+    "skill": "斗殴",
+    "damage": "眩晕",
+    "range": "6步",
+    "impale": false,
+    "rof": 1,
+    "ammo": "25次",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "——/10"
+  },
+  {
+    "name": "双节棍",
+    "skill": "链枷",
+    "damage": "1D8+DB",
+    "range": "接触",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "1/10"
+  },
+  {
+    "name": "投石",
+    "skill": "投掷",
+    "damage": "1D4+半DB",
+    "range": "STR/5步",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "——"
+  },
+  {
+    "name": "手里剑",
+    "skill": "投掷",
+    "damage": "1D3+半DB",
+    "range": "20码",
+    "impale": true,
+    "rof": 2,
+    "ammo": "一次性",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "0.5/3"
+  },
+  {
+    "name": "矛、骑士长枪",
+    "skill": "矛",
+    "damage": "1D8+1",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "25/150"
+  },
+  {
+    "name": "掷矛",
+    "skill": "投掷",
+    "damage": "1D8+半DB",
+    "range": "STR/5码",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "罕见"
+    ],
+    "price": "1/25"
+  },
+  {
+    "name": "大型剑(马刀)",
+    "skill": "剑",
+    "damage": "1D8+1+DB",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "30/75"
+  },
+  {
+    "name": "中型剑(佩剑等)",
+    "skill": "剑",
+    "damage": "1D6+1+DB",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "15/100"
+  },
+  {
+    "name": "轻剑(击剑、剑杖等)",
+    "skill": "剑",
+    "damage": "1D6+DB",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "25/100"
+  },
+  {
+    "name": "电棍、电击枪(接触)",
+    "skill": "斗殴",
+    "damage": "1D3+眩晕",
+    "range": "接触",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "97",
+    "era": [
+      "现代"
+    ],
+    "price": "——/200"
+  },
+  {
+    "name": "电击枪(远程)",
+    "skill": "手枪",
+    "damage": "1D3+眩晕",
+    "range": "15步",
+    "impale": false,
+    "rof": 1,
+    "ammo": "3",
+    "malfunction": "95",
+    "era": [
+      "现代"
+    ],
+    "price": "——/400"
+  },
+  {
+    "name": "利刃回旋镖",
+    "skill": "投掷",
+    "damage": "1D8+半DB",
+    "range": "20码",
+    "impale": false,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "罕见"
+    ],
+    "price": "2/4"
+  },
+  {
+    "name": "伐木斧",
+    "skill": "斧",
+    "damage": "1D8+2+DB",
+    "range": "接触",
+    "impale": true,
+    "rof": 1,
+    "ammo": "——",
+    "malfunction": "——",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "5/10"
+  },
+  {
+    "name": "遂发枪",
+    "skill": "手枪",
+    "damage": "1D6+1",
+    "range": "10",
+    "impale": true,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "95",
+    "era": [
+      "罕见"
+    ],
+    "price": "30/300",
+    "type": "手枪"
+  },
+  {
+    "name": ".22 短口自动手枪",
+    "skill": "手枪",
+    "damage": "1D6",
+    "range": "10",
+    "impale": true,
+    "rof": 1,
+    "ammo": "6",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "25/190"
+  },
+  {
+    "name": ".25 短口手枪 (单管)",
+    "skill": "手枪",
+    "damage": "1D6",
+    "range": "3",
+    "impale": true,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "100",
+    "era": [
+      "1920s"
+    ],
+    "price": "12/55"
+  },
+  {
+    "name": ".32 or 7.65mm 左轮手枪",
+    "skill": "手枪",
+    "damage": "1D8",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "6",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "15/200"
+  },
+  {
+    "name": ".32 or 7.65mm 自动手枪",
+    "skill": "手枪",
+    "damage": "1D8",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "8",
+    "malfunction": "99",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "20/350"
+  },
+  {
+    "name": ".357 Magnum 左轮手枪",
+    "skill": "手枪",
+    "damage": "1D8+1D4",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "6",
+    "malfunction": "100",
+    "era": [
+      "现代"
+    ],
+    "price": "——/425"
+  },
+  {
+    "name": ".38 or 9mm 左轮手枪",
+    "skill": "手枪",
+    "damage": "1D10",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "6",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "25/200"
+  },
+  {
+    "name": ".38 自动手枪",
+    "skill": "手枪",
+    "damage": "1D10",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "8",
+    "malfunction": "99",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "30/375"
+  },
+  {
+    "name": "贝雷塔M9",
+    "skill": "手枪",
+    "damage": "1D10",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "15",
+    "malfunction": "98",
+    "era": [
+      "现代"
+    ],
+    "price": "——/500"
+  },
+  {
+    "name": "格洛克17 9mm 自动手枪",
+    "skill": "手枪",
+    "damage": "1D10",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "17",
+    "malfunction": "98",
+    "era": [
+      "现代"
+    ],
+    "price": "——/500"
+  },
+  {
+    "name": "鲁格P08",
+    "skill": "手枪",
+    "damage": "1D10",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "8",
+    "malfunction": "99",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "75/600"
+  },
+  {
+    "name": ".41 左轮手枪",
+    "skill": "手枪",
+    "damage": "1D10",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "8",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "罕见"
+    ],
+    "price": "30/——"
+  },
+  {
+    "name": ".44 马格南左轮手枪",
+    "skill": "手枪",
+    "damage": "1D10+1D4+2",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "6",
+    "malfunction": "100",
+    "era": [
+      "现代"
+    ],
+    "price": "475"
+  },
+  {
+    "name": ".45 左轮手枪",
+    "skill": "手枪",
+    "damage": "1D10+2",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "6",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "30/300"
+  },
+  {
+    "name": ".45 自动手枪",
+    "skill": "手枪",
+    "damage": "1D10+2",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "7",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "40/375"
+  },
+  {
+    "name": "沙漠之鹰",
+    "skill": "手枪",
+    "damage": "1D10+1D6+3",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "7",
+    "malfunction": "94",
+    "era": [
+      "现代"
+    ],
+    "price": "650"
+  },
+  {
+    "name": ".58 斯普林菲尔德步枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "1D10+4",
+    "range": "60",
+    "impale": true,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "95",
+    "era": [
+      "罕见"
+    ],
+    "price": "25/350",
+    "type": "步枪"
+  },
+  {
+    "name": ".22 杠杆式枪机步枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "1D6+1",
+    "range": "30",
+    "impale": true,
+    "rof": 1,
+    "ammo": "6",
+    "malfunction": "99",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "13/70"
+  },
+  {
+    "name": ".30 卡宾枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6",
+    "range": "50",
+    "impale": true,
+    "rof": 1,
+    "ammo": "6",
+    "malfunction": "98",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "19/150"
+  },
+  {
+    "name": ".45 马提尼·亨利步枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "1D8+1D6+3",
+    "range": "80",
+    "impale": true,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "100",
+    "era": [
+      "1920s"
+    ],
+    "price": "20/200"
+  },
+  {
+    "name": "莫兰上校的气动步枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+1",
+    "range": "20",
+    "impale": true,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "88",
+    "era": [
+      "1920s"
+    ],
+    "price": "200"
+  },
+  {
+    "name": "加兰德M1、M2步枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+4",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "8",
+    "malfunction": "100",
+    "era": [
+      "二战及以后"
+    ],
+    "price": "400"
+  },
+  {
+    "name": "SKS半自动步枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+1",
+    "range": "90",
+    "impale": true,
+    "rof": 1,
+    "ammo": "10",
+    "malfunction": "97",
+    "era": [
+      "现代"
+    ],
+    "price": "500"
+  },
+  {
+    "name": ".303 (7.7mm) 李恩菲尔德",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+4",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "5",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "50/300"
+  },
+  {
+    "name": ".30——06 (7.62mm) 栓式枪机步枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+4",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "5",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "75/175"
+  },
+  {
+    "name": ".30——06 (7.62mm) 半自动步枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+4",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "5",
+    "malfunction": "100",
+    "era": [
+      "现代"
+    ],
+    "price": "275"
+  },
+  {
+    "name": ".444 (11.28mm) 马林步枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D8+4",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "5",
+    "malfunction": "98",
+    "era": [
+      "现代"
+    ],
+    "price": "400"
+  },
+  {
+    "name": "猎象枪(双管)",
+    "skill": "步枪/霰弹枪",
+    "damage": "3D6+4",
+    "range": "100",
+    "impale": true,
+    "rof": 1,
+    "ammo": "2",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "400/1000"
+  },
+  {
+    "name": "20号霰弹枪(双管)",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6/1D6/1D3",
+    "range": "10/20/50",
+    "impale": false,
+    "rof": 1,
+    "ammo": "2",
+    "malfunction": "100",
+    "era": [
+      "1920s"
+    ],
+    "price": "35/稀有",
+    "type": "霰弹枪"
+  },
+  {
+    "name": "16号霰弹枪(双管)",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+2/1D6+1/1D4",
+    "range": "10/20/50",
+    "impale": false,
+    "rof": 1,
+    "ammo": "2",
+    "malfunction": "100",
+    "era": [
+      "1920s"
+    ],
+    "price": "40/稀有"
+  },
+  {
+    "name": "12号霰弹枪(双管)",
+    "skill": "步枪/霰弹枪",
+    "damage": "4D6/2D6/1D6",
+    "range": "10/20/50",
+    "impale": false,
+    "rof": 1,
+    "ammo": "2",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "40/200"
+  },
+  {
+    "name": "12号泵动霰弹枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "4D6/2D6/1D6",
+    "range": "10/20/50",
+    "impale": false,
+    "rof": 1,
+    "ammo": "5",
+    "malfunction": "100",
+    "era": [
+      "现代"
+    ],
+    "price": "45/100"
+  },
+  {
+    "name": "12号半自动霰弹枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "4D6/2D6/1D6",
+    "range": "10/20/50",
+    "impale": false,
+    "rof": 1,
+    "ammo": "5",
+    "malfunction": "100",
+    "era": [
+      "现代"
+    ],
+    "price": "45/100"
+  },
+  {
+    "name": "削短12号双管霰弹枪",
+    "skill": "步枪/霰弹枪",
+    "damage": "4D6/1D6",
+    "range": "5/10",
+    "impale": false,
+    "rof": 1,
+    "ammo": "2",
+    "malfunction": "100",
+    "era": [
+      "1920s"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "10号霰弹枪(双管)",
+    "skill": "步枪/霰弹枪",
+    "damage": "4D6+2/2D6+1/1D4",
+    "range": "10/20/50",
+    "impale": false,
+    "rof": 1,
+    "ammo": "2",
+    "malfunction": "100",
+    "era": [
+      "1920s，罕见"
+    ],
+    "price": "稀有"
+  },
+  {
+    "name": "12号贝里尼M3 (折叠式枪托)",
+    "skill": "步枪/霰弹枪",
+    "damage": "4D6/2D6/1D6",
+    "range": "10/20/50",
+    "impale": false,
+    "rof": 1,
+    "ammo": "7",
+    "malfunction": "100",
+    "era": [
+      "现代"
+    ],
+    "price": "——/895"
+  },
+  {
+    "name": "12号SPAS (折叠式枪托)",
+    "skill": "步枪/霰弹枪",
+    "damage": "4D6/2D6/1D6",
+    "range": "10/20/50",
+    "impale": false,
+    "rof": 1,
+    "ammo": "8",
+    "malfunction": "98",
+    "era": [
+      "现代"
+    ],
+    "price": "——/600"
+  },
+  {
+    "name": "AK——47 or AKM",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+1",
+    "range": "100",
+    "impale": true,
+    "rof": 1,
+    "ammo": "30",
+    "malfunction": "100",
+    "era": [
+      "现代"
+    ],
+    "price": "——/200",
+    "type": "突击步枪"
+  },
+  {
+    "name": "AK——74",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+1",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "30",
+    "malfunction": "97",
+    "era": [
+      "现代"
+    ],
+    "price": "——/1000"
+  },
+  {
+    "name": "巴雷特M82",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D10+1D8+6",
+    "range": "250",
+    "impale": true,
+    "rof": 1,
+    "ammo": "11",
+    "malfunction": "96",
+    "era": [
+      "现代"
+    ],
+    "price": "——/3000"
+  },
+  {
+    "name": "FN FAL Light Automatic",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6+4",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "20",
+    "malfunction": "97",
+    "era": [
+      "现代"
+    ],
+    "price": "——/1500"
+  },
+  {
+    "name": "Galil Assault Rifle",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "20",
+    "malfunction": "98",
+    "era": [
+      "现代"
+    ],
+    "price": "——/2000"
+  },
+  {
+    "name": "M16A2",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "30",
+    "malfunction": "97",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "M4",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6",
+    "range": "90",
+    "impale": true,
+    "rof": 1,
+    "ammo": "30",
+    "malfunction": "97",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "Steyr AUG",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "30",
+    "malfunction": "99",
+    "era": [
+      "现代"
+    ],
+    "price": "——/1100"
+  },
+  {
+    "name": "巴雷特M70/90",
+    "skill": "步枪/霰弹枪",
+    "damage": "2D6",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "30",
+    "malfunction": "99",
+    "era": [
+      "现代"
+    ],
+    "price": "——/2800"
+  },
+  {
+    "name": "贝格曼MP181/ MP2811",
+    "skill": "冲锋枪",
+    "damage": "1D10",
+    "range": "20",
+    "impale": true,
+    "rof": 1,
+    "ammo": "20/30/32",
+    "malfunction": "96",
+    "era": [
+      "1920s"
+    ],
+    "price": "1000/20000",
+    "type": "冲锋枪"
+  },
+  {
+    "name": "黑克勒——科赫MP5",
+    "skill": "冲锋枪",
+    "damage": "1D10",
+    "range": "20",
+    "impale": true,
+    "rof": 1,
+    "ammo": "15/30",
+    "malfunction": "97",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "MAC——11",
+    "skill": "冲锋枪",
+    "damage": "1D10",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "32",
+    "malfunction": "96",
+    "era": [
+      "现代"
+    ],
+    "price": "——/750"
+  },
+  {
+    "name": "蝎式冲锋枪",
+    "skill": "冲锋枪",
+    "damage": "1D8",
+    "range": "15",
+    "impale": true,
+    "rof": 1,
+    "ammo": "20",
+    "malfunction": "96",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "汤普森冲锋枪",
+    "skill": "冲锋枪",
+    "damage": "1D10+2",
+    "range": "20",
+    "impale": true,
+    "rof": 1,
+    "ammo": "20/30/50",
+    "malfunction": "96",
+    "era": [
+      "1920s"
+    ],
+    "price": "200+/1600"
+  },
+  {
+    "name": "乌兹微型冲锋枪",
+    "skill": "冲锋枪",
+    "damage": "1D10",
+    "range": "20",
+    "impale": true,
+    "rof": 1,
+    "ammo": "32",
+    "malfunction": "98",
+    "era": [
+      "现代"
+    ],
+    "price": "——/1000"
+  },
+  {
+    "name": "M1882加特林机枪",
+    "skill": "机枪",
+    "damage": "2D6+4",
+    "range": "100",
+    "impale": true,
+    "rof": 1,
+    "ammo": "200",
+    "malfunction": "96",
+    "era": [
+      "1920s，罕见"
+    ],
+    "price": "2000/14000",
+    "type": "机枪"
+  },
+  {
+    "name": "M1918式勃朗宁自动步枪",
+    "skill": "机枪",
+    "damage": "2D6+4",
+    "range": "90",
+    "impale": true,
+    "rof": 1,
+    "ammo": "20",
+    "malfunction": "100",
+    "era": [
+      "1920s"
+    ],
+    "price": "800/1500"
+  },
+  {
+    "name": "M1917A1式勃朗宁重机枪",
+    "skill": "机枪",
+    "damage": "2D6+4",
+    "range": "150",
+    "impale": true,
+    "rof": 1,
+    "ammo": "250",
+    "malfunction": "96",
+    "era": [
+      "1920s"
+    ],
+    "price": "3000/30000"
+  },
+  {
+    "name": "布伦式轻机枪",
+    "skill": "机枪",
+    "damage": "2D6+4",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "30/100",
+    "malfunction": "96",
+    "era": [
+      "1920s"
+    ],
+    "price": "3000/50000"
+  },
+  {
+    "name": "刘易斯式轻机枪",
+    "skill": "机枪",
+    "damage": "2D6+4",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "27/97",
+    "malfunction": "96",
+    "era": [
+      "1920s"
+    ],
+    "price": "3000/20000"
+  },
+  {
+    "name": "Minigun",
+    "skill": "机枪",
+    "damage": "2D6+4",
+    "range": "200",
+    "impale": true,
+    "rof": 1,
+    "ammo": "4000",
+    "malfunction": "98",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "FNMinimi5.56mm轻机枪",
+    "skill": "机枪",
+    "damage": "2D6",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "30/200",
+    "malfunction": "99",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "维克斯MK1式机枪",
+    "skill": "机枪",
+    "damage": "2D6+4",
+    "range": "110",
+    "impale": true,
+    "rof": 1,
+    "ammo": "250",
+    "malfunction": "99",
+    "era": [
+      "1920s"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "燃烧瓶",
+    "skill": "投掷",
+    "damage": "2D6+燃烧",
+    "range": "STR/5码",
+    "impale": true,
+    "rof": 1,
+    "ammo": "一次性",
+    "malfunction": "95",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "N/A",
+    "type": "特殊武器"
+  },
+  {
+    "name": "信号枪",
+    "skill": "手枪",
+    "damage": "1D10+1D3+燃烧",
+    "range": "10",
+    "impale": true,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "15/75"
+  },
+  {
+    "name": "M79 40mm 榴弹发射器",
+    "skill": "重武器",
+    "damage": "3D10/2码",
+    "range": "20",
+    "impale": true,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "99",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "炸药棒",
+    "skill": "投掷",
+    "damage": "4D10/3码",
+    "range": "STR/5步",
+    "impale": true,
+    "rof": 1,
+    "ammo": "一次性",
+    "malfunction": "99",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "2/5"
+  },
+  {
+    "name": "雷管",
+    "skill": "电气维修",
+    "damage": "2D10/1码",
+    "range": "N/A",
+    "impale": true,
+    "rof": 1,
+    "ammo": "一次性",
+    "malfunction": "100",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "20/整盒"
+  },
+  {
+    "name": "管状炸弹",
+    "skill": "爆破",
+    "damage": "1D10/3码",
+    "range": "布置",
+    "impale": true,
+    "rof": 1,
+    "ammo": "一次性",
+    "malfunction": "95",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "塑胶炸弹(C4) 100克",
+    "skill": "爆破",
+    "damage": "6D10/3码",
+    "range": "布置",
+    "impale": true,
+    "rof": 1,
+    "ammo": "一次性",
+    "malfunction": "99",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "手榴弹",
+    "skill": "投掷",
+    "damage": "4D10/3码",
+    "range": "STR/5步",
+    "impale": true,
+    "rof": 1,
+    "ammo": "一次性",
+    "malfunction": "99",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "81mm迫击炮",
+    "skill": "炮术",
+    "damage": "6D10/6码",
+    "range": "500码",
+    "impale": true,
+    "rof": 2,
+    "ammo": "独立装弹",
+    "malfunction": "100",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "75mm野战炮",
+    "skill": "炮术",
+    "damage": "10D10/2码",
+    "range": "500码",
+    "impale": true,
+    "rof": 1,
+    "ammo": "独立装弹",
+    "malfunction": "99",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "1500/——"
+  },
+  {
+    "name": "120mm坦克炮(稳定)",
+    "skill": "炮术",
+    "damage": "10D10/2码",
+    "range": "2000码",
+    "impale": true,
+    "rof": 1,
+    "ammo": "独立装弹",
+    "malfunction": "100",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "5英寸舰载炮(稳定)",
+    "skill": "炮术",
+    "damage": "15D10/4码",
+    "range": "3000码",
+    "impale": true,
+    "rof": 1,
+    "ammo": "自动上弹",
+    "malfunction": "98",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "反步兵地雷",
+    "skill": "爆破",
+    "damage": "4D10/5码",
+    "range": "布置",
+    "impale": true,
+    "rof": 1,
+    "ammo": "一次性",
+    "malfunction": "99",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "阔剑地雷",
+    "skill": "爆破",
+    "damage": "6D6/20码",
+    "range": "布置",
+    "impale": true,
+    "rof": 1,
+    "ammo": "一次性",
+    "malfunction": "99",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "火焰喷射器",
+    "skill": "喷射器",
+    "damage": "2D6+燃烧",
+    "range": "25码",
+    "impale": true,
+    "rof": 1,
+    "ammo": "至少10",
+    "malfunction": "93",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "轻型反坦克武器",
+    "skill": "重武器",
+    "damage": "8d10/1码",
+    "range": "150码",
+    "impale": true,
+    "rof": 1,
+    "ammo": "1",
+    "malfunction": "98",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  }
+]

@@ -9,6 +9,7 @@
  * POST /sessions/:groupId/resume        — 继续
  * POST /sessions/:groupId/stop          — 停止
  * PUT  /sessions/:groupId/segment       — 手动切换当前分段
+ * GET  /sessions/:groupId/segments      — 列出该 session 的所有分段（含全文）
  * GET  /sessions/:groupId/clues         — 线索列表
  * POST /sessions/:groupId/clues/:id/discover — 标记线索已发现
  * POST /sessions/:groupId/inject        — 向会话注入信息
@@ -25,6 +26,7 @@ import type { CampaignHandler } from '../runtime/CampaignHandler';
 import { ImageLibrary } from '../knowledge/images/ImageLibrary';
 import type { DashScopeClient } from '../ai/client/DashScopeClient';
 import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
+import { addMinutesToTime } from '../runtime/SessionState';
 
 type KnowledgeCategory = 'rules' | 'scenario' | 'keeper_secret';
 
@@ -77,6 +79,7 @@ export class AdminRoutes {
       if (method === 'POST' && action === 'resume') return this.resumeSession(groupId);
       if (method === 'POST' && action === 'stop') return this.stopSession(groupId);
       if (method === 'PUT' && action === 'segment') return this.setSegment(groupId, req);
+      if (method === 'GET' && action === 'segments') return this.listSegments(groupId);
       if (method === 'GET' && action === 'clues') return this.listClues(groupId);
       if (method === 'POST' && action === 'clues' && segments[3] && segments[4] === 'discover') {
         return this.discoverClue(groupId, segments[3]);
@@ -85,6 +88,11 @@ export class AdminRoutes {
       if (method === 'GET' && action === 'messages' && segments[3] === 'stream') {
         return this.messagesStream(groupId);
       }
+      if (method === 'GET' && action === 'messages' && !segments[3]) {
+        return this.listSessionMessages(groupId);
+      }
+      if (method === 'GET' && action === 'timeline') return this.getTimeline(groupId);
+      if (method === 'POST' && action === 'time') return this.adjustTime(groupId, req);
     }
 
     // /knowledge
@@ -92,6 +100,7 @@ export class AdminRoutes {
       if (method === 'GET' && !segments[1]) return this.listKnowledge();
       if (method === 'GET' && segments[1] === 'jobs') return this.listKnowledgeJobs();
       if (method === 'POST' && segments[1] === 'upload') return this.uploadKnowledge(req);
+      if (method === 'DELETE' && segments[1] === 'entry') return this.deleteKnowledgeEntry(req);
       // 图片管理：/knowledge/:fileId/images[/:imgId[/send]]
       if (segments[1] && segments[2] === 'images') {
         const fileId = segments[1];
@@ -112,13 +121,38 @@ export class AdminRoutes {
       return this.sendImage(segments[1], req);
     }
 
-    // /kp-templates
-    if (resource === 'kp-templates' && method === 'GET') return this.listKpTemplates();
+    // /kp-templates — CRUD
+    if (resource === 'kp-templates') {
+      if (method === 'GET' && !segments[1]) return this.listKpTemplates();
+      if (method === 'POST' && !segments[1]) return this.createKpTemplate(req);
+      if (method === 'PUT' && segments[1]) return this.updateKpTemplate(segments[1], req);
+      if (method === 'DELETE' && segments[1]) return this.deleteKpTemplate(segments[1]);
+    }
 
-    // /rooms — 管理员可查看/删除任何房间
+    // /rooms — 管理员可查看/删除/确认/取消审卡任何房间
     if (resource === 'rooms') {
       if (method === 'GET' && !segments[1]) return this.listAllRooms();
-      if (method === 'DELETE' && segments[1]) return this.adminDeleteRoom(segments[1]);
+      if (method === 'GET' && segments[1] && !segments[2]) return this.getAdminRoomDetail(segments[1]);
+      if (method === 'DELETE' && segments[1] && !segments[2]) return this.adminDeleteRoom(segments[1]);
+      if (method === 'POST' && segments[1] && segments[2] === 'confirm') return this.adminConfirmRoom(segments[1]);
+      if (method === 'POST' && segments[1] && segments[2] === 'cancel-review') return this.adminCancelReview(segments[1]);
+      if (method === 'PATCH' && segments[1] && segments[2] === 'kp-settings') return this.updateRoomKpSettings(segments[1], req);
+    }
+
+    // /modules — 模组管理
+    if (resource === 'modules') {
+      if (method === 'GET' && !segments[1]) return this.listModules();
+      if (method === 'POST' && !segments[1]) return this.createModule(req);
+      if (method === 'GET' && segments[1] && !segments[2]) return this.getModule(segments[1]);
+      if (method === 'PUT' && segments[1] && !segments[2]) return this.updateModule(segments[1], req);
+      if (method === 'DELETE' && segments[1] && !segments[2]) return this.deleteModule(segments[1]);
+      // /modules/:id/files
+      if (method === 'POST' && segments[1] && segments[2] === 'files') return this.uploadModuleFile(segments[1], req);
+      if (method === 'DELETE' && segments[1] && segments[2] === 'files' && segments[3]) return this.deleteModuleFile(segments[1], segments[3]);
+      // /modules/:id/images/generate
+      if (method === 'POST' && segments[1] && segments[2] === 'images' && segments[3] === 'generate') return this.generateModuleImage(segments[1], req);
+      // /modules/:id/images/:fileId — 读取图片文件
+      if (method === 'GET' && segments[1] && segments[2] === 'images' && segments[3]) return this.serveModuleImage(segments[1], segments[3]);
     }
 
     return Response.json({ error: 'Not Found' }, { status: 404 });
@@ -194,6 +228,33 @@ export class AdminRoutes {
     if (!this.campaignHandler) return Response.json({ error: 'AI 客户端未配置' }, { status: 503 });
     const msg = this.campaignHandler.stopSession(groupId);
     return Response.json({ message: msg });
+  }
+
+  private listSegments(groupId: number): Response {
+    const session = this.db.query<{ id: string; current_segment_id: string | null }, number>(
+      "SELECT id, current_segment_id FROM kp_sessions WHERE group_id = ? AND status IN ('running', 'paused') ORDER BY updated_at DESC LIMIT 1",
+    ).get(groupId);
+    if (!session) return Response.json({ error: '无进行中的跑团' }, { status: 404 });
+
+    const segments = this.db.query<{
+      id: string; seq: number; title: string; summary: string; full_text: string;
+      char_count: number; created_at: string;
+    }, string>(
+      'SELECT id, seq, title, summary, full_text, char_count, created_at FROM kp_scene_segments WHERE session_id = ? ORDER BY seq',
+    ).all(session.id);
+
+    return Response.json({
+      currentSegmentId: session.current_segment_id ?? null,
+      segments: segments.map((s) => ({
+        id: s.id,
+        seq: s.seq,
+        title: s.title,
+        summary: s.summary,
+        fullText: s.full_text,
+        charCount: s.char_count,
+        createdAt: s.created_at,
+      })),
+    });
   }
 
   private async setSegment(groupId: number, req: Request): Promise<Response> {
@@ -397,22 +458,241 @@ export class AdminRoutes {
     }
   }
 
+  private async deleteKnowledgeEntry(req: Request): Promise<Response> {
+    try {
+      const body = await req.json().catch(() => ({})) as { name?: string };
+      if (!body.name) return Response.json({ error: 'name required' }, { status: 400 });
+
+      const fs = require('fs');
+      const manifestPath = './data/knowledge/manifest.json';
+      if (!fs.existsSync(manifestPath)) return Response.json({ error: 'manifest not found' }, { status: 404 });
+
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
+        files: Array<{
+          sourceRelativePath: string;
+          textPath?: string;
+          chunkPath?: string;
+        }>;
+      };
+
+      const entry = manifest.files.find((f) => f.sourceRelativePath === body.name);
+      if (!entry) return Response.json({ error: '条目不存在' }, { status: 404 });
+
+      // 删除关联文件
+      for (const fpath of [entry.textPath, entry.chunkPath]) {
+        if (fpath && fs.existsSync(fpath)) {
+          try { fs.unlinkSync(fpath); } catch { /* 忽略 */ }
+        }
+      }
+
+      // 从 manifest 移除
+      manifest.files = manifest.files.filter((f) => f.sourceRelativePath !== body.name);
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+
+      return Response.json({ ok: true });
+    } catch (e) {
+      return Response.json({ error: String(e) }, { status: 500 });
+    }
+  }
+
+  // ─── Session Messages (非流式) ──────────────────────────────────────────────
+
+  private listSessionMessages(groupId: number): Response {
+    // 先找 running/paused session，没有则找最近的任何 session
+    let session = this.db.query<{ id: string }, number>(
+      "SELECT id FROM kp_sessions WHERE group_id = ? AND status IN ('running', 'paused') ORDER BY updated_at DESC LIMIT 1",
+    ).get(groupId);
+    if (!session) {
+      session = this.db.query<{ id: string }, number>(
+        'SELECT id FROM kp_sessions WHERE group_id = ? ORDER BY updated_at DESC LIMIT 1',
+      ).get(groupId);
+    }
+    if (!session) return Response.json([]);
+
+    const messages = this.db.query<{
+      id: string; role: string; display_name: string | null; content: string; timestamp: string;
+    }, string>(
+      'SELECT id, role, display_name, content, timestamp FROM kp_messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 200',
+    ).all(session.id).reverse();
+
+    return Response.json(messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      displayName: m.display_name,
+      content: m.content,
+      timestamp: m.timestamp,
+    })));
+  }
+
+  // ─── Timeline ─────────────────────────────────────────────────────────────
+
+  private getTimeline(groupId: number): Response {
+    const session = this.findActiveOrRecentSession(groupId);
+    if (!session) return Response.json({ ingameTime: null, events: [] });
+
+    const row = this.db.query<{ ingame_time: string | null }, string>(
+      'SELECT ingame_time FROM kp_sessions WHERE id = ?',
+    ).get(session.id);
+
+    const events = this.db.query<{
+      id: string; ingame_time: string; delta_minutes: number | null;
+      description: string; trigger: string; message_id: string | null; created_at: string;
+    }, string>(
+      'SELECT id, ingame_time, delta_minutes, description, trigger, message_id, created_at FROM kp_timeline_events WHERE session_id = ? ORDER BY created_at DESC LIMIT 50',
+    ).all(session.id);
+
+    return Response.json({
+      sessionId: session.id,
+      ingameTime: row?.ingame_time ?? null,
+      events: events.map((e) => ({
+        id: e.id,
+        ingameTime: e.ingame_time,
+        deltaMinutes: e.delta_minutes,
+        description: e.description,
+        trigger: e.trigger,
+        messageId: e.message_id,
+        createdAt: e.created_at,
+      })),
+    });
+  }
+
+  private async adjustTime(groupId: number, req: Request): Promise<Response> {
+    const session = this.findActiveOrRecentSession(groupId);
+    if (!session) return Response.json({ error: '没有活跃的跑团 session' }, { status: 404 });
+
+    let body: { type: 'set' | 'advance'; value?: string; minutes?: number };
+    try {
+      body = await req.json() as typeof body;
+    } catch {
+      return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
+
+    const now = new Date().toISOString();
+    const id = `tl-${crypto.randomUUID().slice(0, 8)}`;
+
+    if (body.type === 'set' && body.value) {
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(body.value)) {
+        return Response.json({ error: '时间格式应为 YYYY-MM-DDTHH:MM' }, { status: 400 });
+      }
+      this.db.run('UPDATE kp_sessions SET ingame_time = ?, updated_at = ? WHERE id = ?', [body.value, now, session.id]);
+      this.db.run(
+        'INSERT INTO kp_timeline_events (id, session_id, ingame_time, delta_minutes, description, trigger, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?)',
+        [id, session.id, body.value, `管理员设定时间为 ${body.value}`, 'admin', now],
+      );
+      return Response.json({ ok: true, ingameTime: body.value });
+    }
+
+    if (body.type === 'advance' && body.minutes && body.minutes > 0) {
+      const current = this.db.query<{ ingame_time: string | null }, string>(
+        'SELECT ingame_time FROM kp_sessions WHERE id = ?',
+      ).get(session.id);
+      if (!current?.ingame_time) {
+        return Response.json({ error: '尚未设定游戏时间，请先使用 set 设定' }, { status: 400 });
+      }
+      // 简单的时间推进
+      const newTime = addMinutesToTime(current.ingame_time, body.minutes);
+      this.db.run('UPDATE kp_sessions SET ingame_time = ?, updated_at = ? WHERE id = ?', [newTime, now, session.id]);
+      this.db.run(
+        'INSERT INTO kp_timeline_events (id, session_id, ingame_time, delta_minutes, description, trigger, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [id, session.id, newTime, body.minutes, `管理员推进 ${body.minutes} 分钟`, 'admin', now],
+      );
+      return Response.json({ ok: true, ingameTime: newTime });
+    }
+
+    return Response.json({ error: '请提供 type: "set" + value 或 type: "advance" + minutes' }, { status: 400 });
+  }
+
+  private findActiveOrRecentSession(groupId: number): { id: string } | null {
+    return this.db.query<{ id: string }, number>(
+      "SELECT id FROM kp_sessions WHERE group_id = ? AND status IN ('running', 'paused') ORDER BY updated_at DESC LIMIT 1",
+    ).get(groupId) ?? null;
+  }
+
   // ─── KP Templates ──────────────────────────────────────────────────────────
 
   private listKpTemplates(): Response {
     const { KPTemplateRegistry } = require('../ai/config/KPTemplateRegistry');
-    const registry = new KPTemplateRegistry();
+    const registry = new KPTemplateRegistry(this.db);
     return Response.json(registry.getAll().map((t: {
-      id: string; name: string; description: string;
-      humorLevel: number; rulesStrictness: number; narrativeFlexibility: number;
+      id: string; name: string; description: string; builtin: boolean;
+      tone: number; flexibility: number; guidance: number;
+      lethality: number; pacing: number; customPrompts?: string;
     }) => ({
       id: t.id,
       name: t.name,
       description: t.description,
-      humorLevel: t.humorLevel,
-      rulesStrictness: t.rulesStrictness,
-      narrativeFlexibility: t.narrativeFlexibility,
+      builtin: t.builtin,
+      tone: t.tone,
+      flexibility: t.flexibility,
+      guidance: t.guidance,
+      lethality: t.lethality,
+      pacing: t.pacing,
+      customPrompts: t.customPrompts ?? '',
     })));
+  }
+
+  private async createKpTemplate(req: Request): Promise<Response> {
+    const body = (await req.json()) as {
+      name: string; description?: string;
+      tone?: number; flexibility?: number; guidance?: number;
+      lethality?: number; pacing?: number; customPrompts?: string;
+    };
+    if (!body.name?.trim()) return Response.json({ error: '模板名称不能为空' }, { status: 400 });
+
+    const id = `custom-${Date.now().toString(36)}`;
+    const now = new Date().toISOString();
+    this.db.run(
+      `INSERT INTO kp_templates (id, name, description, tone, flexibility, guidance, lethality, pacing, custom_prompts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, body.name.trim(), body.description?.trim() ?? '', body.tone ?? 5, body.flexibility ?? 5,
+       body.guidance ?? 5, body.lethality ?? 5, body.pacing ?? 5, body.customPrompts?.trim() ?? '', now, now],
+    );
+    return Response.json({ ok: true, id });
+  }
+
+  private async updateKpTemplate(id: string, req: Request): Promise<Response> {
+    // 不允许修改内置模板
+    const { KPTemplateRegistry } = require('../ai/config/KPTemplateRegistry');
+    const registry = new KPTemplateRegistry();
+    const builtin = registry.getBuiltin().find((t: { id: string }) => t.id === id);
+    if (builtin) return Response.json({ error: '不能修改内置模板' }, { status: 400 });
+
+    const body = (await req.json()) as {
+      name?: string; description?: string;
+      tone?: number; flexibility?: number; guidance?: number;
+      lethality?: number; pacing?: number; customPrompts?: string;
+    };
+
+    const updates: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (body.name !== undefined) { updates.push('name = ?'); params.push(body.name.trim()); }
+    if (body.description !== undefined) { updates.push('description = ?'); params.push(body.description.trim()); }
+    if (body.tone !== undefined) { updates.push('tone = ?'); params.push(body.tone); }
+    if (body.flexibility !== undefined) { updates.push('flexibility = ?'); params.push(body.flexibility); }
+    if (body.guidance !== undefined) { updates.push('guidance = ?'); params.push(body.guidance); }
+    if (body.lethality !== undefined) { updates.push('lethality = ?'); params.push(body.lethality); }
+    if (body.pacing !== undefined) { updates.push('pacing = ?'); params.push(body.pacing); }
+    if (body.customPrompts !== undefined) { updates.push('custom_prompts = ?'); params.push(body.customPrompts.trim()); }
+
+    if (updates.length === 0) return Response.json({ ok: true });
+
+    updates.push('updated_at = ?');
+    params.push(new Date().toISOString());
+    params.push(id);
+
+    this.db.run(`UPDATE kp_templates SET ${updates.join(', ')} WHERE id = ?`, params);
+    return Response.json({ ok: true });
+  }
+
+  private deleteKpTemplate(id: string): Response {
+    const { KPTemplateRegistry } = require('../ai/config/KPTemplateRegistry');
+    const registry = new KPTemplateRegistry();
+    const builtin = registry.getBuiltin().find((t: { id: string }) => t.id === id);
+    if (builtin) return Response.json({ error: '不能删除内置模板' }, { status: 400 });
+
+    this.db.run('DELETE FROM kp_templates WHERE id = ?', [id]);
+    return Response.json({ ok: true });
   }
 
   // ─── 图片管理 ───────────────────────────────────────────────────────────────
@@ -544,9 +824,10 @@ export class AdminRoutes {
   private listAllRooms(): Response {
     const rooms = this.db.query<{
       id: string; name: string; group_id: number; creator_qq_id: number;
-      scenario_name: string | null; status: string; created_at: string;
+      scenario_name: string | null; status: string; kp_session_id: string | null;
+      created_at: string; updated_at: string;
     }, []>(
-      'SELECT id, name, group_id, creator_qq_id, scenario_name, status, created_at FROM campaign_rooms ORDER BY created_at DESC',
+      'SELECT id, name, group_id, creator_qq_id, scenario_name, status, kp_session_id, created_at, updated_at FROM campaign_rooms ORDER BY created_at DESC',
     ).all();
 
     return Response.json(rooms.map((r) => ({
@@ -556,11 +837,168 @@ export class AdminRoutes {
       creatorQqId: r.creator_qq_id,
       scenarioName: r.scenario_name,
       status: r.status,
+      kpSessionId: r.kp_session_id,
       createdAt: r.created_at,
+      updatedAt: r.updated_at,
       memberCount: this.db.query<{ cnt: number }, string>(
         'SELECT COUNT(*) as cnt FROM campaign_room_members WHERE room_id = ?',
       ).get(r.id)?.cnt ?? 0,
     })));
+  }
+
+  private getAdminRoomDetail(roomId: string): Response {
+    const room = this.db.query<{
+      id: string; name: string; group_id: number | null; creator_qq_id: number;
+      scenario_name: string | null; module_id: string | null; constraints_json: string;
+      status: string; kp_session_id: string | null; created_at: string; updated_at: string;
+      kp_template_id: string; kp_custom_prompts: string;
+    }, string>(
+      'SELECT id, name, group_id, creator_qq_id, scenario_name, module_id, constraints_json, status, kp_session_id, created_at, updated_at, kp_template_id, kp_custom_prompts FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+
+    const constraints = JSON.parse(room.constraints_json) as {
+      era?: string; allowedOccupations?: string[]; minStats?: Record<string, number>;
+    };
+
+    // 成员 + 角色卡信息
+    const memberRows = this.db.query<{ qq_id: number; character_id: string | null; ready_at: string | null; joined_at: string }, string>(
+      'SELECT qq_id, character_id, ready_at, joined_at FROM campaign_room_members WHERE room_id = ? ORDER BY joined_at',
+    ).all(roomId);
+
+    const members: Array<{
+      qqId: number; joinedAt: string; isCreator: boolean; readyAt: string | null;
+      character: { id: string; name: string; occupation: string | null; attributes: Record<string, number>; derived: Record<string, number> } | null;
+    }> = [];
+    const warnings: string[] = [];
+
+    for (const m of memberRows) {
+      let charRow: { id: string; name: string; occupation: string | null; payload_json: string } | null = null;
+      if (m.character_id) {
+        charRow = this.db.query<{ id: string; name: string; occupation: string | null; payload_json: string }, string>(
+          'SELECT id, name, occupation, payload_json FROM characters WHERE id = ?',
+        ).get(m.character_id) ?? null;
+      }
+      if (!charRow) {
+        charRow = this.db.query<{ id: string; name: string; occupation: string | null; payload_json: string }, string>(
+          `SELECT c.id, c.name, c.occupation, c.payload_json FROM characters c
+           JOIN active_cards a ON a.character_id = c.id WHERE a.binding_key = ?`,
+        ).get(`player:${m.qq_id}`) ?? null;
+      }
+
+      let character: typeof members[0]['character'] = null;
+      if (charRow) {
+        const payload = JSON.parse(charRow.payload_json) as { attributes?: Record<string, number>; derived?: Record<string, number> };
+        character = {
+          id: charRow.id, name: charRow.name, occupation: charRow.occupation,
+          attributes: payload.attributes ?? {}, derived: payload.derived ?? {},
+        };
+        // 约束检查
+        if (constraints.allowedOccupations?.length && charRow.occupation &&
+            !constraints.allowedOccupations.includes(charRow.occupation)) {
+          warnings.push(`QQ ${m.qq_id} 的职业「${charRow.occupation}」不在模组允许范围内`);
+        }
+        if (constraints.minStats) {
+          for (const [stat, minVal] of Object.entries(constraints.minStats)) {
+            const actual = (payload.attributes ?? {})[stat] ?? 0;
+            if (actual < minVal) warnings.push(`QQ ${m.qq_id} 的 ${stat}(${actual}) 低于最低要求(${minVal})`);
+          }
+        }
+      } else {
+        warnings.push(`QQ ${m.qq_id} 尚未选择角色卡`);
+      }
+
+      members.push({ qqId: m.qq_id, joinedAt: m.joined_at, isCreator: m.qq_id === room.creator_qq_id, readyAt: m.ready_at, character });
+    }
+
+    // Session 信息（如果有）
+    let session: { id: string; groupId: number; status: string; startedAt: string } | null = null;
+    if (room.kp_session_id) {
+      const sess = this.db.query<{ id: string; group_id: number; status: string; started_at: string }, string>(
+        'SELECT id, group_id, status, started_at FROM kp_sessions WHERE id = ?',
+      ).get(room.kp_session_id);
+      if (sess) session = { id: sess.id, groupId: sess.group_id, status: sess.status, startedAt: sess.started_at };
+    }
+
+    return Response.json({
+      id: room.id, name: room.name, groupId: room.group_id, creatorQqId: room.creator_qq_id,
+      scenarioName: room.scenario_name, moduleId: room.module_id, constraints,
+      status: room.status, kpSessionId: room.kp_session_id,
+      kpTemplateId: room.kp_template_id ?? 'classic',
+      kpCustomPrompts: room.kp_custom_prompts ?? '',
+      createdAt: room.created_at, updatedAt: room.updated_at,
+      memberCount: memberRows.length, members, warnings, session,
+    });
+  }
+
+  private adminConfirmRoom(roomId: string): Response {
+    if (!this.campaignHandler) return Response.json({ error: 'AI KP 服务未配置' }, { status: 503 });
+
+    const room = this.db.query<{ status: string; group_id: number | null }, string>(
+      'SELECT status, group_id FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    if (room.status !== 'reviewing') return Response.json({ error: '该房间不在审卡阶段' }, { status: 409 });
+    if (!room.group_id) return Response.json({ error: '该房间尚未绑定 QQ 群' }, { status: 400 });
+
+    const now = new Date().toISOString();
+    this.db.run("UPDATE campaign_rooms SET status = 'running', updated_at = ? WHERE id = ?", [now, roomId]);
+
+    const groupId = room.group_id;
+    this.campaignHandler.startSession(groupId, undefined, roomId).then(async (parts) => {
+      if (this.napcat) {
+        for (const part of parts) {
+          await this.napcat.sendGroupMessage(groupId, part);
+          await new Promise<void>((r) => setTimeout(r, 800));
+        }
+      }
+    }).catch((err) => {
+      console.error('[AdminRoutes] 开团失败:', err);
+      this.db.run("UPDATE campaign_rooms SET status = 'reviewing', updated_at = ? WHERE id = ?", [new Date().toISOString(), roomId]);
+    });
+
+    return Response.json({ ok: true, message: '开团指令已发送' });
+  }
+
+  private adminCancelReview(roomId: string): Response {
+    const room = this.db.query<{ status: string }, string>(
+      'SELECT status FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    if (room.status !== 'reviewing') return Response.json({ error: '该房间不在审卡阶段' }, { status: 409 });
+
+    const now = new Date().toISOString();
+    this.db.run("UPDATE campaign_rooms SET status = 'waiting', updated_at = ? WHERE id = ?", [now, roomId]);
+    this.db.run('UPDATE campaign_room_members SET ready_at = NULL WHERE room_id = ?', [roomId]);
+    return Response.json({ ok: true, message: '已取消审卡' });
+  }
+
+  private async updateRoomKpSettings(roomId: string, req: Request): Promise<Response> {
+    const room = this.db.query<{ status: string }, string>(
+      'SELECT status FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+
+    const body = (await req.json()) as { templateId?: string; customPrompts?: string };
+    const updates: string[] = [];
+    const params: string[] = [];
+
+    if (body.templateId !== undefined) {
+      updates.push('kp_template_id = ?');
+      params.push(body.templateId);
+    }
+    if (body.customPrompts !== undefined) {
+      updates.push('kp_custom_prompts = ?');
+      params.push(body.customPrompts);
+    }
+    if (updates.length === 0) return Response.json({ error: '没有要更新的字段' }, { status: 400 });
+
+    updates.push('updated_at = ?');
+    params.push(new Date().toISOString());
+    params.push(roomId);
+
+    this.db.run(`UPDATE campaign_rooms SET ${updates.join(', ')} WHERE id = ?`, params);
+    return Response.json({ ok: true });
   }
 
   private adminDeleteRoom(roomId: string): Response {
@@ -572,5 +1010,445 @@ export class AdminRoutes {
     this.db.run('DELETE FROM campaign_room_members WHERE room_id = ?', [roomId]);
     this.db.run('DELETE FROM campaign_rooms WHERE id = ?', [roomId]);
     return Response.json({ ok: true });
+  }
+
+  // ─── 模组管理 ───────────────────────────────────────────────────────────────
+
+  private listModules(): Response {
+    const modules = this.db.query<{
+      id: string; name: string; description: string | null; era: string | null;
+      allowed_occupations: string; min_stats: string; created_at: string; updated_at: string;
+    }, []>('SELECT * FROM scenario_modules ORDER BY created_at DESC').all();
+
+    return Response.json(modules.map((m) => {
+      const files = this.db.query<{ id: string; file_type: string; import_status: string }, string>(
+        'SELECT id, file_type, import_status FROM scenario_module_files WHERE module_id = ?',
+      ).all(m.id);
+      return {
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        era: m.era,
+        allowedOccupations: JSON.parse(m.allowed_occupations),
+        minStats: JSON.parse(m.min_stats),
+        fileCount: files.filter((f) => f.file_type === 'document').length,
+        imageCount: files.filter((f) => f.file_type === 'image').length,
+        createdAt: m.created_at,
+        updatedAt: m.updated_at,
+      };
+    }));
+  }
+
+  private async createModule(req: Request): Promise<Response> {
+    const body = await req.json().catch(() => ({})) as {
+      name?: string; description?: string; era?: string;
+      allowedOccupations?: string[]; minStats?: Record<string, number>;
+    };
+    if (!body.name?.trim()) return Response.json({ error: 'name required' }, { status: 400 });
+
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.db.run(
+      'INSERT INTO scenario_modules (id, name, description, era, allowed_occupations, min_stats, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, body.name.trim(), body.description?.trim() ?? null, body.era ?? null,
+        JSON.stringify(body.allowedOccupations ?? []),
+        JSON.stringify(body.minStats ?? {}),
+        now, now],
+    );
+    return Response.json({ id }, { status: 201 });
+  }
+
+  private getModule(moduleId: string): Response {
+    const m = this.db.query<{
+      id: string; name: string; description: string | null; era: string | null;
+      allowed_occupations: string; min_stats: string; created_at: string; updated_at: string;
+    }, string>('SELECT * FROM scenario_modules WHERE id = ?').get(moduleId);
+    if (!m) return Response.json({ error: '模组不存在' }, { status: 404 });
+
+    const files = this.db.query<{
+      id: string; filename: string; original_name: string; file_type: string;
+      label: string | null; description: string | null;
+      char_count: number; chunk_count: number; import_status: string; import_error: string | null;
+      created_at: string;
+    }, string>('SELECT * FROM scenario_module_files WHERE module_id = ? ORDER BY created_at', ).all(moduleId);
+
+    return Response.json({
+      id: m.id,
+      name: m.name,
+      description: m.description,
+      era: m.era,
+      allowedOccupations: JSON.parse(m.allowed_occupations),
+      minStats: JSON.parse(m.min_stats),
+      files: files.map((f) => ({
+        id: f.id,
+        filename: f.filename,
+        originalName: f.original_name,
+        fileType: f.file_type,
+        label: f.label,
+        description: f.description,
+        charCount: f.char_count,
+        chunkCount: f.chunk_count,
+        importStatus: f.import_status,
+        importError: f.import_error,
+        createdAt: f.created_at,
+      })),
+      createdAt: m.created_at,
+      updatedAt: m.updated_at,
+    });
+  }
+
+  private async updateModule(moduleId: string, req: Request): Promise<Response> {
+    const m = this.db.query<{ id: string }, string>('SELECT id FROM scenario_modules WHERE id = ?').get(moduleId);
+    if (!m) return Response.json({ error: '模组不存在' }, { status: 404 });
+
+    const body = await req.json().catch(() => ({})) as {
+      name?: string; description?: string; era?: string;
+      allowedOccupations?: string[]; minStats?: Record<string, number>;
+    };
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE scenario_modules SET name = COALESCE(?, name), description = ?, era = ?, allowed_occupations = ?, min_stats = ?, updated_at = ? WHERE id = ?',
+      [body.name?.trim() ?? null, body.description?.trim() ?? null, body.era ?? null,
+        JSON.stringify(body.allowedOccupations ?? []),
+        JSON.stringify(body.minStats ?? {}),
+        now, moduleId],
+    );
+    return Response.json({ ok: true });
+  }
+
+  private deleteModule(moduleId: string): Response {
+    const m = this.db.query<{ id: string }, string>('SELECT id FROM scenario_modules WHERE id = ?').get(moduleId);
+    if (!m) return Response.json({ error: '模组不存在' }, { status: 404 });
+
+    // 删除物理图片文件
+    const fs = require('fs');
+    const images = this.db.query<{ filename: string }, string>(
+      "SELECT filename FROM scenario_module_files WHERE module_id = ? AND file_type = 'image'",
+    ).all(moduleId);
+    for (const img of images) {
+      try { fs.unlinkSync(img.filename); } catch { /* 忽略 */ }
+    }
+
+    this.db.run('DELETE FROM scenario_module_files WHERE module_id = ?', [moduleId]);
+    this.db.run('DELETE FROM scenario_modules WHERE id = ?', [moduleId]);
+    return Response.json({ ok: true });
+  }
+
+  private async uploadModuleFile(moduleId: string, req: Request): Promise<Response> {
+    const m = this.db.query<{ id: string }, string>('SELECT id FROM scenario_modules WHERE id = ?').get(moduleId);
+    if (!m) return Response.json({ error: '模组不存在' }, { status: 404 });
+
+    try {
+      const formData = await req.formData();
+      const file = formData.get('file') as File | null;
+      if (!file) return Response.json({ error: 'file required' }, { status: 400 });
+
+      const label = (formData.get('label') as string | null)?.trim() ?? null;
+      const description = (formData.get('description') as string | null)?.trim() ?? null;
+
+      const fs = require('fs');
+      const path = require('path');
+      const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+      const fileType = isImage ? 'image' : 'document';
+
+      let destDir: string;
+      if (isImage) {
+        destDir = `./data/knowledge/images/modules/${moduleId}`;
+      } else {
+        destDir = `./data/knowledge/uploads/${moduleId}`;
+      }
+      fs.mkdirSync(destDir, { recursive: true });
+
+      const safeName = path.basename(file.name).replace(/[^a-zA-Z0-9.\-_\u4e00-\u9fa5]/g, '_');
+      const dest = path.join(destDir, safeName);
+      fs.writeFileSync(dest, new Uint8Array(await file.arrayBuffer()));
+
+      const fileId = crypto.randomUUID();
+      const now = new Date().toISOString();
+
+      this.db.run(
+        'INSERT INTO scenario_module_files (id, module_id, filename, original_name, file_type, label, description, import_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [fileId, moduleId, dest, file.name, fileType, label, description, isImage ? 'done' : 'pending', now],
+      );
+
+      // 文档类型触发后台索引
+      if (!isImage) {
+        const job: ImportJob = {
+          id: fileId,
+          filename: safeName,
+          category: 'scenario',
+          status: 'pending',
+          startedAt: now,
+        };
+        this.importJobs.set(fileId, job);
+
+        const proc = Bun.spawn(
+          ['bun', 'run', 'scripts/import-pdfs.ts', `--file=${dest}`, '--category=scenario'],
+          { stdout: 'inherit', stderr: 'inherit' },
+        );
+        proc.exited.then(async (code) => {
+          const status = code === 0 ? 'done' : 'failed';
+          const error = code !== 0 ? `exit code ${code}` : null;
+          this.db.run(
+            'UPDATE scenario_module_files SET import_status = ?, import_error = ? WHERE id = ?',
+            [status, error, fileId],
+          );
+          job.status = status;
+          if (error) job.error = error;
+          job.finishedAt = new Date().toISOString();
+
+          // 导入成功后，AI 自动填充模组元数据
+          if (code === 0) {
+            this.autoFillModuleMetadata(moduleId, dest).catch((err) => {
+              console.error('[AdminRoutes] AI 自动填充模组元数据失败:', err);
+            });
+          }
+        }).catch((e) => {
+          this.db.run(
+            'UPDATE scenario_module_files SET import_status = ?, import_error = ? WHERE id = ?',
+            ['failed', String(e), fileId],
+          );
+        });
+      }
+
+      return Response.json({ ok: true, id: fileId, fileType });
+    } catch (e) {
+      return Response.json({ error: String(e) }, { status: 500 });
+    }
+  }
+
+  /**
+   * 文档导入成功后，用 AI 从提取的文本中自动填充模组元数据。
+   * 只填充当前为空的字段，不覆盖已手动填写的内容。
+   */
+  private async autoFillModuleMetadata(moduleId: string, docPath: string): Promise<void> {
+    console.log(`[AutoFill] === 开始 === moduleId=${moduleId}, docPath=${docPath}`);
+    if (!this.aiClient) { console.log('[AutoFill] 跳过：aiClient 未配置'); return; }
+
+    const mod = this.db.query<{
+      name: string; description: string | null; era: string | null;
+      allowed_occupations: string; min_stats: string;
+    }, string>('SELECT name, description, era, allowed_occupations, min_stats FROM scenario_modules WHERE id = ?').get(moduleId);
+    if (!mod) { console.log('[AutoFill] 跳过：模组不存在'); return; }
+    console.log(`[AutoFill] 当前模组: name="${mod.name}", desc="${mod.description}", era="${mod.era}"`);
+
+    // 从 manifest.json 找到该文档的提取文本路径
+    const { readFileSync, existsSync, readdirSync, statSync } = await import('fs');
+    let text = '';
+
+    // 方案 1: manifest 匹配（对比文件名尾部）
+    const manifestPath = resolve('data/knowledge/manifest.json');
+    const docFileName = docPath.replace(/\\/g, '/').split('/').pop() ?? ''; // 提取纯文件名
+    console.log(`[AutoFill] docFileName="${docFileName}", manifestPath="${manifestPath}", exists=${existsSync(manifestPath)}`);
+
+    if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+          files?: Array<{ sourcePath?: string; sourceRelativePath?: string; textPath?: string }>;
+        };
+        console.log(`[AutoFill] manifest 共 ${manifest.files?.length ?? 0} 条:`);
+        manifest.files?.forEach((f, i) => console.log(`  [${i}] relPath="${f.sourceRelativePath}" textPath="${f.textPath}"`));
+
+        const entry = manifest.files?.find((f) =>
+          f.sourceRelativePath === docFileName ||
+          (f.sourcePath && f.sourcePath.replace(/\\/g, '/').split('/').pop() === docFileName),
+        );
+        if (entry?.textPath) {
+          const textFullPath = resolve(entry.textPath);
+          console.log(`[AutoFill] manifest 匹配成功: textPath="${textFullPath}", exists=${existsSync(textFullPath)}`);
+          if (existsSync(textFullPath)) {
+            text = readFileSync(textFullPath, 'utf-8');
+            console.log(`[AutoFill] 读取成功，${text.length} 字符`);
+          }
+        } else {
+          console.log(`[AutoFill] manifest 未匹配 "${docFileName}"`);
+        }
+      } catch (err) {
+        console.error('[AutoFill] manifest 读取失败:', err);
+      }
+    }
+
+    // 方案 2: 扫描 raw 目录找最新的 .txt
+    if (!text) {
+      const rawDir = resolve('data/knowledge/raw');
+      console.log(`[AutoFill] fallback: 扫描 ${rawDir}, exists=${existsSync(rawDir)}`);
+      if (existsSync(rawDir)) {
+        const txtFiles = readdirSync(rawDir)
+          .filter((f) => f.endsWith('.txt'))
+          .map((f) => ({ name: f, mtime: statSync(resolve(rawDir, f)).mtimeMs }))
+          .sort((a, b) => b.mtime - a.mtime);
+        console.log(`[AutoFill] 找到 ${txtFiles.length} 个 .txt 文件: ${txtFiles.map(f => f.name).join(', ')}`);
+        if (txtFiles.length > 0) {
+          try {
+            text = readFileSync(resolve(rawDir, txtFiles[0].name), 'utf-8');
+            console.log(`[AutoFill] fallback 读取 ${txtFiles[0].name}，${text.length} 字符`);
+          } catch (e) { console.error('[AutoFill] fallback 读取失败:', e); }
+        }
+      }
+    }
+
+    if (!text || text.length < 50) { console.log(`[AutoFill] 跳过：文本太短 (${text.length} 字符)`); return; }
+
+    // 截取前 6000 字符给 AI 分析
+    const excerpt = text.slice(0, 6000);
+    console.log(`[AutoFill] 准备调用 AI，excerpt 前100字: "${excerpt.slice(0, 100)}..."`);
+
+    const prompt = `你是一个 CoC（克苏鲁的呼唤）跑团模组分析专家。阅读以下模组文本的开头部分，提取关键信息。
+
+请以严格 JSON 格式输出（不要输出其他内容）：
+{
+  "name": "模组名称",
+  "description": "3-5句简明剧情简介，供玩家阅读，不要剧透关键情节和结局",
+  "era": "1920s 或 现代 或 其他时代描述",
+  "allowedOccupations": ["适合的职业1", "职业2"],
+  "minStats": {"属性名": 最低值}
+}
+
+规则：
+- name: 提取模组的官方名称
+- description: 玩家可见的简介，营造氛围但不剧透
+- era: 根据内容判断时代背景
+- allowedOccupations: 如果模组有职业限制则列出，否则空数组 []
+- minStats: 如果模组有属性要求则列出（如 {"智力": 60}），否则空对象 {}
+- 不要输出任何思考过程，只输出 JSON`;
+
+    try {
+      console.log('[AutoFill] 调用 AI chat...');
+      const result = await this.aiClient.chat('qwen3.5-flash', [
+        { role: 'system', content: prompt },
+        { role: 'user', content: excerpt },
+      ]);
+      console.log(`[AutoFill] AI 返回 ${result.length} 字符: "${result.slice(0, 200)}..."`);
+
+      // 清理 AI 输出（去掉 think 标签和 markdown 代码块）
+      const cleaned = result
+        .replace(/<think>[\s\S]*?<\/think>/g, '')
+        .replace(/```json\s*/g, '')
+        .replace(/```\s*/g, '')
+        .trim();
+      console.log(`[AutoFill] 清理后: "${cleaned.slice(0, 300)}"`);
+
+      const data = JSON.parse(cleaned) as {
+        name?: string;
+        description?: string;
+        era?: string;
+        allowedOccupations?: string[];
+        minStats?: Record<string, number>;
+      };
+      console.log(`[AutoFill] 解析成功: name="${data.name}", era="${data.era}", desc="${data.description?.slice(0, 50)}..."`);
+
+      // 只更新空字段
+      const updates: string[] = [];
+      const values: (string | null)[] = [];
+
+      const hasOccs = mod.allowed_occupations && JSON.parse(mod.allowed_occupations).length > 0;
+      const hasStats = mod.min_stats && Object.keys(JSON.parse(mod.min_stats)).length > 0;
+
+      // 名称：如果 AI 提取的名称不同于当前临时名称，总是更新
+      if (data.name && data.name !== mod.name) {
+        updates.push('name = ?');
+        values.push(data.name);
+      }
+      if (!mod.description && data.description) {
+        updates.push('description = ?');
+        values.push(data.description);
+      }
+      if (!mod.era && data.era) {
+        updates.push('era = ?');
+        values.push(data.era);
+      }
+      if (!hasOccs && data.allowedOccupations && data.allowedOccupations.length > 0) {
+        updates.push('allowed_occupations = ?');
+        values.push(JSON.stringify(data.allowedOccupations));
+      }
+      if (!hasStats && data.minStats && Object.keys(data.minStats).length > 0) {
+        updates.push('min_stats = ?');
+        values.push(JSON.stringify(data.minStats));
+      }
+
+      console.log(`[AutoFill] 待更新字段: ${updates.length > 0 ? updates.join(', ') : '（无）'}`);
+
+      if (updates.length > 0) {
+        updates.push('updated_at = ?');
+        values.push(new Date().toISOString());
+        values.push(moduleId);
+        this.db.run(
+          `UPDATE scenario_modules SET ${updates.join(', ')} WHERE id = ?`,
+          values,
+        );
+        console.log(`[AutoFill] ✅ 已更新模组 ${moduleId}: ${updates.filter(u => u !== 'updated_at = ?').join(', ')}`);
+      }
+    } catch (err) {
+      console.error('[AutoFill] ❌ AI 解析失败:', err);
+    }
+  }
+
+  private deleteModuleFile(moduleId: string, fileId: string): Response {
+    const f = this.db.query<{ filename: string; file_type: string }, [string, string]>(
+      'SELECT filename, file_type FROM scenario_module_files WHERE id = ? AND module_id = ?',
+    ).get(fileId, moduleId);
+    if (!f) return Response.json({ error: '文件不存在' }, { status: 404 });
+
+    // 图片删除物理文件
+    if (f.file_type === 'image') {
+      try { require('fs').unlinkSync(f.filename); } catch { /* 忽略 */ }
+    }
+
+    this.db.run('DELETE FROM scenario_module_files WHERE id = ?', [fileId]);
+    return Response.json({ ok: true });
+  }
+
+  private async generateModuleImage(moduleId: string, req: Request): Promise<Response> {
+    if (!this.aiClient) return Response.json({ error: 'AI 客户端未配置' }, { status: 503 });
+
+    const m = this.db.query<{ id: string }, string>('SELECT id FROM scenario_modules WHERE id = ?').get(moduleId);
+    if (!m) return Response.json({ error: '模组不存在' }, { status: 404 });
+
+    const body = await req.json().catch(() => ({})) as {
+      description?: string; label?: string; size?: string;
+    };
+    const desc = body.description?.trim();
+    if (!desc) return Response.json({ error: 'description required' }, { status: 400 });
+
+    try {
+      const optimizedPrompt = await this.aiClient.optimizeImagePrompt(desc);
+      const imageUrl = await this.aiClient.generateImage(optimizedPrompt, body.size);
+
+      const fs = require('fs');
+      const imgDir = `./data/knowledge/images/modules/${moduleId}`;
+      fs.mkdirSync(imgDir, { recursive: true });
+
+      const imgId = ImageLibrary.generateId();
+      const imgPath = `${imgDir}/${imgId}.jpg`;
+      const imgResp = await fetch(imageUrl);
+      if (!imgResp.ok) throw new Error(`下载生成图片失败: ${imgResp.status}`);
+      fs.writeFileSync(imgPath, Buffer.from(await imgResp.arrayBuffer()));
+
+      const now = new Date().toISOString();
+      this.db.run(
+        'INSERT INTO scenario_module_files (id, module_id, filename, original_name, file_type, label, description, import_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [imgId, moduleId, imgPath, `${imgId}.jpg`, 'image', body.label?.trim() ?? null, desc, 'done', now],
+      );
+
+      return Response.json({ ok: true, id: imgId });
+    } catch (e) {
+      return Response.json({ error: String(e) }, { status: 500 });
+    }
+  }
+
+  private serveModuleImage(moduleId: string, fileId: string): Response {
+    const f = this.db.query<{ filename: string }, [string, string]>(
+      "SELECT filename FROM scenario_module_files WHERE id = ? AND module_id = ? AND file_type = 'image'",
+    ).get(fileId, moduleId);
+    if (!f) return Response.json({ error: '图片不存在' }, { status: 404 });
+
+    try {
+      const buf = require('fs').readFileSync(f.filename) as Buffer;
+      const ext = f.filename.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
+      return new Response(buf, { headers: { 'Content-Type': mime, 'Cache-Control': 'max-age=86400' } });
+    } catch {
+      return Response.json({ error: '读取图片失败' }, { status: 500 });
+    }
   }
 }

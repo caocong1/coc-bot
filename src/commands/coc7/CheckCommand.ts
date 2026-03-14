@@ -36,7 +36,7 @@ export class CheckCommand implements CommandHandler {
     const { skillName, targetValue } = this.parseSkillAndValue(ctx, cmd);
 
     if (!skillName || targetValue === undefined) {
-      return { text: '格式错误。用法：.ra 技能名 [技能值]' };
+      return { text: '格式错误。用法：.ra 技能名 [技能值]', error: true };
     }
 
     // 应用困难等级修正
@@ -121,9 +121,37 @@ export class CheckCommand implements CommandHandler {
     return { skillName, targetValue: undefined };
   }
 
+  private static readonly ATTR_MAP: Record<string, string> = {
+    '力量': 'str', 'str': 'str', 'STR': 'str',
+    '体质': 'con', 'con': 'con', 'CON': 'con',
+    '体型': 'siz', 'siz': 'siz', 'SIZ': 'siz',
+    '敏捷': 'dex', 'dex': 'dex', 'DEX': 'dex',
+    '外貌': 'app', 'app': 'app', 'APP': 'app',
+    '智力': 'int', 'int': 'int', 'INT': 'int',
+    '意志': 'pow', 'pow': 'pow', 'POW': 'pow',
+    '教育': 'edu', 'edu': 'edu', 'EDU': 'edu',
+  };
+
+  private static readonly DERIVED_MAP: Record<string, string> = {
+    'hp': 'hp', 'HP': 'hp', '生命值': 'hp',
+    'mp': 'mp', 'MP': 'mp', '魔法值': 'mp',
+    'san': 'san', 'SAN': 'san', '理智': 'san',
+    '幸运': 'luck', 'luck': 'luck', 'LUCK': 'luck',
+  };
+
   private lookupSkill(ctx: CommandContext, skillName: string): number | undefined {
     const character = this.characterStore.getActiveCharacter(ctx.userId, ctx.groupId);
     if (!character) return undefined;
+
+    // 1. 基础属性（力量、体质等）
+    const attrKey = CheckCommand.ATTR_MAP[skillName];
+    if (attrKey) return (character.attributes as Record<string, number>)[attrKey];
+
+    // 2. 派生属性（hp、mp、san、幸运）
+    const derivedKey = CheckCommand.DERIVED_MAP[skillName];
+    if (derivedKey) return (character.derived as Record<string, number>)[derivedKey];
+
+    // 3. 技能
     return character.skills[skillName];
   }
 }

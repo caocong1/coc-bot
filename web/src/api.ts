@@ -41,7 +41,7 @@ async function request<T>(
 // ─── Player API ──────────────────────────────────────────────────────────────
 
 export const playerApi = {
-  getMe: () => request<{ qqId: number; characterCount: number }>('/player/me'),
+  getMe: () => request<{ qqId: number; groupId: number | null; characterCount: number }>('/player/me'),
 
   listCharacters: () => request<CharacterSummary[]>('/player/characters'),
 
@@ -54,6 +54,22 @@ export const playerApi = {
   deleteCharacter: (id: string) =>
     request<{ ok: boolean }>(`/player/characters/${id}`, { method: 'DELETE' }),
 
+  importExcel: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${BASE}/player/characters/import-excel`, {
+      method: 'POST', body: formData, headers,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText })) as { error: string };
+      throw new Error(err.error ?? res.statusText);
+    }
+    return res.json();
+  },
+
   listCampaigns: () => request<CampaignSummary[]>('/player/campaigns'),
 
   getCampaign: (id: string) => request<CampaignDetail>(`/player/campaigns/${id}`),
@@ -61,8 +77,12 @@ export const playerApi = {
   getCampaignMessages: (id: string) => request<Message[]>(`/player/campaigns/${id}/messages`),
 
   listScenarios: () => request<ScenarioSummary[]>('/player/scenarios'),
+  listModules: () => request<ScenarioSummary[]>('/player/modules'),
 
   // ── 跑团房间 ──────────────────────────────────────────────────────────────
+  getRoomTime: (id: string) => request<{ ingameTime: string | null }>(`/player/rooms/${id}/time`),
+  getRoomMessages: (id: string) => request<Message[]>(`/player/rooms/${id}/messages`),
+
   listRooms: () => request<RoomSummary[]>('/player/rooms'),
 
   createRoom: (data: CreateRoomPayload) =>
@@ -80,10 +100,19 @@ export const playerApi = {
     request<{ ok: boolean }>(`/player/rooms/${id}/character`, { method: 'PUT', body: JSON.stringify({ characterId }) }),
 
   startRoom: (id: string) =>
-    request<{ ok: boolean; message: string }>(`/player/rooms/${id}/start`, { method: 'POST' }),
+    request<{ ok: boolean; summary: string }>(`/player/rooms/${id}/start`, { method: 'POST' }),
+
+  readyRoom: (id: string) =>
+    request<{ ok: boolean; readyCount: number; total: number; allReady: boolean }>(`/player/rooms/${id}/ready`, { method: 'POST' }),
+
+  cancelReview: (id: string) =>
+    request<{ ok: boolean }>(`/player/rooms/${id}/cancel-review`, { method: 'POST' }),
 
   updateRoomConstraints: (id: string, data: { scenarioName?: string; constraints: RoomConstraints }) =>
     request<{ ok: boolean }>(`/player/rooms/${id}/constraints`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // ── 参考数据（公开） ──
+  getReference: <T = unknown>(key: string) => request<T>(`/player/reference/${key}`, {}, 'none'),
 };
 
 // ─── Admin API ───────────────────────────────────────────────────────────────
@@ -136,12 +165,66 @@ export const adminApi = {
     return res.json() as Promise<{ ok: boolean; filename: string; jobId: string }>;
   },
 
+  deleteKnowledge: (name: string) =>
+    request<{ ok: boolean }>('/admin/knowledge/entry', { method: 'DELETE', body: JSON.stringify({ name }) }, 'admin'),
+
   listKpTemplates: () => request<KpTemplate[]>('/admin/kp-templates', {}, 'admin'),
 
-  messagesStreamUrl: (groupId: number) => `/api/admin/sessions/${groupId}/messages/stream`,
+  createKpTemplate: (data: KpTemplatePayload) =>
+    request<{ ok: boolean; id: string }>('/admin/kp-templates', { method: 'POST', body: JSON.stringify(data) }, 'admin'),
 
-  listRooms: () => request<RoomSummary[]>('/admin/rooms', {}, 'admin'),
+  updateKpTemplate: (id: string, data: KpTemplatePayload) =>
+    request<{ ok: boolean }>(`/admin/kp-templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }, 'admin'),
+
+  deleteKpTemplate: (id: string) =>
+    request<{ ok: boolean }>(`/admin/kp-templates/${id}`, { method: 'DELETE' }, 'admin'),
+
+  messagesStreamUrl: (groupId: number) => `/api/admin/sessions/${groupId}/messages/stream`,
+  getSessionMessages: (groupId: number) => request<Message[]>(`/admin/sessions/${groupId}/messages`, {}, 'admin'),
+
+  listSegments: (groupId: number) => request<SessionSegments>(`/admin/sessions/${groupId}/segments`, {}, 'admin'),
+
+  getTimeline: (groupId: number) => request<TimelineData>(`/admin/sessions/${groupId}/timeline`, {}, 'admin'),
+
+  adjustTime: (groupId: number, data: { type: 'set'; value: string } | { type: 'advance'; minutes: number }) =>
+    request<{ ok: boolean; ingameTime: string }>(`/admin/sessions/${groupId}/time`, {
+      method: 'POST', body: JSON.stringify(data),
+    }, 'admin'),
+
+  listRooms: () => request<AdminRoomSummary[]>('/admin/rooms', {}, 'admin'),
+  getRoomDetail: (id: string) => request<AdminRoomDetail>(`/admin/rooms/${id}`, {}, 'admin'),
+  confirmRoom: (id: string) => request<{ ok: boolean }>(`/admin/rooms/${id}/confirm`, { method: 'POST' }, 'admin'),
+  cancelReview: (id: string) => request<{ ok: boolean }>(`/admin/rooms/${id}/cancel-review`, { method: 'POST' }, 'admin'),
   deleteRoom: (id: string) => request<{ ok: boolean }>(`/admin/rooms/${id}`, { method: 'DELETE' }, 'admin'),
+  updateRoomKpSettings: (id: string, data: { templateId?: string; customPrompts?: string }) =>
+    request<{ ok: boolean }>(`/admin/rooms/${id}/kp-settings`, { method: 'PATCH', body: JSON.stringify(data) }, 'admin'),
+
+  // ── 模组管理 ──────────────────────────────────────────────────────────────
+  listModules: () => request<ScenarioModule[]>('/admin/modules', {}, 'admin'),
+  createModule: (data: CreateModulePayload) =>
+    request<{ id: string }>('/admin/modules', { method: 'POST', body: JSON.stringify(data) }, 'admin'),
+  getModule: (id: string) => request<ModuleDetail>(`/admin/modules/${id}`, {}, 'admin'),
+  updateModule: (id: string, data: CreateModulePayload) =>
+    request<{ ok: boolean }>(`/admin/modules/${id}`, { method: 'PUT', body: JSON.stringify(data) }, 'admin'),
+  deleteModule: (id: string) =>
+    request<{ ok: boolean }>(`/admin/modules/${id}`, { method: 'DELETE' }, 'admin'),
+  uploadModuleFile: async (moduleId: string, file: File, label?: string, description?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (label) formData.append('label', label);
+    if (description) formData.append('description', description);
+    const secret = getAdminSecret();
+    const headers: Record<string, string> = {};
+    if (secret) headers['Authorization'] = `Bearer ${secret}`;
+    const res = await fetch(`/api/admin/modules/${moduleId}/files`, { method: 'POST', body: formData, headers });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json() as Promise<{ ok: boolean; id: string; fileType: string }>;
+  },
+  deleteModuleFile: (moduleId: string, fileId: string) =>
+    request<{ ok: boolean }>(`/admin/modules/${moduleId}/files/${fileId}`, { method: 'DELETE' }, 'admin'),
+  generateModuleImage: (moduleId: string, data: { description: string; label?: string; size?: string }) =>
+    request<{ ok: boolean; id: string }>(`/admin/modules/${moduleId}/images/generate`, { method: 'POST', body: JSON.stringify(data) }, 'admin'),
+  moduleImageUrl: (moduleId: string, fileId: string) => `/api/admin/modules/${moduleId}/images/${fileId}`,
 };
 
 // ─── 类型定义 ─────────────────────────────────────────────────────────────────
@@ -196,8 +279,45 @@ export interface Message {
 }
 
 export interface ScenarioSummary {
+  id: string;
   name: string;
   description: string;
+  era: string | null;
+  allowedOccupations: string[];
+  minStats: Record<string, number>;
+}
+
+export interface ScenarioModule extends ScenarioSummary {
+  fileCount: number;
+  imageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModuleFile {
+  id: string;
+  filename: string;
+  originalName: string;
+  fileType: 'document' | 'image';
+  label: string | null;
+  description: string | null;
+  charCount: number;
+  chunkCount: number;
+  importStatus: 'pending' | 'done' | 'failed';
+  importError: string | null;
+  createdAt: string;
+}
+
+export interface ModuleDetail extends ScenarioModule {
+  files: ModuleFile[];
+}
+
+export interface CreateModulePayload {
+  name: string;
+  description?: string;
+  era?: string;
+  allowedOccupations?: string[];
+  minStats?: Record<string, number>;
 }
 
 export interface SessionInfo {
@@ -253,7 +373,8 @@ export interface RoomConstraints {
 
 export interface CreateRoomPayload {
   name: string;
-  groupId: number;
+  groupId?: number;
+  moduleId?: string;
   scenarioName?: string;
   constraints?: RoomConstraints;
 }
@@ -261,6 +382,7 @@ export interface CreateRoomPayload {
 export interface RoomMember {
   qqId: number;
   joinedAt: string;
+  readyAt: string | null;
   isCreator: boolean;
   character: {
     id: string;
@@ -275,12 +397,12 @@ export interface RoomMember {
 export interface RoomSummary {
   id: string;
   name: string;
-  groupId: number;
+  groupId: number | null;
   creatorQqId: number;
   isCreator: boolean;
   scenarioName: string | null;
   constraints: RoomConstraints;
-  status: 'waiting' | 'running' | 'ended';
+  status: 'waiting' | 'reviewing' | 'running' | 'ended';
   kpSessionId: string | null;
   createdAt: string;
   memberCount: number;
@@ -291,11 +413,103 @@ export interface RoomDetail extends RoomSummary {
   warnings: string[];
 }
 
+export interface Segment {
+  id: string;
+  seq: number;
+  title: string;
+  summary: string;
+  fullText: string;
+  charCount: number;
+  createdAt: string;
+}
+
+export interface SessionSegments {
+  currentSegmentId: string | null;
+  segments: Segment[];
+}
+
+export interface AdminRoomSummary {
+  id: string;
+  name: string;
+  groupId: number | null;
+  creatorQqId: number;
+  scenarioName: string | null;
+  status: 'waiting' | 'reviewing' | 'running' | 'ended';
+  kpSessionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  memberCount: number;
+}
+
+export interface AdminRoomDetailMember {
+  qqId: number;
+  characterId: string | null;
+  readyAt: string | null;
+  joinedAt: string;
+  character: {
+    id: string;
+    name: string;
+    occupation: string | null;
+    age: number | null;
+    hp: number | null;
+    san: number | null;
+    attributes: Record<string, number>;
+    skills: Record<string, number>;
+  } | null;
+}
+
+export interface AdminRoomDetail extends AdminRoomSummary {
+  moduleId: string | null;
+  constraints: RoomConstraints;
+  kpTemplateId: string;
+  kpCustomPrompts: string;
+  members: AdminRoomDetailMember[];
+  warnings: string[];
+  session: {
+    id: string;
+    groupId: number;
+    status: string;
+    segmentCount: number;
+    messageCount: number;
+  } | null;
+}
+
 export interface KpTemplate {
   id: string;
   name: string;
   description: string;
-  humorLevel: number;
-  rulesStrictness: number;
-  narrativeFlexibility: number;
+  builtin: boolean;
+  tone: number;
+  flexibility: number;
+  guidance: number;
+  lethality: number;
+  pacing: number;
+  customPrompts: string;
+}
+
+export interface TimelineEvent {
+  id: string;
+  ingameTime: string;
+  deltaMinutes: number | null;
+  description: string;
+  trigger: 'ai' | 'system' | 'admin';
+  messageId: string | null;
+  createdAt: string;
+}
+
+export interface TimelineData {
+  sessionId: string;
+  ingameTime: string | null;
+  events: TimelineEvent[];
+}
+
+export interface KpTemplatePayload {
+  name: string;
+  description?: string;
+  tone?: number;
+  flexibility?: number;
+  guidance?: number;
+  lethality?: number;
+  pacing?: number;
+  customPrompts?: string;
 }

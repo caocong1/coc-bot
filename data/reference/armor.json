@@ -1,0 +1,1104 @@
+[
+  {
+    "name": "厚重皮夹克",
+    "armorValue": "1",
+    "movPenalty": "0",
+    "coverage": "躯干",
+    "species": "人类、人型生物",
+    "antiPierce": false,
+    "protectionLevel": "每处1次/难以防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "10/55"
+  },
+  {
+    "name": "一战标准钢盔",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "头部",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/正常防护/无法防护",
+    "era": [
+      "1920s"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "1英寸（2.5厘米）硬木",
+    "armorValue": "3",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/易击碎/无法防护",
+    "era": [
+      "——"
+    ],
+    "price": "0.5/10 m²"
+  },
+  {
+    "name": "现代美军头盔",
+    "armorValue": "5",
+    "movPenalty": "0",
+    "coverage": "头部",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/正常防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "重型凯芙拉防弹背心",
+    "armorValue": "8",
+    "movPenalty": "0",
+    "coverage": "躯干",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/正常防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "1.5 （3.8厘米）英寸防弹玻璃",
+    "armorValue": "15",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "∞/正常防护/1D4",
+    "era": [
+      "现代"
+    ],
+    "price": "——/100 m²"
+  },
+  {
+    "name": "1 英寸钢板",
+    "armorValue": "19",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "∞/∞/每处1次",
+    "era": [
+      "——"
+    ],
+    "price": "1/10 m²"
+  },
+  {
+    "name": "大号沙包",
+    "armorValue": "20",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "∞/∞/正常防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "0.01/3"
+  },
+  {
+    "name": "皮肤",
+    "armorValue": "?",
+    "movPenalty": "——",
+    "coverage": "全身",
+    "species": "大象,深潜者,鳄鱼等",
+    "antiPierce": false,
+    "protectionLevel": "每处1次/难以防护/无法防护",
+    "era": [
+      "——"
+    ],
+    "price": "——"
+  },
+  {
+    "name": "生化网状装甲",
+    "armorValue": "8",
+    "movPenalty": "？",
+    "coverage": "全身",
+    "species": "米戈、人型生物",
+    "antiPierce": false,
+    "protectionLevel": "?/?/?",
+    "era": [
+      "——"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "砖墙",
+    "armorValue": "10",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "∞/∞/正常防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "5/60 m²"
+  },
+  {
+    "name": "一尺深的水",
+    "armorValue": "1D2+1/1D8+4",
+    "movPenalty": "——",
+    "coverage": "浸入部分",
+    "species": "——",
+    "antiPierce": false,
+    "protectionLevel": "∞/∞/∞",
+    "era": [
+      "43亿年前至今"
+    ],
+    "price": "无价之宝"
+  },
+  {
+    "name": "半米深的水",
+    "armorValue": "1D4+2/1D8+4",
+    "movPenalty": "——",
+    "coverage": "浸入部分",
+    "species": "——",
+    "antiPierce": false,
+    "protectionLevel": "∞/∞/∞",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "一米深的水",
+    "armorValue": "1D8+4/1D16+8",
+    "movPenalty": "——",
+    "coverage": "浸入部分",
+    "species": "——",
+    "antiPierce": false,
+    "protectionLevel": "∞/∞/∞",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "桌面板凳等 普通木质平面",
+    "armorValue": "2",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": false,
+    "protectionLevel": "每处1次/无法防护/无法防护",
+    "era": [
+      "新石器时代后"
+    ],
+    "price": "3/20 m²"
+  },
+  {
+    "name": "弹簧床垫",
+    "armorValue": "8",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": false,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "——/40"
+  },
+  {
+    "name": "半米厚水泥墙",
+    "armorValue": "12",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "∞/∞/正常防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "7/45 m²"
+  },
+  {
+    "name": "普通玻璃",
+    "armorValue": "1",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "一次性/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "5/10 m²"
+  },
+  {
+    "name": "1立方米石块",
+    "armorValue": "20",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "∞/正常防护/难以防护",
+    "era": [
+      "古埃及之后"
+    ],
+    "price": "5/20 m²"
+  },
+  {
+    "name": "粗钢筋网",
+    "armorValue": "40 网状",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": false,
+    "protectionLevel": "∞/∞/∞",
+    "era": [
+      "现代"
+    ],
+    "price": "——/40m²"
+  },
+  {
+    "name": "土堆",
+    "armorValue": "15",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "∞/∞/正常防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "0.01/3"
+  },
+  {
+    "name": "卷闸门（铁）",
+    "armorValue": "4",
+    "movPenalty": "——",
+    "coverage": "分隔整个空间",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "每处1次/难以防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "30/70"
+  },
+  {
+    "name": "500张A4纸",
+    "armorValue": "3",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "1/9"
+  },
+  {
+    "name": "书",
+    "armorValue": "3",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "1500年前至今"
+    ],
+    "price": "10/15"
+  },
+  {
+    "name": "大型动物的部分肢体",
+    "armorValue": "2",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "——",
+    "antiPierce": false,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "厚皮毡帽",
+    "armorValue": "1",
+    "movPenalty": "0",
+    "coverage": "头部",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": false,
+    "protectionLevel": "每处1次/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "10/35"
+  },
+  {
+    "name": "铁面具",
+    "armorValue": "1",
+    "movPenalty": "0",
+    "coverage": "面部",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "罕见"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "击剑面具",
+    "armorValue": "1",
+    "movPenalty": "0",
+    "coverage": "头+面+颈",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "25/80"
+  },
+  {
+    "name": "冰球面罩",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "头+眼部(网状)",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "30/110"
+  },
+  {
+    "name": "工业防护眼镜",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "眼部",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "无法防护/无法防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "——/15"
+  },
+  {
+    "name": "电焊面罩",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "面部",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "一次性/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "1/10"
+  },
+  {
+    "name": "全防护级防毒面具",
+    "armorValue": "耐毒性 2h",
+    "movPenalty": "0",
+    "coverage": "面部",
+    "species": "人类、有明显口鼻的生物",
+    "antiPierce": false,
+    "protectionLevel": "无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "35/150"
+  },
+  {
+    "name": "工地安全帽",
+    "armorValue": "1 耐冲击",
+    "movPenalty": "0",
+    "coverage": "头顶",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": false,
+    "protectionLevel": "一次性/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "1/10"
+  },
+  {
+    "name": "全防护摩托车帽",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "头部",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "25/90"
+  },
+  {
+    "name": "维京头盔",
+    "armorValue": "3",
+    "movPenalty": "0",
+    "coverage": "头顶+眼部(网状)",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "古罗马头盔",
+    "armorValue": "3",
+    "movPenalty": "0",
+    "coverage": "头顶+面颊",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "藤条盔",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "头部",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "中世纪全防护头盔",
+    "armorValue": "4",
+    "movPenalty": "0",
+    "coverage": "头+面+颈",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "中世纪"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "文艺复兴头盔",
+    "armorValue": "1D2+3",
+    "movPenalty": "0",
+    "coverage": "头+面+颈",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "文艺复兴"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "金质镶钻王冠",
+    "armorValue": "1",
+    "movPenalty": "0",
+    "coverage": "头顶",
+    "species": "人类、有明显头颅的生物",
+    "antiPierce": false,
+    "protectionLevel": "无法防护/无法防护/无法防护",
+    "era": [
+      "工业革命结束前"
+    ],
+    "price": "老鼻子贵了"
+  },
+  {
+    "name": "击剑纤维服",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "四肢、躯干、颈",
+    "species": "人类、人型生物",
+    "antiPierce": false,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "50/230"
+  },
+  {
+    "name": "对练棉甲",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "躯干、双臂、颈",
+    "species": "人类、人型生物",
+    "antiPierce": false,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "——/160"
+  },
+  {
+    "name": "关节护具",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "肘、膝、四肢、头",
+    "species": "人类、有明显关节的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "5/20"
+  },
+  {
+    "name": "护胸板",
+    "armorValue": "3",
+    "movPenalty": "0",
+    "coverage": "前胸",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "——/35"
+  },
+  {
+    "name": "锁子甲",
+    "armorValue": "4",
+    "movPenalty": "1",
+    "coverage": "双臂、大腿、躯干、颈",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "扎甲",
+    "armorValue": "4",
+    "movPenalty": "1",
+    "coverage": "双臂、大腿、躯干、颈",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "鳞甲",
+    "armorValue": "4",
+    "movPenalty": "1",
+    "coverage": "双臂、大腿、躯干、颈",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "米兰盔甲",
+    "armorValue": "5",
+    "movPenalty": "1",
+    "coverage": "除头部、全身",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "藤甲",
+    "armorValue": "4",
+    "movPenalty": "0",
+    "coverage": "双臂、大腿、躯干、颈",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "板甲",
+    "armorValue": "5",
+    "movPenalty": "1",
+    "coverage": "除头部、全身",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "胴丸",
+    "armorValue": "4",
+    "movPenalty": "1",
+    "coverage": "除头部、全身",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "纸甲",
+    "armorValue": "3",
+    "movPenalty": "0",
+    "coverage": "双臂、大腿、躯干、颈",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "防刺服",
+    "armorValue": "4",
+    "movPenalty": "0",
+    "coverage": "躯干",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "——/40"
+  },
+  {
+    "name": "常规防弹衣",
+    "armorValue": "6",
+    "movPenalty": "0",
+    "coverage": "躯干",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/正常防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "防刺西服",
+    "armorValue": "5",
+    "movPenalty": "1",
+    "coverage": "除头部、除手脚、全身",
+    "species": "人类、人型生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "——/120"
+  },
+  {
+    "name": "防化服",
+    "armorValue": "耐毒性 氧气瓶",
+    "movPenalty": "1",
+    "coverage": "全身",
+    "species": "人类、人型生物",
+    "antiPierce": false,
+    "protectionLevel": "无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "工作手套",
+    "armorValue": "1",
+    "movPenalty": "0",
+    "coverage": "双手",
+    "species": "拥有五指型手掌的生物",
+    "antiPierce": false,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "0.1/3"
+  },
+  {
+    "name": "防刺手套",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "双手",
+    "species": "拥有五指型手掌的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "——/20"
+  },
+  {
+    "name": "冰球手套",
+    "armorValue": "1",
+    "movPenalty": "0",
+    "coverage": "双手",
+    "species": "拥有五指型手掌的生物",
+    "antiPierce": false,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "5/20"
+  },
+  {
+    "name": "军用特种手套",
+    "armorValue": "1",
+    "movPenalty": "0",
+    "coverage": "双手",
+    "species": "拥有五指型手掌的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "电焊手套",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "双手",
+    "species": "拥有五指型手掌的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "5/20"
+  },
+  {
+    "name": "铁手甲",
+    "armorValue": "2",
+    "movPenalty": "0",
+    "coverage": "双手",
+    "species": "拥有五指型手掌的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "雨靴",
+    "armorValue": "1",
+    "movPenalty": "0",
+    "coverage": "双脚",
+    "species": "拥有站立功能的双腿的生物",
+    "antiPierce": false,
+    "protectionLevel": "难以防护/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "0.5/10"
+  },
+  {
+    "name": "铁靴",
+    "armorValue": "2",
+    "movPenalty": "1",
+    "coverage": "双脚",
+    "species": "拥有站立功能的双腿的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "工业防护靴",
+    "armorValue": "2",
+    "movPenalty": "1",
+    "coverage": "双脚",
+    "species": "拥有站立功能的双腿的生物",
+    "antiPierce": false,
+    "protectionLevel": "正常防护/无法防护/无法防护",
+    "era": [
+      "1920s",
+      "现代"
+    ],
+    "price": "3/15"
+  },
+  {
+    "name": "PC防暴盾",
+    "armorValue": "9",
+    "movPenalty": "1",
+    "coverage": "——",
+    "species": "人类、可以拿起物品的生物",
+    "antiPierce": true,
+    "protectionLevel": "正常防护/难以防护/无法防护",
+    "era": [
+      "现代"
+    ],
+    "price": "——/40"
+  },
+  {
+    "name": "金属镇暴盾",
+    "armorValue": "13",
+    "movPenalty": "1",
+    "coverage": "——",
+    "species": "人类、可以拿起物品的生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/正常防护/难以防护",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "防弹钢盾",
+    "armorValue": "25",
+    "movPenalty": "2",
+    "coverage": "——",
+    "species": "人类、可以拿起物品的生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/∞/正常防护",
+    "era": [
+      "现代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "格斗盾",
+    "armorValue": "20",
+    "movPenalty": "0",
+    "coverage": "拳前",
+    "species": "人类、有手的生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "圆木盾",
+    "armorValue": "15",
+    "movPenalty": "1",
+    "coverage": "——",
+    "species": "人类、可以拿起物品的生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "筝形盾",
+    "armorValue": "15",
+    "movPenalty": "1",
+    "coverage": "——",
+    "species": "人类、可以拿起物品的生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/难以防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "圆铁盾",
+    "armorValue": "20",
+    "movPenalty": "2",
+    "coverage": "——",
+    "species": "人类、可以拿起物品的生物",
+    "antiPierce": true,
+    "protectionLevel": "∞/正常防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "剑格、护手",
+    "armorValue": "20",
+    "movPenalty": "——",
+    "coverage": "——",
+    "species": "剑",
+    "antiPierce": true,
+    "protectionLevel": "∞/正常防护/无法防护",
+    "era": [
+      "古代"
+    ],
+    "price": "N/A"
+  },
+  {
+    "name": "术语解释",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "防护等级：指的是该护具或物品被（冷兵器/热武器/反器材武器或爆炸武器）三种不同的伤害攻击后有什么程度的防御力。",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "每处1次：指的是该物体很容易被打出缺口或者被破坏，如果朝被打出的缺口攻击则无视护甲",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "正常防护：没有什么特别的，就是尽到防御的责任",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "难以防护：指的是虽然护甲值会降低伤害，但是几乎没法将伤害显著降低",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "无法防护：指的是该伤害会无视护甲值，直接穿透该物品伤害到本体",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "∞：几乎无法摧毁该物品",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "护甲 ：护甲可以降低角色受到的伤害，从伤害中减去护甲数值。",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "躯干：是指大腿以上，锁骨以下以内的身体部位",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "防利器穿刺：指的是带有利刃的冷兵器无法直接穿透该物体伤害到本体，并不是代表冷兵器不可破坏该物体",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "网状：这种物品都有较大的空隙，最小足以将手伸出去但头不能伸出去。",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  },
+  {
+    "name": "√：表示肯定 ×：表示否定 ?：表示该物品在这方面的数据完全未知，或因情况有异",
+    "armorValue": "",
+    "movPenalty": "",
+    "coverage": "",
+    "species": "",
+    "antiPierce": false,
+    "protectionLevel": "",
+    "era": [],
+    "price": ""
+  }
+]

@@ -98,6 +98,20 @@ export interface ScenarioImage {
   playerVisible: boolean;
 }
 
+/** 时间轴事件 */
+export interface TimelineEvent {
+  id: string;
+  sessionId: string;
+  /** 此事件后的游戏内时间，如 "1925-03-14T15:00" */
+  ingameTime: string;
+  /** 推进的分钟数（SET_TIME 时为 null） */
+  deltaMinutes: number | null;
+  description: string;
+  trigger: 'ai' | 'system' | 'admin';
+  messageId?: string;
+  createdAt: Date;
+}
+
 /** 会话状态快照（供 ContextBuilder 读取） */
 export interface SessionSnapshot {
   sessionId: string;
@@ -110,6 +124,8 @@ export interface SessionSnapshot {
   recentMessages: SessionMessage[];
   /** 已压缩的摘要文本列表（从旧到新） */
   summaries: string[];
+  /** 当前游戏内时间 */
+  ingameTime: string | null;
 }
 
 // ─── 实现 ─────────────────────────────────────────────────────────────────────
@@ -125,6 +141,8 @@ export class SessionState {
   private _pendingRolls: PendingRoll[] = [];
   /** 已加载的模组全文（来自 data/knowledge/raw/）*/
   private _scenarioText: string | null = null;
+  /** 当前游戏内时间 */
+  private _ingameTime: string | null = null;
 
   constructor(db: Database, sessionId: string, campaignId: string, groupId: number) {
     this.db = db;
@@ -134,6 +152,7 @@ export class SessionState {
     this._loadScene();
     this._loadPendingRolls();
     this._loadScenarioText();
+    this._loadIngameTime();
   }
 
   // ─── 场景管理 ───────────────────────────────────────────────────────────────
@@ -411,6 +430,59 @@ export class SessionState {
     return false;
   }
 
+  // ─── 游戏内时间 ───────────────────────────────────────────────────────────
+
+  get ingameTime(): string | null {
+    return this._ingameTime;
+  }
+
+  /** 设置绝对游戏时间（开场 / SET_TIME 标记 / 管理员手动） */
+  setIngameTime(time: string, description: string, trigger: 'ai' | 'system' | 'admin', messageId?: string): void {
+    this._ingameTime = time;
+    this.db.run('UPDATE kp_sessions SET ingame_time = ?, updated_at = ? WHERE id = ?',
+      [time, new Date().toISOString(), this.sessionId]);
+    this._insertTimelineEvent(time, null, description, trigger, messageId);
+  }
+
+  /** 按分钟数推进游戏时间（TIME_ADVANCE 标记 / 管理员手动） */
+  advanceIngameTime(deltaMinutes: number, description: string, trigger: 'ai' | 'system' | 'admin', messageId?: string): void {
+    if (!this._ingameTime) return;
+    const newTime = addMinutesToTime(this._ingameTime, deltaMinutes);
+    this._ingameTime = newTime;
+    this.db.run('UPDATE kp_sessions SET ingame_time = ?, updated_at = ? WHERE id = ?',
+      [newTime, new Date().toISOString(), this.sessionId]);
+    this._insertTimelineEvent(newTime, deltaMinutes, description, trigger, messageId);
+  }
+
+  /** 查询时间轴事件 */
+  getTimelineEvents(limit = 50): TimelineEvent[] {
+    return this.db
+      .query<DbTimelineRow, [string, number]>(
+        `SELECT * FROM kp_timeline_events WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(this.sessionId, limit)
+      .map(rowToTimelineEvent);
+  }
+
+  private _insertTimelineEvent(
+    ingameTime: string, deltaMinutes: number | null,
+    description: string, trigger: string, messageId?: string,
+  ): void {
+    const id = `te-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    this.db.run(
+      `INSERT INTO kp_timeline_events (id, session_id, ingame_time, delta_minutes, description, trigger, message_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, this.sessionId, ingameTime, deltaMinutes, description, trigger, messageId ?? null, new Date().toISOString()],
+    );
+  }
+
+  private _loadIngameTime(): void {
+    const row = this.db.query<{ ingame_time: string | null }, [string]>(
+      'SELECT ingame_time FROM kp_sessions WHERE id = ?',
+    ).get(this.sessionId);
+    this._ingameTime = row?.ingame_time ?? null;
+  }
+
   // ─── 快照 ─────────────────────────────────────────────────────────────────
 
   snapshot(): SessionSnapshot {
@@ -423,6 +495,7 @@ export class SessionState {
       pendingRolls: this.pendingRolls,
       recentMessages: this.getRecentMessages(40),
       summaries: this.getSummaries(),
+      ingameTime: this._ingameTime,
     };
   }
 
@@ -593,4 +666,42 @@ function rowToMessage(row: DbMessageRow): SessionMessage {
     timestamp: new Date(row.timestamp),
     isSummarized: row.is_summarized === 1,
   };
+}
+
+interface DbTimelineRow {
+  id: string;
+  session_id: string;
+  ingame_time: string;
+  delta_minutes: number | null;
+  description: string;
+  trigger: string;
+  message_id: string | null;
+  created_at: string;
+}
+
+function rowToTimelineEvent(row: DbTimelineRow): TimelineEvent {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    ingameTime: row.ingame_time,
+    deltaMinutes: row.delta_minutes,
+    description: row.description,
+    trigger: row.trigger as TimelineEvent['trigger'],
+    messageId: row.message_id ?? undefined,
+    createdAt: new Date(row.created_at),
+  };
+}
+
+/**
+ * 游戏内时间算术：将 "YYYY-MM-DDTHH:MM" 加上指定分钟数
+ * JS Date 对 1925 等历史日期的基本算术是正确的
+ */
+export function addMinutesToTime(isoTime: string, minutes: number): string {
+  const [datePart, timePart] = isoTime.split('T');
+  const [y, mo, d] = datePart.split('-').map(Number);
+  const [h, mi] = timePart.split(':').map(Number);
+  const base = new Date(y, mo - 1, d, h, mi);
+  base.setMinutes(base.getMinutes() + minutes);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}T${pad(base.getHours())}:${pad(base.getMinutes())}`;
 }

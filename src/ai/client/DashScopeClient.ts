@@ -253,20 +253,35 @@ export class DashScopeClient {
     messages: Array<{ role: string; content: string }>,
     callbacks: StreamCallbacks
   ): Promise<void> {
-    const response = await fetch(DASHSCOPE_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: modelId,
-        messages,
-        stream: true,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+
+    let response: Response;
+    try {
+      response = await fetch(DASHSCOPE_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages,
+          stream: true,
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      const msg = err instanceof Error && err.name === 'AbortError'
+        ? '模型调用超时（60秒）'
+        : `模型调用失败: ${err instanceof Error ? err.message : String(err)}`;
+      callbacks.onError(msg);
+      return;
+    }
     
     if (!response.ok) {
+      clearTimeout(timeout);
       const body = await response.text().catch(() => '');
       callbacks.onError(`模型调用失败 (${response.status}): ${body}`);
       return;
@@ -274,6 +289,7 @@ export class DashScopeClient {
     
     const reader = response.body?.getReader();
     if (!reader) {
+      clearTimeout(timeout);
       callbacks.onError('响应流为空');
       return;
     }
@@ -307,12 +323,16 @@ export class DashScopeClient {
         }
       }
     } catch (err) {
-      callbacks.onError(`读取响应流失败: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error && err.name === 'AbortError'
+        ? '模型响应超时（60秒）'
+        : `读取响应流失败: ${err instanceof Error ? err.message : String(err)}`;
+      callbacks.onError(msg);
       return;
     } finally {
+      clearTimeout(timeout);
       reader.releaseLock();
     }
-    
+
     callbacks.onDone();
   }
 }
