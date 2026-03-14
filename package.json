@@ -1,6 +1,6 @@
 {
   "name": "coc-bot",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "AI QQ CoC 跑团平台 - 基于 Bun + SolidJS 的统一工作流平台",
   "type": "module",
   "scripts": {

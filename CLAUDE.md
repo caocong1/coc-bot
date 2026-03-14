@@ -85,3 +85,30 @@ When writing code that uses external libraries (SolidJS, Vite, mammoth, pdfjs-di
 ## AI Collaboration
 
 When a second opinion or code review from a different AI model is useful, use the `ask-codex` skill. It provides Codex CLI (GPT) via MCP with `codex` (new session) and `codex-reply` (continue conversation) tools. Always use `sandbox: "read-only"` and `approval-policy: "never"` for MCP mode.
+
+## Workflow Rules
+
+Every time you finish a task or set of changes:
+
+1. **Update docs** — Update ALL relevant documentation under `docs/`:
+   - `docs/ROADMAP.md` — Mark completed items, add new sections for new features
+   - `docs/architecture/repo-layout-final.md` — Update file tree and module descriptions if files were added/removed/changed
+   - `docs/CHANGELOG.md` — Add entry under the current version
+   - Other docs as applicable (GETTING_STARTED.md, TEST_LOG.md, etc.)
+
+2. **Version and commit** — When the user asks to commit:
+   - Bump the version in `package.json` (patch for fixes, minor for features, major for breaking changes)
+   - Add a CHANGELOG entry with the version number and date
+   - Stage all relevant files (exclude runtime files like `data/bot.pid`)
+   - Write a clear commit message summarizing all changes
+
+3. **CHANGELOG format** — `docs/CHANGELOG.md` uses this format:
+   ```markdown
+   ## [x.y.z] - YYYY-MM-DD
+   ### Added
+   - New feature description
+   ### Changed
+   - Changed behavior description
+   ### Fixed
+   - Bug fix description
+   ```
