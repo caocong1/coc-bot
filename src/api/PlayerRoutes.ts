@@ -32,6 +32,21 @@ import { deliverCampaignOutput } from '../runtime/CampaignOutputDelivery';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { parseExcelCharacter } from '../import/ExcelCharacterParser';
+import {
+  countRoomRelationships,
+  deleteRoomRelationship,
+  getRoomDirectorPrefs,
+  listRoomRelationships,
+  updateRoomDirectorPrefs,
+  upsertRoomRelationship,
+  isRoomRelationType,
+} from '../storage/RoomDirectorStore';
+import {
+  createDefaultRoomDirectorPrefs,
+  type RoomDirectorPrefs,
+  type RoomRelationship,
+  type RoomRelationType,
+} from '@shared/types/StoryDirector';
 
 export class PlayerRoutes {
   constructor(
@@ -99,6 +114,13 @@ export class PlayerRoutes {
       if (method === 'POST' && resourceId && sub2 === 'ready') return this.readyRoom(qqId, resourceId);
       if (method === 'POST' && resourceId && sub2 === 'cancel-review') return this.cancelReview(qqId, resourceId);
       if (method === 'PATCH' && resourceId && sub2 === 'constraints') return this.updateConstraints(qqId, resourceId, req);
+      if (method === 'GET' && resourceId && sub2 === 'relationships') return this.listRoomRelationships(qqId, resourceId);
+      if (method === 'PUT' && resourceId && sub2 === 'relationships') return this.upsertRoomRelationship(qqId, resourceId, req);
+      if (method === 'DELETE' && resourceId && sub2 === 'relationships' && segments[3]) {
+        return this.deleteRoomRelationship(qqId, resourceId, segments[3]);
+      }
+      if (method === 'GET' && resourceId && sub2 === 'director-prefs') return this.getRoomDirectorPrefs(qqId, resourceId);
+      if (method === 'PATCH' && resourceId && sub2 === 'director-prefs') return this.updateDirectorPrefs(qqId, resourceId, req);
       if (method === 'GET' && resourceId && sub2 === 'messages') return this.getRoomMessages(qqId, resourceId);
       if (method === 'GET' && resourceId && sub2 === 'time') return this.getRoomTime(qqId, resourceId);
     }
@@ -403,11 +425,12 @@ export class PlayerRoutes {
     }
 
     this.db.run(
-      `INSERT INTO campaign_rooms (id, name, group_id, creator_qq_id, module_id, scenario_name, constraints_json, status, created_at, updated_at)
-       VALUES (?, ?, NULL, ?, ?, ?, ?, 'waiting', ?, ?)`,
+      `INSERT INTO campaign_rooms (id, name, group_id, creator_qq_id, module_id, scenario_name, constraints_json, director_prefs_json, status, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'waiting', ?, ?)`,
       [id, name, qqId, moduleId,
         scenarioName,
         JSON.stringify(constraints),
+        JSON.stringify(createDefaultRoomDirectorPrefs()),
         now, now],
     );
 
@@ -423,10 +446,10 @@ export class PlayerRoutes {
   private getRoom(qqId: number, roomId: string): Response {
     const room = this.db.query<{
       id: string; name: string; group_id: number | null; creator_qq_id: number;
-      scenario_name: string | null; constraints_json: string; status: string;
+      scenario_name: string | null; constraints_json: string; director_prefs_json: string; status: string;
       kp_session_id: string | null; created_at: string;
     }, string>(
-      'SELECT id, name, group_id, creator_qq_id, scenario_name, constraints_json, status, kp_session_id, created_at FROM campaign_rooms WHERE id = ?',
+      'SELECT id, name, group_id, creator_qq_id, scenario_name, constraints_json, director_prefs_json, status, kp_session_id, created_at FROM campaign_rooms WHERE id = ?',
     ).get(roomId);
 
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
@@ -464,10 +487,14 @@ export class PlayerRoutes {
     // PC 合规性检查（软验证）
     const constraints = JSON.parse(room.constraints_json) as RoomConstraints;
     const warnings = this.validateMembers(memberDetails, constraints);
+    const relationships = listRoomRelationships(this.db, roomId);
+    const directorPrefs = getRoomDirectorPrefs(this.db, roomId);
 
     return Response.json({
       ...this.formatRoom(room, qqId),
       members: memberDetails,
+      relationships,
+      directorPrefs,
       warnings,
     });
   }
@@ -489,6 +516,7 @@ export class PlayerRoutes {
       }, { status: 409 });
     }
 
+    this.db.run('DELETE FROM campaign_room_relationships WHERE room_id = ?', [roomId]);
     this.db.run('DELETE FROM campaign_room_members WHERE room_id = ?', [roomId]);
     this.db.run('DELETE FROM campaign_rooms WHERE id = ?', [roomId]);
     return Response.json({ ok: true });
@@ -506,6 +534,7 @@ export class PlayerRoutes {
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
     if (room.creator_qq_id !== qqId) return Response.json({ error: '只有创建者可以删除房间' }, { status: 403 });
 
+    this.db.run('DELETE FROM campaign_room_relationships WHERE room_id = ?', [roomId]);
     this.db.run('DELETE FROM campaign_room_members WHERE room_id = ?', [roomId]);
     this.db.run('DELETE FROM campaign_rooms WHERE id = ?', [roomId]);
     return Response.json({ ok: true });
@@ -663,6 +692,87 @@ export class PlayerRoutes {
     return Response.json({ ok: true });
   }
 
+  private listRoomRelationships(qqId: number, roomId: string): Response {
+    if (!this.isRoomMember(roomId, qqId)) {
+      return Response.json({ error: '不是该房间成员' }, { status: 403 });
+    }
+    return Response.json(listRoomRelationships(this.db, roomId));
+  }
+
+  private async upsertRoomRelationship(qqId: number, roomId: string, req: Request): Promise<Response> {
+    if (!this.isRoomMember(roomId, qqId)) {
+      return Response.json({ error: '不是该房间成员' }, { status: 403 });
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json() as Record<string, unknown>;
+    } catch {
+      return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
+
+    const targetQqId = Number(body.targetQqId);
+    const relationType = String(body.relationType ?? '');
+    const notes = typeof body.notes === 'string' ? body.notes : '';
+    if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
+      return Response.json({ error: 'targetQqId 无效' }, { status: 400 });
+    }
+    if (!isRoomRelationType(relationType)) {
+      return Response.json({ error: 'relationType 无效' }, { status: 400 });
+    }
+    if (!this.isRoomMember(roomId, targetQqId)) {
+      return Response.json({ error: '目标玩家不在该房间中' }, { status: 404 });
+    }
+
+    const relation = upsertRoomRelationship(this.db, roomId, qqId, targetQqId, relationType, notes);
+    return Response.json(relation);
+  }
+
+  private deleteRoomRelationship(qqId: number, roomId: string, targetRaw: string): Response {
+    if (!this.isRoomMember(roomId, qqId)) {
+      return Response.json({ error: '不是该房间成员' }, { status: 403 });
+    }
+
+    const targetQqId = Number(targetRaw);
+    if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
+      return Response.json({ error: 'targetQqId 无效' }, { status: 400 });
+    }
+    if (!this.isRoomMember(roomId, targetQqId)) {
+      return Response.json({ error: '目标玩家不在该房间中' }, { status: 404 });
+    }
+
+    deleteRoomRelationship(this.db, roomId, qqId, targetQqId);
+    return Response.json({ ok: true });
+  }
+
+  private getRoomDirectorPrefs(qqId: number, roomId: string): Response {
+    if (!this.isRoomMember(roomId, qqId)) {
+      return Response.json({ error: '不是该房间成员' }, { status: 403 });
+    }
+    return Response.json(getRoomDirectorPrefs(this.db, roomId));
+  }
+
+  private async updateDirectorPrefs(qqId: number, roomId: string, req: Request): Promise<Response> {
+    const room = this.db.query<{ creator_qq_id: number; status: string }, [string]>(
+      'SELECT creator_qq_id, status FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    if (room.creator_qq_id !== qqId) return Response.json({ error: '只有创建者可以修改导演偏好' }, { status: 403 });
+    if (room.status === 'running' || room.status === 'ended') {
+      return Response.json({ error: '跑团已开始或已结束，不可修改导演偏好' }, { status: 409 });
+    }
+
+    let body: Partial<RoomDirectorPrefs>;
+    try {
+      body = await req.json() as Partial<RoomDirectorPrefs>;
+    } catch {
+      return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
+
+    const prefs = updateRoomDirectorPrefs(this.db, roomId, body);
+    return Response.json(prefs);
+  }
+
   // ─── Room Messages ─────────────────────────────────────────────────────────
 
   private getRoomMessages(qqId: number, roomId: string): Response {
@@ -738,7 +848,7 @@ export class PlayerRoutes {
 
   private formatRoom(r: {
     id: string; name: string; group_id: number | null; creator_qq_id: number;
-    scenario_name: string | null; constraints_json: string; status: string;
+    scenario_name: string | null; constraints_json: string; director_prefs_json?: string | null; status: string;
     kp_session_id: string | null; created_at: string;
   }, viewerQqId: number) {
     return {
@@ -749,6 +859,7 @@ export class PlayerRoutes {
       isCreator: r.creator_qq_id === viewerQqId,
       scenarioName: r.scenario_name,
       constraints: JSON.parse(r.constraints_json) as RoomConstraints,
+      directorPrefs: parseRoomDirectorPrefsSafe(r.director_prefs_json),
       status: r.status,
       kpSessionId: r.kp_session_id,
       createdAt: r.created_at,
@@ -760,6 +871,13 @@ export class PlayerRoutes {
       'SELECT COUNT(*) as cnt FROM campaign_room_members WHERE room_id = ?',
     ).get(roomId);
     return row?.cnt ?? 0;
+  }
+
+  private isRoomMember(roomId: string, qqId: number): boolean {
+    const row = this.db.query<{ qq_id: number }, [string, number]>(
+      'SELECT qq_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
+    ).get(roomId, qqId);
+    return Boolean(row);
   }
 
   private validateMembers(
@@ -839,4 +957,15 @@ interface RoomConstraints {
   era?: string;
   allowedOccupations?: string[];
   minStats?: Record<string, number>;
+}
+
+function parseRoomDirectorPrefsSafe(raw?: string | null): RoomDirectorPrefs {
+  try {
+    return raw ? {
+      ...createDefaultRoomDirectorPrefs(),
+      ...(JSON.parse(raw) as Partial<RoomDirectorPrefs>),
+    } : createDefaultRoomDirectorPrefs();
+  } catch {
+    return createDefaultRoomDirectorPrefs();
+  }
 }

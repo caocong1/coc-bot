@@ -23,6 +23,7 @@ import { CharacterStore } from '../../commands/sheet/CharacterStore';
 import type { Character } from '@shared/types/Character';
 import { getSkillDisplayName, resolveSkillKey } from '@shared/coc7/skillNames';
 import type { SessionEntityOverlay, SessionItemOverlay } from '@shared/types/ScenarioAssets';
+import type { DirectorCue } from '@shared/types/StoryDirector';
 
 // ─── 公开类型 ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,8 @@ export interface KPInput {
   visibility?: SessionVisibility;
   /** 当前上下文查看视角 */
   viewerScope?: ViewerScope;
+  /** 本轮待注入的导演提示 */
+  directorCue?: DirectorCue | null;
 }
 
 /** 需要展示给玩家的图片 */
@@ -249,6 +252,7 @@ export class KPPipeline {
         channelId,
         viewerScope,
         channelPlayerIds: channelState.playerIds,
+        directorCue: input.directorCue ?? null,
       },
     );
 

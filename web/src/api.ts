@@ -111,6 +111,21 @@ export const playerApi = {
   updateRoomConstraints: (id: string, data: { scenarioName?: string; constraints: RoomConstraints }) =>
     request<{ ok: boolean }>(`/player/rooms/${id}/constraints`, { method: 'PATCH', body: JSON.stringify(data) }),
 
+  listRoomRelationships: (id: string) =>
+    request<RoomRelationship[]>(`/player/rooms/${id}/relationships`),
+
+  setRoomRelationship: (id: string, data: { targetQqId: number; relationType: RoomRelationType; notes?: string }) =>
+    request<RoomRelationship>(`/player/rooms/${id}/relationships`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  deleteRoomRelationship: (id: string, targetQqId: number) =>
+    request<{ ok: boolean }>(`/player/rooms/${id}/relationships/${targetQqId}`, { method: 'DELETE' }),
+
+  getRoomDirectorPrefs: (id: string) =>
+    request<RoomDirectorPrefs>(`/player/rooms/${id}/director-prefs`),
+
+  updateRoomDirectorPrefs: (id: string, data: Partial<RoomDirectorPrefs>) =>
+    request<RoomDirectorPrefs>(`/player/rooms/${id}/director-prefs`, { method: 'PATCH', body: JSON.stringify(data) }),
+
   // ── 参考数据（公开） ──
   getReference: <T = unknown>(key: string) => request<T>(`/player/reference/${key}`, {}, 'none'),
 };
@@ -524,6 +539,27 @@ export interface RoomMember {
   } | null;
 }
 
+export type RoomRelationType = 'heard_of' | 'acquainted' | 'close' | 'bound' | 'secret_tie';
+
+export interface RoomRelationship {
+  roomId: string;
+  userA: number;
+  userB: number;
+  relationType: RoomRelationType;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoomDirectorPrefs {
+  allowSplitOpening: boolean;
+  preferredStartStyle: 'together' | 'split' | 'mixed';
+  allowModuleExpansion: boolean;
+  expansionLevel: 'light' | 'medium' | 'high';
+  privateHookLevel: 'none' | 'light' | 'medium';
+  notes: string;
+}
+
 export interface RoomSummary {
   id: string;
   name: string;
@@ -536,11 +572,13 @@ export interface RoomSummary {
   kpSessionId: string | null;
   createdAt: string;
   memberCount: number;
+  directorPrefs: RoomDirectorPrefs;
 }
 
 export interface RoomDetail extends RoomSummary {
   members: RoomMember[];
   warnings: string[];
+  relationships: RoomRelationship[];
 }
 
 export interface Segment {

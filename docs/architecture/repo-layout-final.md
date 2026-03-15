@@ -14,12 +14,16 @@ coc-bot/
 │   │
 │   ├── storage/
 │   │   ├── Database.ts          # SQLite schema / 迁移
-│   │   └── ModuleAssetStore.ts  # 模组资产与规则包的行映射 / 查询辅助
+│   │   ├── ModuleAssetStore.ts  # 模组资产与规则包的行映射 / 查询辅助
+│   │   └── RoomDirectorStore.ts # 房间关系与导演偏好存取
 │   │
 │   ├── runtime/                 # 消息路由、模式切换、Campaign 管理
 │   │   ├── ModeResolver.ts
 │   │   ├── CampaignHandler.ts   # Campaign 模式处理（焦点频道 + per-channel 队列 + 成员过滤）
+│   │   ├── CampaignOutputDelivery.ts # 跑团输出统一投递（群聊/图片/私聊 sidecar）
+│   │   ├── OpeningDirector.ts   # 开场导演（opening skeleton + beat 文本生成）
 │   │   ├── SessionState.ts      # 会话状态管理（kp_events 回放 + SceneChannel + 模组资产 overlay）
+│   │   ├── SessionDirector.ts   # 持续推进导演（DirectorCue 生成）
 │   │   ├── MessageRouter.ts
 │   │   └── VisibilityPlanner.ts
 │   │
@@ -91,6 +95,7 @@ coc-bot/
 │       └── types/
 │           ├── Campaign.ts
 │           ├── Character.ts
+│           ├── StoryDirector.ts # 房间关系 / 导演偏好 / OpeningPlan / DirectorCue 类型
 │           └── Session.ts
 │
 ├── web/                         # SolidJS Web 控制台（独立子项目）
@@ -204,7 +209,7 @@ AI 系统层，负责：
 - `kp_templates` — 自定义 KP 人格模板
 - `scenario_modules` / `scenario_module_files` — 模组管理
 - `module_entities` / `module_items` / `module_rule_packs` — 模组资产层（关键 NPC/怪物、关键物品、模组规则包）
-- `campaign_rooms` / `campaign_room_members` — 跑团房间
+- `campaign_rooms` / `campaign_room_members` / `campaign_room_relationships` — 跑团房间、成员、人物关系与导演偏好
 - `player_tokens` — 玩家 Web 登录
 - `user_settings` — 用户设置（默认骰/昵称）
 

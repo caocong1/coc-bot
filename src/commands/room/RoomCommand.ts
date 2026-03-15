@@ -4,6 +4,8 @@
  * .room list              — 我参与的活跃房间
  * .room create <名称> [模组序号] — 创建房间（返回房间ID）
  * .room join <roomId>     — 加入房间，私发 Web 链接
+ * .room pc <角色卡名或ID>  — 为当前房间绑定自己的 PC
+ * .room relation ...      — 管理房间内人物关系
  * .room start <roomId>    — 审卡（查看 PC 信息 + 约束检查，任何成员可触发）
  * .room ready             — 确认准备就绪（当前群正在审卡的房间）
  * .room status            — 查看审卡进度（谁 ready 了）
@@ -19,6 +21,14 @@ import type { CampaignHandler } from '../../runtime/CampaignHandler';
 import type { NapCatActionClient } from '../../adapters/napcat/NapCatActionClient';
 import { deliverCampaignOutput } from '../../runtime/CampaignOutputDelivery';
 import { ModCommand } from '../module/ModCommand';
+import {
+  countRoomRelationships,
+  deleteRoomRelationship,
+  listRoomRelationships,
+  normalizeRoomRelationPair,
+  upsertRoomRelationship,
+  isRoomRelationType,
+} from '../../storage/RoomDirectorStore';
 
 const WEB_BASE_URL = process.env.WEB_BASE_URL ?? 'http://localhost:5173';
 const SHORT_ID_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉 I/O/0/1 避免混淆
@@ -55,6 +65,8 @@ export class RoomCommand {
     switch (sub) {
       case 'create':  return this.create(ctx, cmd);
       case 'join':    return this.join(ctx, cmd);
+      case 'pc':      return this.bindRoomCharacter(ctx, cmd);
+      case 'relation':return this.relation(ctx, cmd);
       case 'start':   return this.start(ctx, cmd);
       case 'ready':   return this.ready(ctx);
       case 'status':  return this.status(ctx);
@@ -170,6 +182,16 @@ export class RoomCommand {
     if (warnings.length > 0) {
       lines.push('', '⚠️ 约束警告：');
       for (const w of warnings) lines.push(`  - ${w}`);
+    }
+
+    const relationCount = countRoomRelationships(this.db, roomId);
+    if (members.length >= 2 && relationCount === 0) {
+      lines.push(
+        '',
+        '💡 还没有配置人物关系。为了让开场更自然，建议先补一轮：',
+        '  .room relation list',
+        '  .room relation set <对方QQ号> <heard_of|acquainted|close|bound|secret_tie> [备注]',
+      );
     }
 
     lines.push('', `准备进度：${readyCount}/${members.length}`);
@@ -332,6 +354,100 @@ export class RoomCommand {
       private: true,
       publicHint: ctx.messageType === 'group' ? `✅ @${ctx.userId} 房间链接已私发，请查收。` : undefined,
     };
+  }
+
+  private bindRoomCharacter(ctx: CommandContext, cmd: ParsedCommand): CommandResult {
+    const raw = cmd.args.slice(1).join(' ').trim();
+    if (!raw) return { text: '用法：.room pc <角色卡名或ID>' };
+    if (ctx.messageType !== 'group' || !ctx.groupId) {
+      return { text: '请在跑团群内发送 .room pc <角色卡名或ID>' };
+    }
+
+    const room = this.findActiveRoomForMember(ctx.groupId, ctx.userId);
+    if (!room) {
+      return { text: '当前群没有你参与的待开团/审卡房间，或房间未绑定到本群。' };
+    }
+
+    const candidates = this.db.query<{ id: string; name: string }, [number]>(
+      'SELECT id, name FROM characters WHERE player_id = ? ORDER BY updated_at DESC',
+    ).all(ctx.userId);
+    const exactId = candidates.find((item) => item.id === raw);
+    const exactName = candidates.find((item) => item.name === raw);
+    const fuzzyName = candidates.find((item) => item.name.includes(raw));
+    const target = exactId ?? exactName ?? fuzzyName;
+    if (!target) {
+      return { text: `未找到你的角色卡：${raw}` };
+    }
+
+    this.db.run(
+      'UPDATE campaign_room_members SET character_id = ? WHERE room_id = ? AND qq_id = ?',
+      [target.id, room.id, ctx.userId],
+    );
+    return { text: `已为房间【${room.name}】绑定角色卡：${target.name}` };
+  }
+
+  private relation(ctx: CommandContext, cmd: ParsedCommand): CommandResult {
+    if (ctx.messageType !== 'group' || !ctx.groupId) {
+      return { text: '请在跑团群内使用 .room relation ...' };
+    }
+
+    const room = this.findActiveRoomForMember(ctx.groupId, ctx.userId);
+    if (!room) {
+      return { text: '当前群没有你参与的待开团/审卡房间。' };
+    }
+
+    const sub = (cmd.args[1] ?? 'list').toLowerCase();
+    if (sub === 'list') {
+      const relations = listRoomRelationships(this.db, room.id);
+      if (relations.length === 0) {
+        return { text: `房间【${room.name}】当前还没有配置人物关系。` };
+      }
+      const lines = relations.map((item) => {
+        const notes = item.notes ? `｜${item.notes}` : '';
+        return `- ${item.userA} ↔ ${item.userB}：${item.relationType}${notes}`;
+      });
+      return { text: `房间【${room.name}】人物关系：\n${lines.join('\n')}` };
+    }
+
+    if (sub === 'set') {
+      const targetQqId = Number(cmd.args[2]);
+      const relationType = String(cmd.args[3] ?? '');
+      const notes = cmd.args.slice(4).join(' ').trim();
+      if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
+        return { text: '用法：.room relation set <对方QQ号> <heard_of|acquainted|close|bound|secret_tie> [备注]' };
+      }
+      if (!isRoomRelationType(relationType)) {
+        return { text: '关系类型无效，可用：heard_of、acquainted、close、bound、secret_tie' };
+      }
+      if (!this.isRoomMember(room.id, targetQqId)) {
+        return { text: `QQ ${targetQqId} 不在房间【${room.name}】中。` };
+      }
+      try {
+        const relation = upsertRoomRelationship(this.db, room.id, ctx.userId, targetQqId, relationType, notes);
+        const [left, right] = normalizeRoomRelationPair(relation.userA, relation.userB);
+        return { text: `已设置房间关系：${left} ↔ ${right} = ${relation.relationType}${relation.notes ? `（${relation.notes}）` : ''}` };
+      } catch (err) {
+        return { text: String(err) };
+      }
+    }
+
+    if (sub === 'clear') {
+      const targetQqId = Number(cmd.args[2]);
+      if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
+        return { text: '用法：.room relation clear <对方QQ号>' };
+      }
+      if (!this.isRoomMember(room.id, targetQqId)) {
+        return { text: `QQ ${targetQqId} 不在房间【${room.name}】中。` };
+      }
+      try {
+        deleteRoomRelationship(this.db, room.id, ctx.userId, targetQqId);
+        return { text: `已清除你与 QQ ${targetQqId} 在房间【${room.name}】中的人物关系。` };
+      } catch (err) {
+        return { text: String(err) };
+      }
+    }
+
+    return { text: '用法：.room relation <list|set|clear> ...' };
   }
 
   private start(ctx: CommandContext, cmd: ParsedCommand): CommandResult {
@@ -529,6 +645,10 @@ export class RoomCommand {
         '  .room list              — 我参与的活跃房间\n' +
         '  .room create <名称> [模组序号] — 创建房间\n' +
         '  .room join <房间ID>     — 加入房间（私发链接）\n' +
+        '  .room pc <角色卡名或ID>  — 为当前房间绑定角色卡\n' +
+        '  .room relation list     — 查看当前房间人物关系\n' +
+        '  .room relation set <QQ号> <关系类型> [备注] — 设置人物关系\n' +
+        '  .room relation clear <QQ号> — 清除人物关系\n' +
         '  .room start <房间ID>    — 审卡（查看 PC 信息）\n' +
         '  .room ready             — 确认准备就绪\n' +
         '  .room status            — 查看审卡进度\n' +
@@ -539,5 +659,23 @@ export class RoomCommand {
         '  .room info <房间ID>     — 查看房间详情\n\n' +
         '流程：.mod list → create → 队友 join → start → 每人 ready → 自动开团',
     };
+  }
+
+  private findActiveRoomForMember(groupId: number, userId: number): { id: string; name: string; status: string } | null {
+    return this.db.query<{ id: string; name: string; status: string }, [number, number]>(
+      `SELECT r.id, r.name, r.status
+         FROM campaign_rooms r
+         JOIN campaign_room_members m ON m.room_id = r.id
+        WHERE r.group_id = ? AND m.qq_id = ? AND r.status IN ('waiting', 'reviewing', 'running')
+        ORDER BY r.updated_at DESC
+        LIMIT 1`,
+    ).get(groupId, userId) ?? null;
+  }
+
+  private isRoomMember(roomId: string, userId: number): boolean {
+    const row = this.db.query<{ qq_id: number }, [string, number]>(
+      'SELECT qq_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
+    ).get(roomId, userId);
+    return Boolean(row);
   }
 }

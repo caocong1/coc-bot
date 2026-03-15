@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-15
+
+### Added
+
+- **开场导演**：`OpeningDirector` 取代旧的三段式固定开场，改为“skeleton + 并行 beat 文本”两步生成，可基于房间人物关系、导演偏好、模组资产和规则包生成分镜式开场
+- **推进导演**：新增 `SessionDirector` 与 `director_cue` / `director_seed_resolved` 事件，在连续无进展交互后给 KP 注入低侵入的推进方向
+- **房间关系与导演偏好**：新增 `campaign_room_relationships` 表和 `campaign_rooms.director_prefs_json`，支持开场关系预设、分头开场偏好、扩写强度和私密引子偏好
+- **玩家入口扩展**：新增 `.room pc`、`.room relation list/set/clear`，玩家端 API 与房间详情页可读写关系和导演偏好
+
+### Changed
+
+- **开场落库**：开场计划、镜头标识和公开/私密开场文本都会进入 `kp_events`，恢复会话时可重建 opening plan、初始频道分配和导演种子
+- **上下文注入**：`ContextBuilder` 新增导演层，支持在 cue 触发时向 KP 注入当前汇合目标、未解决开场种子、最近导演提示和分频道状态
+- **房间详情页**：Web 玩家端增加轻量关系编辑区和导演偏好表单，便于在开团前调整开场组织方式
+
+### Verified
+
+- 通过 `bun x tsc -p c:\\Users\\sorawatcher\\workspace\\coc-bot\\tsconfig.json --noEmit`
+- 通过 `cd web && bun run build`
+
 ## [0.7.0] - 2026-03-15
 
 ### Added

@@ -23,6 +23,12 @@ import type {
   SessionEntityOverlay,
   SessionItemOverlay,
 } from '@shared/types/ScenarioAssets';
+import type {
+  DirectorCue,
+  DirectorSeed,
+  OpeningAssignment,
+  OpeningDirectorPlanSkeleton,
+} from '@shared/types/StoryDirector';
 import {
   getModuleRulePack,
   listModuleEntities,
@@ -57,10 +63,15 @@ export type SessionEventType =
   | 'player_joined'
   | 'channel_focus'
   | 'channel_assignment'
+  | 'channel_merge'
   | 'channel_interrupt'
   | 'register_entity'
   | 'register_item'
-  | 'item_change';
+  | 'item_change'
+  | 'opening_plan'
+  | 'director_marker'
+  | 'director_seed_resolved'
+  | 'director_cue';
 
 /** 查看上下文的视角 */
 export interface ViewerScope {
@@ -224,6 +235,14 @@ export interface SessionSnapshot {
   sceneItems: ScenarioItem[];
   /** 当前模组规则包（仅 approved） */
   moduleRulePack: ModuleRulePack | null;
+  /** 尚未完成的导演 seeds */
+  unresolvedDirectorSeeds: DirectorSeed[];
+  /** 最近的导演 cues */
+  recentDirectorCues: DirectorCue[];
+  /** 开场阶段为玩家分配的频道 */
+  openingAssignments: OpeningAssignment[];
+  /** 当前开场的汇合目标 */
+  openingMergeGoal: string | null;
 }
 
 // ─── 事件 payload ─────────────────────────────────────────────────────────────
@@ -279,6 +298,12 @@ interface ChannelAssignmentEventPayload {
   channelId: string;
 }
 
+interface ChannelMergeEventPayload {
+  fromChannel: string;
+  toChannel: string;
+  playerIds: number[];
+}
+
 interface ChannelInterruptEventPayload {
   channelId: string;
   reason: string;
@@ -301,6 +326,25 @@ interface ItemChangeEventPayload {
   usage?: string;
 }
 
+interface OpeningPlanEventPayload {
+  plan: OpeningDirectorPlanSkeleton;
+}
+
+interface DirectorMarkerEventPayload {
+  label: string;
+  beatId?: string;
+  participants?: string[];
+}
+
+interface DirectorSeedResolvedEventPayload {
+  seedIds: string[];
+  reason: string;
+}
+
+interface DirectorCueEventPayload {
+  cue: DirectorCue;
+}
+
 type KnownEventPayload =
   | MessageEventPayload
   | SceneChangeEventPayload
@@ -311,10 +355,15 @@ type KnownEventPayload =
   | PlayerJoinedEventPayload
   | ChannelFocusEventPayload
   | ChannelAssignmentEventPayload
+  | ChannelMergeEventPayload
   | ChannelInterruptEventPayload
   | RegisterEntityEventPayload
   | RegisterItemEventPayload
-  | ItemChangeEventPayload;
+  | ItemChangeEventPayload
+  | OpeningPlanEventPayload
+  | DirectorMarkerEventPayload
+  | DirectorSeedResolvedEventPayload
+  | DirectorCueEventPayload;
 
 interface AppendEventOptions {
   channelId?: string;
@@ -344,6 +393,11 @@ interface ReplayedState {
   ingameTime: string | null;
   activeChannels: Set<string>;
   interruptChannels: Set<string>;
+  openingPlan: OpeningDirectorPlanSkeleton | null;
+  directorSeeds: DirectorSeed[];
+  directorCues: DirectorCue[];
+  openingAssignments: OpeningAssignment[];
+  openingMergeGoal: string | null;
 }
 
 // ─── 实现 ─────────────────────────────────────────────────────────────────────
@@ -371,6 +425,11 @@ export class SessionState {
   private _derivedSummaryCache = new Map<string, { maxSeq: number; summaries: string[] }>();
   private _recentMessagesCache: SessionMessage[] = [];
   private _discoveredCluesCache: Clue[] = [];
+  private _openingPlanCache: OpeningDirectorPlanSkeleton | null = null;
+  private _directorSeedsCache: DirectorSeed[] = [];
+  private _directorCuesCache: DirectorCue[] = [];
+  private _openingAssignmentsCache: OpeningAssignment[] = [];
+  private _openingMergeGoal: string | null = null;
   /** 已加载的模组全文（来自 data/knowledge/raw/）*/
   private _scenarioText: string | null = null;
   /** 当前游戏内时间 */
@@ -546,6 +605,98 @@ export class SessionState {
         channelId: options.channelId ?? this._focusChannelId,
         actorId: options.actorId,
         visibility: options.visibility ?? DEFAULT_VISIBILITY,
+      },
+    );
+  }
+
+  recordChannelMerge(
+    fromChannel: string,
+    toChannel: string,
+    playerIds: number[],
+    actorId?: number,
+  ): void {
+    const normalizedFrom = normalizeChannelId(fromChannel);
+    const normalizedTo = normalizeChannelId(toChannel);
+    this.appendEvent(
+      'channel_merge',
+      {
+        fromChannel: normalizedFrom,
+        toChannel: normalizedTo,
+        playerIds: Array.from(new Set(playerIds)),
+      },
+      {
+        channelId: normalizedTo,
+        actorId,
+        visibility: DEFAULT_VISIBILITY,
+      },
+    );
+  }
+
+  recordOpeningPlan(
+    plan: OpeningDirectorPlanSkeleton,
+    options: { channelId?: string; actorId?: number } = {},
+  ): void {
+    this.appendEvent(
+      'opening_plan',
+      { plan },
+      {
+        channelId: options.channelId ?? this._focusChannelId,
+        actorId: options.actorId,
+        visibility: DEFAULT_VISIBILITY,
+        ingameTime: plan.startTime,
+      },
+    );
+  }
+
+  addDirectorMarker(
+    label: string,
+    options: { channelId?: string; actorId?: number; beatId?: string; participants?: string[] } = {},
+  ): void {
+    if (!label.trim()) return;
+    this.appendEvent(
+      'director_marker',
+      {
+        label: label.trim(),
+        beatId: options.beatId?.trim(),
+        participants: options.participants?.map((item) => item.trim()).filter(Boolean),
+      },
+      {
+        channelId: options.channelId ?? this._focusChannelId,
+        actorId: options.actorId,
+        visibility: DEFAULT_VISIBILITY,
+      },
+    );
+  }
+
+  resolveDirectorSeeds(
+    seedIds: string[],
+    reason: string,
+    options: { channelId?: string; actorId?: number } = {},
+  ): void {
+    const normalizedSeedIds = Array.from(new Set(seedIds.map((id) => id.trim()).filter(Boolean)));
+    if (normalizedSeedIds.length === 0) return;
+    this.appendEvent(
+      'director_seed_resolved',
+      { seedIds: normalizedSeedIds, reason: reason.trim() || 'resolved' },
+      {
+        channelId: options.channelId ?? this._focusChannelId,
+        actorId: options.actorId,
+        visibility: DEFAULT_VISIBILITY,
+      },
+    );
+  }
+
+  addDirectorCue(
+    cue: DirectorCue,
+    options: { channelId?: string; actorId?: number } = {},
+  ): void {
+    this.appendEvent(
+      'director_cue',
+      { cue },
+      {
+        channelId: options.channelId ?? cue.channelId ?? this._focusChannelId,
+        actorId: options.actorId,
+        visibility: DEFAULT_VISIBILITY,
       },
     );
   }
@@ -931,6 +1082,41 @@ export class SessionState {
       .map((r) => r.user_id);
   }
 
+  getLatestEventSeq(): number {
+    return this._events[this._events.length - 1]?.seq ?? 0;
+  }
+
+  getEventsSince(seqExclusive: number): Array<SessionEvent<KnownEventPayload>> {
+    return this._events.filter((event) => event.seq > seqExclusive);
+  }
+
+  getOpeningPlan(): OpeningDirectorPlanSkeleton | null {
+    return this._openingPlanCache ? cloneOpeningPlanSkeleton(this._openingPlanCache) : null;
+  }
+
+  getUnresolvedDirectorSeeds(): DirectorSeed[] {
+    return this._directorSeedsCache
+      .filter((seed) => !seed.resolved)
+      .map((seed) => ({ ...seed, targets: [...seed.targets] }));
+  }
+
+  getRecentDirectorCues(limit = 6): DirectorCue[] {
+    return this._directorCuesCache
+      .slice(-Math.max(0, limit))
+      .map((cue) => ({
+        ...cue,
+        relatedSeedIds: [...cue.relatedSeedIds],
+      }));
+  }
+
+  getOpeningAssignments(): OpeningAssignment[] {
+    return this._openingAssignmentsCache.map((assignment) => ({ ...assignment }));
+  }
+
+  getOpeningMergeGoal(): string | null {
+    return this._openingMergeGoal;
+  }
+
   // ─── 摘要 ────────────────────────────────────────────────────────────────────
 
   addSummary(content: string, sourceMessageIds: string[]): void {
@@ -1193,6 +1379,10 @@ export class SessionState {
       entityDetails: assetContext.entityDetails,
       sceneItems: assetContext.sceneItems,
       moduleRulePack: assetContext.moduleRulePack,
+      unresolvedDirectorSeeds: this.getUnresolvedDirectorSeeds(),
+      recentDirectorCues: this.getRecentDirectorCues(),
+      openingAssignments: this.getOpeningAssignments(),
+      openingMergeGoal: this._openingMergeGoal,
     };
   }
 
@@ -1447,6 +1637,11 @@ export class SessionState {
       ingameTime: legacyIngameTime,
       activeChannels: new Set<string>([DEFAULT_CHANNEL_ID]),
       interruptChannels: new Set<string>(),
+      openingPlan: null,
+      directorSeeds: [],
+      directorCues: [],
+      openingAssignments: [],
+      openingMergeGoal: null,
     };
 
     const seenPlayers = new Set<number>(legacyPlayerIds);
@@ -1532,11 +1727,45 @@ export class SessionState {
           }
           break;
         }
+        case 'channel_merge': {
+          const payload = event.payload as ChannelMergeEventPayload;
+          state.activeChannels.add(normalizeChannelId(payload.fromChannel));
+          state.activeChannels.add(normalizeChannelId(payload.toChannel));
+          break;
+        }
         case 'channel_interrupt': {
           const payload = event.payload as ChannelInterruptEventPayload;
           const normalized = normalizeChannelId(payload.channelId);
           if (payload.active) state.interruptChannels.add(normalized);
           else state.interruptChannels.delete(normalized);
+          break;
+        }
+        case 'opening_plan': {
+          const payload = event.payload as OpeningPlanEventPayload;
+          state.openingPlan = cloneOpeningPlanSkeleton(payload.plan);
+          state.directorSeeds = payload.plan.directorSeeds.map((seed) => ({ ...seed, targets: [...seed.targets] }));
+          state.openingAssignments = payload.plan.initialAssignments.map((assignment) => ({ ...assignment }));
+          state.openingMergeGoal = payload.plan.mergeGoal;
+          for (const assignment of payload.plan.initialAssignments) {
+            const normalized = normalizeChannelId(assignment.channelId);
+            state.activeChannels.add(normalized);
+          }
+          break;
+        }
+        case 'director_seed_resolved': {
+          const payload = event.payload as DirectorSeedResolvedEventPayload;
+          const resolvedIds = new Set(payload.seedIds);
+          state.directorSeeds = state.directorSeeds.map((seed) =>
+            resolvedIds.has(seed.id) ? { ...seed, resolved: true } : seed,
+          );
+          break;
+        }
+        case 'director_cue': {
+          const payload = event.payload as DirectorCueEventPayload;
+          state.directorCues.push({
+            ...payload.cue,
+            relatedSeedIds: [...payload.cue.relatedSeedIds],
+          });
           break;
         }
         default:
@@ -1559,6 +1788,11 @@ export class SessionState {
     this._ingameTime = state.ingameTime;
     this._activeChannels = state.activeChannels;
     this._interruptChannels = state.interruptChannels;
+    this._openingPlanCache = state.openingPlan;
+    this._directorSeedsCache = state.directorSeeds;
+    this._directorCuesCache = state.directorCues;
+    this._openingAssignmentsCache = state.openingAssignments;
+    this._openingMergeGoal = state.openingMergeGoal;
   }
 
   private _applyEvent(_event: SessionEvent<KnownEventPayload>): void {
@@ -1599,6 +1833,10 @@ export class SessionState {
       entityDetails: assetContext.entityDetails,
       sceneItems: assetContext.sceneItems,
       moduleRulePack: assetContext.moduleRulePack,
+      unresolvedDirectorSeeds: [],
+      recentDirectorCues: [],
+      openingAssignments: [],
+      openingMergeGoal: null,
     };
   }
 
@@ -2009,6 +2247,30 @@ function buildSummaryCacheKey(channelId: string, viewerScope: ViewerScope): stri
   return `${channelId}::${viewer}`;
 }
 
+function cloneOpeningPlanSkeleton(plan: OpeningDirectorPlanSkeleton): OpeningDirectorPlanSkeleton {
+  return {
+    ...plan,
+    assumedLinks: plan.assumedLinks.map((link) => ({
+      ...link,
+      participants: [...link.participants],
+    })),
+    initialAssignments: plan.initialAssignments.map((assignment) => ({ ...assignment })),
+    beats: plan.beats.map((beat) => ({
+      ...beat,
+      participants: [...beat.participants],
+      sceneState: {
+        ...beat.sceneState,
+        activeNpcs: [...beat.sceneState.activeNpcs],
+      },
+      privateTargets: [...beat.privateTargets],
+    })),
+    directorSeeds: plan.directorSeeds.map((seed) => ({
+      ...seed,
+      targets: [...seed.targets],
+    })),
+  };
+}
+
 function summarizeEventForContext(event: SessionEvent<KnownEventPayload>): string | null {
   switch (event.type) {
     case 'message': {
@@ -2058,6 +2320,10 @@ function summarizeEventForContext(event: SessionEvent<KnownEventPayload>): strin
       const payload = event.payload as ChannelAssignmentEventPayload;
       return `玩家${payload.userId}进入频道 ${payload.channelId}`;
     }
+    case 'channel_merge': {
+      const payload = event.payload as ChannelMergeEventPayload;
+      return `频道 ${payload.fromChannel} 并入 ${payload.toChannel}`;
+    }
     case 'channel_interrupt': {
       const payload = event.payload as ChannelInterruptEventPayload;
       return payload.active
@@ -2075,6 +2341,22 @@ function summarizeEventForContext(event: SessionEvent<KnownEventPayload>): strin
     case 'item_change': {
       const payload = event.payload as ItemChangeEventPayload;
       return `物品状态更新：${payload.itemName}${payload.owner ? ` → ${payload.owner}` : ''}${payload.location ? ` @ ${payload.location}` : ''}`;
+    }
+    case 'opening_plan': {
+      const payload = event.payload as OpeningPlanEventPayload;
+      return `开场计划已设定：${payload.plan.beats.length} 个镜头，汇合目标为 ${compact(payload.plan.mergeGoal, 48)}`;
+    }
+    case 'director_marker': {
+      const payload = event.payload as DirectorMarkerEventPayload;
+      return `导演镜头：${payload.label}`;
+    }
+    case 'director_seed_resolved': {
+      const payload = event.payload as DirectorSeedResolvedEventPayload;
+      return `导演种子已解决：${payload.seedIds.join('、')}`;
+    }
+    case 'director_cue': {
+      const payload = event.payload as DirectorCueEventPayload;
+      return `导演提示：${payload.cue.type}（${compact(payload.cue.reason, 48)}）`;
     }
     default:
       return null;

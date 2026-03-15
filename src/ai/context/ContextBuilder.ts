@@ -16,6 +16,7 @@
 
 import type { Character } from '@shared/types/Character';
 import { getSkillDisplayName } from '@shared/coc7/skillNames';
+import type { DirectorCue } from '@shared/types/StoryDirector';
 import type { KPTemplate } from '../config/KPTemplateRegistry';
 import { ALL_DIMENSIONS, getDimensionTier } from '../config/DimensionDescriptors';
 import type { SessionSnapshot, SceneSegment, ScenarioImage, ViewerScope } from '../../runtime/SessionState';
@@ -72,6 +73,8 @@ export interface BuildOptions {
   viewerScope?: ViewerScope;
   /** 当前频道内的调查员 userId 列表 */
   channelPlayerIds?: number[];
+  /** 本轮待注入的导演提示 */
+  directorCue?: DirectorCue | null;
 }
 
 // ─── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -118,6 +121,7 @@ export class ContextBuilder {
 
     const layer1 = this.buildKPPersonality(template, options.customPrompts);
     const layer1_5 = this.buildModuleRulePack(snapshot);
+    const layerDirector = this.buildDirectorState(snapshot, options.directorCue ?? null);
     const layer2 = this.buildSceneState(snapshot, options.scenarioImages);
     const layer3 = this.buildCharacterSheets(channelCharacters);
     const layer4 = this.buildRuleContext(options.ruleChunks ?? []);
@@ -132,13 +136,14 @@ export class ContextBuilder {
 
     layerStats['1_personality'] = layer1.length;
     layerStats['1_5_rule_pack'] = layer1_5.length;
+    layerStats['1_6_director'] = layerDirector.length;
     layerStats['2_scene'] = layer2.length;
     layerStats['3_characters'] = layer3.length;
     layerStats['4_rules_rag'] = layer4.length;
     layerStats['5_scenario_rag'] = layer5.length;
     layerStats['6_summaries'] = layer6.length;
 
-    const sections = [layer1, layer1_5, layer2, layer3, layer4, layer5, layer6].filter(Boolean);
+    const sections = [layer1, layer1_5, layerDirector, layer2, layer3, layer4, layer5, layer6].filter(Boolean);
     const systemPrompt = sections.join('\n\n---\n\n');
 
     // 层 7：近期原文对话
@@ -402,6 +407,62 @@ ${this.buildBehavioralProfile(template)}
     if (rulePack.revelationRules) lines.push(`**信息揭示规则**：${rulePack.revelationRules}`);
     if (rulePack.forbiddenAssumptions) lines.push(`**禁止默认假设**：${rulePack.forbiddenAssumptions}`);
     if (rulePack.freeText) lines.push(`**补充设定**：${rulePack.freeText}`);
+    return lines.join('\n');
+  }
+
+  private buildDirectorState(snapshot: SessionSnapshot, directorCue: DirectorCue | null): string {
+    const hasSplitOpening = snapshot.openingAssignments.length > 0;
+    const hasSeeds = snapshot.unresolvedDirectorSeeds.length > 0;
+    const hasCueHistory = snapshot.recentDirectorCues.length > 0;
+    const hasSplitChannels = snapshot.activeChannels.length > 1;
+    const hasMergeGoal = Boolean(snapshot.openingMergeGoal?.trim());
+    if (!directorCue && !hasSplitOpening && !hasSeeds && !hasCueHistory && !hasSplitChannels && !hasMergeGoal) {
+      return '';
+    }
+
+    const lines: string[] = [
+      '# 导演层（隐藏，仅供节奏与镜头调度参考）',
+      '以下信息用于自然编排开场与中途推动，不要把它们原样说给玩家。',
+    ];
+
+    if (hasMergeGoal) {
+      lines.push(`**当前汇合目标**：${snapshot.openingMergeGoal}`);
+    }
+
+    if (hasSplitOpening) {
+      lines.push('**开场频道分配**：');
+      for (const assignment of snapshot.openingAssignments) {
+        lines.push(`- ${assignment.target} → ${assignment.channelId}`);
+      }
+    }
+
+    if (hasSeeds) {
+      lines.push('**未完成开场种子**：');
+      for (const seed of snapshot.unresolvedDirectorSeeds.slice(0, 6)) {
+        lines.push(`- [${seed.kind}] ${seed.title}（频道 ${seed.channelId}）：${seed.description}`);
+      }
+    }
+
+    if (hasCueHistory) {
+      lines.push('**最近导演提示**：');
+      for (const cue of snapshot.recentDirectorCues.slice(-3)) {
+        lines.push(`- [${cue.type}] ${cue.reason}`);
+      }
+    }
+
+    if (directorCue) {
+      lines.push('**本轮导演提示**：');
+      lines.push(`- 类型：${directorCue.type}`);
+      lines.push(`- 原因：${directorCue.reason}`);
+      lines.push(`- 推动方式：${directorCue.guidance}`);
+      lines.push(`- 边界：${directorCue.boundaries}`);
+    }
+
+    if (hasSplitChannels) {
+      lines.push(`**当前分频道状态**：焦点在 ${snapshot.focusChannelId}，活跃频道有 ${snapshot.activeChannels.join('、')}。`);
+    }
+
+    lines.push('推进时优先提供自然的世界反应、人物跟进和时间压力，不要替调查员做决定。');
     return lines.join('\n');
   }
 

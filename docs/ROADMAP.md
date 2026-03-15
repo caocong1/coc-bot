@@ -107,6 +107,9 @@
 - [x] 快照接口（`snapshot()`）供 ContextBuilder 读取
 - [x] 事件回放快照（`snapshotFromEvents()`）和 shadow compare
 - [x] 场景频道（`SceneChannel`）：焦点频道、玩家归属、频道中断
+- [x] 开场导演：`OpeningDirector` 两步生成 opening plan（skeleton + beat 文本），支持分频道、分时段、个人化引子和自然汇合目标
+- [x] 推进导演：`SessionDirector` 在连续无进展交互后生成 `DirectorCue`，为 KP 注入低侵入推进方向
+- [x] 开场/导演事件：`opening_plan` / `director_marker` / `director_seed_resolved` / `director_cue`
 - [x] 分段管理（`saveSegments` / `getSegments` / `getCurrentSegmentId` / `setCurrentSegmentId`）
 - [x] 自动场景推进（`advanceSegmentIfTitleMatches`）— KP 回复含下一段标题关键词时自动前进指针
 
@@ -180,6 +183,7 @@
 - [x] PC 名称解析：消息记录中显示角色名（`resolvePcName()`）
 - [x] `.scene list/focus/join/move/merge/clear`
 - [x] 非焦点频道紧急中断提示（建议切换焦点）
+- [x] 开团前关系/偏好输入：`.room pc`、`.room relation list/set/clear`
 
 #### 服务入口（`server/index.ts`）
 
@@ -235,8 +239,10 @@
 ### 13. 跑团房间系统
 
 - [x] **DB**：`campaign_rooms` + `campaign_room_members` 表
+- [x] **DB**：`campaign_room_relationships` 表 + `campaign_rooms.director_prefs_json`
 - [x] 创建/加入/删除房间（运行中需 `force:true`）
 - [x] 房间成员选择 PC（软验证：不符合约束显示 ⚠️ 但允许强行开始）
+- [x] 房间关系预设（无向对）与导演偏好配置（分头开场、扩写强度、私密引子强度）
 - [x] 从 Web 触发 `.campaign start`
 - [x] 管理员强制删除任意房间
 - [x] 一群只能有一个活跃跑团

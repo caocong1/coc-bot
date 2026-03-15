@@ -180,6 +180,7 @@ export function migrateCoreSchema(db: Database): void {
       creator_qq_id INTEGER NOT NULL,
       scenario_name TEXT,
       constraints_json TEXT NOT NULL DEFAULT '{}',
+      director_prefs_json TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'waiting',
       kp_session_id TEXT,
       created_at TEXT NOT NULL,
@@ -199,6 +200,21 @@ export function migrateCoreSchema(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_campaign_room_members_room ON campaign_room_members(room_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_room_members_qq ON campaign_room_members(qq_id);
+
+    CREATE TABLE IF NOT EXISTS campaign_room_relationships (
+      room_id TEXT NOT NULL REFERENCES campaign_rooms(id),
+      user_a INTEGER NOT NULL,
+      user_b INTEGER NOT NULL,
+      relation_type TEXT NOT NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (room_id, user_a, user_b)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_room_relationships_room ON campaign_room_relationships(room_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_campaign_room_relationships_user_a ON campaign_room_relationships(user_a);
+    CREATE INDEX IF NOT EXISTS idx_campaign_room_relationships_user_b ON campaign_room_relationships(user_b);
 
     -- ── 模组管理 ────────────────────────────────────────────────────────────────
 
@@ -325,6 +341,10 @@ export function migrateCoreSchema(db: Database): void {
   } catch { /* 列已存在，忽略 */ }
 
   try {
+    db.exec("ALTER TABLE campaign_rooms ADD COLUMN director_prefs_json TEXT NOT NULL DEFAULT '{}';");
+  } catch { /* 列已存在，忽略 */ }
+
+  try {
     db.exec('ALTER TABLE player_tokens ADD COLUMN group_id INTEGER;');
   } catch { /* 列已存在，忽略 */ }
 
@@ -384,7 +404,7 @@ export function migrateCoreSchema(db: Database): void {
     if (col && col.notnull === 1) {
       // 动态获取现有列名，安全拷贝数据
       const cols = info.map((c) => c.name);
-      const targetCols = ['id', 'name', 'group_id', 'creator_qq_id', 'scenario_name', 'module_id', 'constraints_json', 'status', 'kp_session_id', 'created_at', 'updated_at'];
+      const targetCols = ['id', 'name', 'group_id', 'creator_qq_id', 'scenario_name', 'module_id', 'constraints_json', 'director_prefs_json', 'status', 'kp_session_id', 'created_at', 'updated_at'];
       const existingCols = targetCols.filter((c) => cols.includes(c));
       const selectCols = existingCols.join(', ');
 
@@ -397,6 +417,7 @@ export function migrateCoreSchema(db: Database): void {
           scenario_name TEXT,
           module_id TEXT,
           constraints_json TEXT NOT NULL DEFAULT '{}',
+          director_prefs_json TEXT NOT NULL DEFAULT '{}',
           status TEXT NOT NULL DEFAULT 'waiting',
           kp_session_id TEXT,
           created_at TEXT NOT NULL,

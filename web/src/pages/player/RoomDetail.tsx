@@ -1,5 +1,14 @@
-import { createResource, createSignal, For, Show, type Component } from 'solid-js';
-import { playerApi, type RoomDetail, type RoomMember, type CharacterSummary, type Message } from '../../api';
+import { createEffect, createResource, createSignal, For, Show, type Component } from 'solid-js';
+import {
+  playerApi,
+  type CharacterSummary,
+  type Message,
+  type RoomDetail,
+  type RoomDirectorPrefs,
+  type RoomMember,
+  type RoomRelationship,
+  type RoomRelationType,
+} from '../../api';
 
 const STATUS_LABEL: Record<string, string> = {
   waiting: '⏳ 等待中',
@@ -11,6 +20,7 @@ const STATUS_LABEL: Record<string, string> = {
 const RoomDetailPage: Component<{ id: string }> = (props) => {
   const [room, { refetch }] = createResource(() => playerApi.getRoom(props.id).catch(() => null));
   const [chars] = createResource(() => playerApi.listCharacters().catch(() => []));
+  const [me] = createResource(() => playerApi.getMe().catch(() => null));
   const [roomTime] = createResource(
     () => room()?.status === 'running' ? props.id : null,
     (id) => id ? playerApi.getRoomTime(id).then((r) => r.ingameTime).catch(() => null) : null,
@@ -23,12 +33,26 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
   const [msg, setMsg] = createSignal('');
   const [err, setErr] = createSignal('');
   const [showDeleteConfirm, setShowDeleteConfirm] = createSignal(false);
+  const [relationTarget, setRelationTarget] = createSignal('');
+  const [relationType, setRelationType] = createSignal<RoomRelationType>('acquainted');
+  const [relationNotes, setRelationNotes] = createSignal('');
+  const [savingRelation, setSavingRelation] = createSignal(false);
+  const [savingPrefs, setSavingPrefs] = createSignal(false);
+  const [directorPrefs, setDirectorPrefs] = createSignal<RoomDirectorPrefs>({
+    allowSplitOpening: true,
+    preferredStartStyle: 'mixed',
+    allowModuleExpansion: true,
+    expansionLevel: 'medium',
+    privateHookLevel: 'light',
+    notes: '',
+  });
 
-  const myQqId = () => {
-    // 从 room members 里找自己（通过 isCreator 或 character player_id 无法直接知道，
-    // 所以先 join 确保在里面，然后通过 /me 获取）
-    return null; // 简化：通过 join/setChar 操作时后端会用 token 识别
-  };
+  createEffect(() => {
+    const prefs = room()?.directorPrefs;
+    if (prefs) {
+      setDirectorPrefs({ ...prefs });
+    }
+  });
 
   const isMember = () => {
     const r = room();
@@ -131,6 +155,67 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
     navigator.clipboard.writeText(`.web room ${props.id}`).then(() => {
       setMsg('✅ 邀请指令已复制，发送到 QQ 私聊即可获取链接');
     });
+  };
+
+  const saveRelationship = async () => {
+    const targetQqId = Number(relationTarget().trim());
+    if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
+      setErr('请输入有效的目标 QQ 号');
+      return;
+    }
+    setSavingRelation(true);
+    setErr('');
+    setMsg('');
+    try {
+      await playerApi.setRoomRelationship(props.id, {
+        targetQqId,
+        relationType: relationType(),
+        notes: relationNotes().trim(),
+      });
+      setMsg('已更新人物关系');
+      setRelationNotes('');
+      await refetch();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSavingRelation(false);
+    }
+  };
+
+  const clearRelationship = async (targetQqId: number) => {
+    setSavingRelation(true);
+    setErr('');
+    setMsg('');
+    try {
+      await playerApi.deleteRoomRelationship(props.id, targetQqId);
+      setMsg('已清除人物关系');
+      await refetch();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSavingRelation(false);
+    }
+  };
+
+  const saveDirectorPrefs = async () => {
+    setSavingPrefs(true);
+    setErr('');
+    setMsg('');
+    try {
+      const saved = await playerApi.updateRoomDirectorPrefs(props.id, directorPrefs());
+      setDirectorPrefs({ ...saved });
+      setMsg('已更新导演偏好');
+      await refetch();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSavingPrefs(false);
+    }
+  };
+
+  const canClearRelationship = (relation: RoomRelationship) => {
+    const myQqId = me()?.qqId;
+    return Boolean(myQqId && (relation.userA === myQqId || relation.userB === myQqId));
   };
 
   return (
@@ -274,6 +359,156 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
                     </Show>
                   </div>
                 </Show>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', 'grid-template-columns': '1fr 1fr', gap: '1.5rem', 'margin-top': '1.5rem' }}>
+              <div>
+                <h3 style={{ margin: '0 0 0.75rem' }}>人物关系</h3>
+                <div class="bg-surface border border-border rounded-lg px-4 py-4 flex flex-col gap-3">
+                  <Show when={(r().relationships ?? []).length > 0} fallback={<p class="text-text-dim text-sm">还没有显式关系。也可以直接在群里用 <code>.room relation</code> 配。</p>}>
+                    <div class="flex flex-col gap-2">
+                      <For each={r().relationships}>
+                        {(relation) => (
+                          <div class="border border-border rounded-md px-3 py-2 text-sm">
+                            <div style={{ 'font-weight': 600 }}>
+                              QQ {relation.userA} ↔ QQ {relation.userB}
+                            </div>
+                            <div class="text-text-dim">{relation.relationType}{relation.notes ? ` · ${relation.notes}` : ''}</div>
+                            <Show when={canClearRelationship(relation)}>
+                              <div style={{ 'margin-top': '0.5rem' }}>
+                                <button
+                                  class="px-3 py-1.5 bg-danger text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95"
+                                  onClick={() => {
+                                    const myQqId = me()?.qqId;
+                                    const target = myQqId && relation.userA === myQqId ? relation.userB : relation.userA;
+                                    clearRelationship(target);
+                                  }}
+                                  disabled={savingRelation()}
+                                >
+                                  清除
+                                </button>
+                              </div>
+                            </Show>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+
+                  <div class="border-t border-border pt-3 flex flex-col gap-2">
+                    <div class="text-sm" style={{ 'font-weight': 600 }}>新增或覆盖关系</div>
+                    <input
+                      value={relationTarget()}
+                      onInput={(e) => setRelationTarget(e.currentTarget.value)}
+                      placeholder="目标 QQ 号"
+                      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
+                    />
+                    <select
+                      value={relationType()}
+                      onChange={(e) => setRelationType(e.currentTarget.value as RoomRelationType)}
+                      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
+                    >
+                      <option value="heard_of">heard_of</option>
+                      <option value="acquainted">acquainted</option>
+                      <option value="close">close</option>
+                      <option value="bound">bound</option>
+                      <option value="secret_tie">secret_tie</option>
+                    </select>
+                    <textarea
+                      value={relationNotes()}
+                      onInput={(e) => setRelationNotes(e.currentTarget.value)}
+                      placeholder="备注，可写旧识来源、共同经历等"
+                      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text min-h-[84px]"
+                    />
+                    <button
+                      class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
+                      onClick={saveRelationship}
+                      disabled={savingRelation()}
+                    >
+                      {savingRelation() ? '保存中...' : '保存关系'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 style={{ margin: '0 0 0.75rem' }}>导演偏好</h3>
+                <div class="bg-surface border border-border rounded-lg px-4 py-4 flex flex-col gap-3">
+                  <div class="flex items-center justify-between">
+                    <span>允许分头开场</span>
+                    <input
+                      type="checkbox"
+                      checked={directorPrefs().allowSplitOpening}
+                      onChange={(e) => setDirectorPrefs((prev) => ({ ...prev, allowSplitOpening: e.currentTarget.checked }))}
+                      disabled={!r().isCreator}
+                    />
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span>允许模组内扩写</span>
+                    <input
+                      type="checkbox"
+                      checked={directorPrefs().allowModuleExpansion}
+                      onChange={(e) => setDirectorPrefs((prev) => ({ ...prev, allowModuleExpansion: e.currentTarget.checked }))}
+                      disabled={!r().isCreator}
+                    />
+                  </div>
+                  <label class="flex flex-col gap-1 text-sm">
+                    <span>开场风格</span>
+                    <select
+                      value={directorPrefs().preferredStartStyle}
+                      onChange={(e) => setDirectorPrefs((prev) => ({ ...prev, preferredStartStyle: e.currentTarget.value as RoomDirectorPrefs['preferredStartStyle'] }))}
+                      disabled={!r().isCreator}
+                      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
+                    >
+                      <option value="together">together</option>
+                      <option value="split">split</option>
+                      <option value="mixed">mixed</option>
+                    </select>
+                  </label>
+                  <label class="flex flex-col gap-1 text-sm">
+                    <span>扩写强度</span>
+                    <select
+                      value={directorPrefs().expansionLevel}
+                      onChange={(e) => setDirectorPrefs((prev) => ({ ...prev, expansionLevel: e.currentTarget.value as RoomDirectorPrefs['expansionLevel'] }))}
+                      disabled={!r().isCreator}
+                      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
+                    >
+                      <option value="light">light</option>
+                      <option value="medium">medium</option>
+                      <option value="high">high</option>
+                    </select>
+                  </label>
+                  <label class="flex flex-col gap-1 text-sm">
+                    <span>私密引子强度</span>
+                    <select
+                      value={directorPrefs().privateHookLevel}
+                      onChange={(e) => setDirectorPrefs((prev) => ({ ...prev, privateHookLevel: e.currentTarget.value as RoomDirectorPrefs['privateHookLevel'] }))}
+                      disabled={!r().isCreator}
+                      class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
+                    >
+                      <option value="none">none</option>
+                      <option value="light">light</option>
+                      <option value="medium">medium</option>
+                    </select>
+                  </label>
+                  <textarea
+                    value={directorPrefs().notes}
+                    onInput={(e) => setDirectorPrefs((prev) => ({ ...prev, notes: e.currentTarget.value }))}
+                    placeholder="额外导演偏好，例如更慢热、更强调职业引子等"
+                    disabled={!r().isCreator}
+                    class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text min-h-[96px]"
+                  />
+                  <Show when={r().isCreator} fallback={<p class="text-text-dim text-sm">只有创建者可以修改导演偏好。</p>}>
+                    <button
+                      class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
+                      onClick={saveDirectorPrefs}
+                      disabled={savingPrefs()}
+                    >
+                      {savingPrefs() ? '保存中...' : '保存导演偏好'}
+                    </button>
+                  </Show>
+                </div>
               </div>
             </div>
 

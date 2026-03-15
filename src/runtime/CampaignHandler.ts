@@ -26,6 +26,11 @@ import { ModeResolver } from './ModeResolver';
 import { CharacterStore } from '../commands/sheet/CharacterStore';
 import { ImageLibrary } from '../knowledge/images/ImageLibrary';
 import type { Character } from '@shared/types/Character';
+import { getRoomDirectorPrefs, listRoomRelationships } from '../storage/RoomDirectorStore';
+import { getModuleRulePack, listModuleEntities, listModuleItems } from '../storage/ModuleAssetStore';
+import { OpeningDirector } from './OpeningDirector';
+import { SessionDirector } from './SessionDirector';
+import { createDefaultRoomDirectorPrefs, type OpeningDirectorPlan, type RoomDirectorPrefs, type RoomRelationship } from '@shared/types/StoryDirector';
 
 const MANIFEST_PATH = 'data/knowledge/manifest.json';
 const KP_MODEL = 'qwen3.5-plus';
@@ -81,6 +86,9 @@ interface GroupSession {
   campaignId: string;
   state: SessionState;
   pipeline: KPPipeline;
+  roomId: string | null;
+  effectiveCycle: number;
+  idleCycleStreak: number;
 }
 
 export class CampaignHandler {
@@ -91,6 +99,8 @@ export class CampaignHandler {
   private readonly defaultTemplateId: string;
   private readonly knowledge = new KnowledgeService();
   private readonly imageLibrary = new ImageLibrary();
+  private readonly openingDirector: OpeningDirector;
+  private readonly sessionDirector = new SessionDirector();
 
   /** groupId → 活跃 session */
   private readonly sessions = new Map<number, GroupSession>();
@@ -107,6 +117,7 @@ export class CampaignHandler {
     this.store = options.store;
     this.modeResolver = options.modeResolver;
     this.defaultTemplateId = options.defaultTemplateId ?? 'classic';
+    this.openingDirector = new OpeningDirector(this.aiClient);
   }
 
   // ─── 开 / 暂停 / 继续 / 结团 ────────────────────────────────────────────────
@@ -158,7 +169,15 @@ export class CampaignHandler {
     const state = new SessionState(this.db, sessionId, campaignId, groupId);
     const pipeline = new KPPipeline(this.aiClient, state, this.store, this.knowledge, { templateId: tid, customPrompts, db: this.db });
 
-    this.sessions.set(groupId, { sessionId, campaignId, state, pipeline });
+    this.sessions.set(groupId, {
+      sessionId,
+      campaignId,
+      state,
+      pipeline,
+      roomId: roomId ?? null,
+      effectiveCycle: 0,
+      idleCycleStreak: 0,
+    });
     this.modeResolver.setGroupMode(groupId, 'campaign', campaignId);
 
     // 关联 room ↔ session + 自动加载模组
@@ -186,8 +205,7 @@ export class CampaignHandler {
       ? this.store.getRoomCharacters(roomId)
       : this.store.getGroupActiveCharacters(groupId);
 
-    // 生成多段开场白
-    return campaignOutputFromParts(await this.generateRichOpening(state, tid, characters));
+    return this.createOpeningOutput(state, tid, characters, roomId ?? null);
   }
 
   /**
@@ -262,6 +280,9 @@ export class CampaignHandler {
       campaignId: row.campaign_id,
       state,
       pipeline,
+      roomId: this.getRoomIdBySession(row.id),
+      effectiveCycle: this.getInitialEffectiveCycle(state),
+      idleCycleStreak: 0,
     });
     this.modeResolver.setGroupMode(groupId, 'campaign', row.campaign_id);
 
@@ -539,15 +560,13 @@ export class CampaignHandler {
     channelId: string,
     onThinking?: () => void,
   ): Promise<CampaignOutput> {
-    const input: KPInput = {
+    const output = await this.runPipelineInput(session, {
       kind: 'player_message',
       userId,
       displayName,
       content: text,
       channelId,
-    };
-
-    const output = await session.pipeline.process(input, onThinking);
+    }, onThinking);
 
     if (output.debug) {
       console.log(
@@ -589,7 +608,7 @@ export class CampaignHandler {
     };
 
     console.log(`[Campaign] group=${groupId} user=${userId} force_kp text="${text.slice(0, 30)}"`);
-    const output = await session.pipeline.process(input, onThinking);
+    const output = await this.runPipelineInput(session, input, onThinking);
     const reply = output.shouldRespond ? output.text : null;
     if (reply) session.state.advanceSegmentIfTitleMatches(reply);
     return { text: reply, images: output.images ?? [], privateMessages: output.privateMessages ?? [] };
@@ -622,7 +641,7 @@ export class CampaignHandler {
       channelId,
     };
 
-    const output = await session.pipeline.process(input, onThinking);
+    const output = await this.runPipelineInput(session, input, onThinking);
     const reply = output.shouldRespond ? output.text : null;
     if (reply) session.state.advanceSegmentIfTitleMatches(reply);
     return { text: reply, images: output.images ?? [], privateMessages: output.privateMessages ?? [] };
@@ -703,6 +722,17 @@ export class CampaignHandler {
       const fromState = session.state.getChannelState(fromChannel);
       for (const playerId of fromState.playerIds) {
         session.state.assignPlayerToChannel(playerId, toChannel, userId);
+      }
+      session.state.recordChannelMerge(fromChannel, toChannel, fromState.playerIds, userId);
+      const mergeSeedIds = session.state.getUnresolvedDirectorSeeds()
+        .filter((seed) => seed.kind === 'merge_goal')
+        .map((seed) => seed.id);
+      if (mergeSeedIds.length > 0) {
+        session.state.resolveDirectorSeeds(
+          mergeSeedIds,
+          `频道 ${fromChannel} 并入 ${toChannel}，自然汇合目标已进入执行阶段`,
+          { channelId: toChannel, actorId: userId },
+        );
       }
       if (session.state.getFocusChannel() === fromChannel) {
         session.state.setFocusChannel(toChannel, userId);
@@ -814,6 +844,72 @@ export class CampaignHandler {
     };
   }
 
+  private async runPipelineInput(
+    session: GroupSession,
+    input: KPInput,
+    onThinking?: () => void,
+  ) {
+    const cycleEligible = input.kind === 'player_message' || input.kind === 'force_kp' || input.kind === 'dice_result';
+    const beforeSeq = session.state.getLatestEventSeq();
+    const pendingCue = cycleEligible
+      ? this.sessionDirector.maybeCreateCue({
+        snapshot: session.state.snapshot(input.channelId ?? session.state.getFocusChannel(), { includeKpOnly: true }),
+        upcomingCycle: session.effectiveCycle + 1,
+        idleCycleStreak: session.idleCycleStreak,
+      })
+      : null;
+
+    const output = await session.pipeline.process(
+      { ...input, directorCue: pendingCue ?? undefined },
+      onThinking,
+    );
+
+    if (!cycleEligible || !output.shouldRespond) {
+      return output;
+    }
+
+    session.effectiveCycle += 1;
+    const eventDelta = session.state.getEventsSince(beforeSeq);
+    const progressed = this.hasMeaningfulProgress(eventDelta);
+    session.idleCycleStreak = progressed ? 0 : session.idleCycleStreak + 1;
+
+    if (pendingCue) {
+      session.state.addDirectorCue({ ...pendingCue, issuedAtCycle: session.effectiveCycle }, { channelId: pendingCue.channelId });
+      if (progressed && pendingCue.relatedSeedIds.length > 0) {
+        session.state.resolveDirectorSeeds(
+          pendingCue.relatedSeedIds,
+          `导演提示 ${pendingCue.type} 已在本轮形成有效推进`,
+          { channelId: pendingCue.channelId },
+        );
+      }
+    }
+
+    return output;
+  }
+
+  private hasMeaningfulProgress(events: Array<{ type: string; payload: any }>): boolean {
+    return events.some((event) => {
+      switch (event.type) {
+        case 'clue_discovered':
+        case 'scene_change':
+        case 'check_request':
+        case 'check_result':
+        case 'channel_merge':
+          return true;
+        case 'time_advance': {
+          const deltaMinutes = Number(event.payload.deltaMinutes ?? 0);
+          return Number.isFinite(deltaMinutes) && Math.abs(deltaMinutes) >= 10;
+        }
+        default:
+          return false;
+      }
+    });
+  }
+
+  private getInitialEffectiveCycle(state: SessionState): number {
+    return state.getRecentDirectorCues(20).reduce((max, cue) => Math.max(max, cue.issuedAtCycle), 0);
+  }
+
   private buildSceneStatusText(session: GroupSession): string {
     const focusChannelId = session.state.getFocusChannel();
     const channels = session.state.getActiveChannels();
@@ -855,6 +951,151 @@ export class CampaignHandler {
       if (pattern.test(trimmed)) return reason;
     }
     return null;
+  }
+
+  private getRoomIdBySession(sessionId: string): string | null {
+    const row = this.db.query<{ id: string }, [string]>(
+      'SELECT id FROM campaign_rooms WHERE kp_session_id = ? LIMIT 1',
+    ).get(sessionId);
+    return row?.id ?? null;
+  }
+
+  private async createOpeningOutput(
+    state: SessionState,
+    templateId: string,
+    characters: Character[],
+    roomId: string | null,
+  ): Promise<CampaignOutput> {
+    const directorPrefs = roomId ? getRoomDirectorPrefs(this.db, roomId) : createDefaultRoomDirectorPrefs();
+    const roomRelationships = roomId ? listRoomRelationships(this.db, roomId) : [];
+    const moduleId = state.getModuleId();
+    const approvedEntities = moduleId ? listModuleEntities(this.db, moduleId, ['approved']) : [];
+    const approvedItems = moduleId ? listModuleItems(this.db, moduleId, ['approved']) : [];
+    const moduleRulePack = moduleId ? getModuleRulePack(this.db, moduleId, ['approved']) : null;
+
+    let plan: OpeningDirectorPlan;
+    try {
+      plan = await this.openingDirector.createPlan({
+        characters,
+        roomRelationships,
+        directorPrefs,
+        scenarioText: state.getScenarioText(),
+        scenarioLabel: state.getScenarioLabel(),
+        approvedEntities,
+        approvedItems,
+        moduleRulePack,
+      });
+    } catch (err) {
+      console.error('[Campaign] OpeningDirector failed unexpectedly, fallback to deterministic opening plan:', err);
+      plan = this.openingDirector.createFallbackPlan({
+        characters,
+        roomRelationships,
+        directorPrefs,
+        scenarioText: state.getScenarioText(),
+        scenarioLabel: state.getScenarioLabel(),
+        approvedEntities,
+        approvedItems,
+        moduleRulePack,
+      });
+    }
+
+    return this.applyOpeningPlan(state, plan, characters);
+  }
+
+  private applyOpeningPlan(
+    state: SessionState,
+    plan: OpeningDirectorPlan,
+    characters: Character[],
+  ): CampaignOutput {
+    const textParts: string[] = [];
+    const privateMessages: Array<{ userId: number; text: string }> = [];
+    const deliveredPrivate = new Set<string>();
+
+    state.recordOpeningPlan(plan, { channelId: plan.beats[0]?.channelId ?? 'main' });
+    state.setIngameTime(plan.startTime, '开场导演设定时间', 'ai', undefined, { channelId: plan.beats[0]?.channelId ?? 'main' });
+
+    const targetToUserId = new Map<string, number>();
+    for (const character of characters) {
+      targetToUserId.set(normalizeOpeningTarget(character.name), character.playerId);
+      targetToUserId.set(normalizeOpeningTarget(String(character.playerId)), character.playerId);
+      state.trackPlayer(character.playerId, { channelId: 'main', actorId: character.playerId });
+    }
+
+    for (const assignment of plan.initialAssignments) {
+      const userId = targetToUserId.get(normalizeOpeningTarget(assignment.target));
+      if (userId !== undefined) {
+        state.assignPlayerToChannel(userId, assignment.channelId);
+      }
+    }
+
+    if (plan.beats[0]?.channelId) {
+      state.setFocusChannel(plan.beats[0].channelId);
+    }
+
+    for (const beat of plan.beats) {
+      const label = `【镜头：${beat.sceneName}｜涉及：${beat.participants.join('、')}】`;
+      state.addDirectorMarker(label, {
+        channelId: beat.channelId,
+        beatId: beat.id,
+        participants: beat.participants,
+      });
+      textParts.push(label);
+
+      if (beat.sceneName || beat.sceneState.description || beat.sceneState.activeNpcs.length > 0) {
+        state.setScene({
+          name: beat.sceneName || '开场镜头',
+          description: beat.sceneState.description,
+          activeNpcs: beat.sceneState.activeNpcs,
+        }, { channelId: beat.channelId });
+      }
+
+      const beatText = plan.beatTexts[beat.id];
+      if (!beatText) continue;
+
+      if (beatText.publicText.trim()) {
+        textParts.push(beatText.publicText.trim());
+        state.addMessage({
+          id: `opening-${beat.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          role: 'kp',
+          content: beatText.publicText.trim(),
+          timestamp: new Date(),
+          channelId: beat.channelId,
+        });
+      }
+
+      for (const privateText of beatText.privateTexts) {
+        const userId = targetToUserId.get(normalizeOpeningTarget(privateText.target));
+        const text = privateText.text.trim();
+        if (userId === undefined || !text) continue;
+        const dedupeKey = `${userId}:${text}`;
+        if (deliveredPrivate.has(dedupeKey)) continue;
+        deliveredPrivate.add(dedupeKey);
+        privateMessages.push({ userId, text });
+        state.addMessage({
+          id: `opening-${beat.id}-priv-${userId}-${Math.random().toString(36).slice(2, 6)}`,
+          role: 'kp',
+          content: text,
+          timestamp: new Date(),
+          channelId: beat.channelId,
+          visibility: `private:${userId}`,
+        });
+      }
+
+      if (beat.advanceMinutes > 0) {
+        state.advanceIngameTime(beat.advanceMinutes, `开场镜头 ${beat.sceneName} 推进`, 'ai', undefined, { channelId: beat.channelId });
+      }
+    }
+
+    if (plan.beats.length > 1 || new Set(plan.initialAssignments.map((assignment) => assignment.channelId)).size > 1) {
+      textParts.push(`当前开场频道分配已建立，可使用 .scene list 查看镜头分布。`);
+    }
+
+    return {
+      text: textParts[0] ?? null,
+      textParts,
+      images: [],
+      privateMessages,
+    };
   }
 
   // ─── 私有：AI 生成 ─────────────────────────────────────────────────────────
@@ -1170,4 +1411,8 @@ function campaignOutputFromParts(parts: string[]): CampaignOutput {
     images: [],
     privateMessages: [],
   };
+}
+
+function normalizeOpeningTarget(value: string): string {
+  return value.toLowerCase().replace(/[\s【】（）()：:，,、]/g, '').trim();
 }

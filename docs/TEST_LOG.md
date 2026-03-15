@@ -24,6 +24,16 @@
 | B4 | 检查导入链路 | 模组导入后可触发元数据 / 资产 / 规则包三路提取 | ✅ | 代码路径已接入，待真实模组数据联调 |
 | B5 | 检查运行时事件 | `register_entity` / `register_item` / `item_change` 已进入 `kp_events` 类型集 | ✅ | 通过类型与实现检查 |
 
+### 补充验证：2026-03-15（开场导演与推进导演）
+
+| # | 操作 | 期望 | 结果 | 备注 |
+|---|------|------|------|------|
+| D1 | `bun x tsc -p c:\\\\Users\\\\sorawatcher\\\\workspace\\\\coc-bot\\\\tsconfig.json --noEmit` | 新增房间关系、导演偏好、OpeningDirector、SessionDirector 类型与调用全部通过编译 | ✅ | 覆盖 `CampaignHandler` / `SessionState` / `ContextBuilder` / `PlayerRoutes` / `RoomCommand` |
+| D2 | 在 `web/` 目录执行 `bun run build` | 玩家端房间详情页的新关系/偏好编辑区可正常构建 | ✅ | 验证 `web/src/api.ts` 与 `RoomDetail.tsx` 的新增类型和调用 |
+| D3 | 检查 DB schema | 存在 `campaign_room_relationships` 和 `campaign_rooms.director_prefs_json` | ✅ | 由 `Database.ts` 迁移创建 |
+| D4 | 检查开场事件类型 | `opening_plan` / `director_marker` / `director_seed_resolved` / `director_cue` 已加入 `kp_events` 类型集 | ✅ | 通过 `SessionState` 类型与回放逻辑检查 |
+| D5 | 检查开场生成链路 | `OpeningDirector` 采用 skeleton + beat 文本两步生成，beat 文本并行执行且单 beat 可独立 fallback | ✅ | 代码路径已接入 `CampaignHandler.startSession()` |
+
 ### 第二阶段：车卡（Web 表单）
 
 > 正式流程通过 Web 完成，提交后自动同步 bot，玩家无需发任何 QQ 命令。
