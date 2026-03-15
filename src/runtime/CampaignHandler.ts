@@ -33,9 +33,18 @@ const KP_MODEL = 'qwen3.5-plus';
 /** Campaign 处理器返回值（支持文字 + 图片） */
 export interface CampaignOutput {
   text: string | null;
+  textParts?: string[];
   images: KPImage[];
+  privateMessages?: Array<{ userId: number; text: string }>;
   /** 消息已排队等待合并处理 */
   queued?: boolean;
+}
+
+interface PendingChannelMessage {
+  userId: number;
+  displayName: string;
+  text: string;
+  channelId: string;
 }
 
 interface ManifestEntry {
@@ -89,7 +98,7 @@ export class CampaignHandler {
   /** per-group 并发锁 + 消息缓冲 */
   private readonly groupLocks = new Map<number, {
     processing: boolean;
-    pending: Array<{ userId: number; displayName: string; text: string }>;
+    pendingByChannel: Map<string, PendingChannelMessage[]>;
   }>();
 
   constructor(options: CampaignHandlerOptions) {
@@ -107,19 +116,19 @@ export class CampaignHandler {
    * 若该群已有暂停中的 session，提示先 resume 或 stop。
    * @returns 多段开场白，逐条发到群聊
    */
-  async startSession(groupId: number, templateId?: string, roomId?: string): Promise<string[]> {
+  async startSession(groupId: number, templateId?: string, roomId?: string): Promise<CampaignOutput> {
     if (this.sessions.has(groupId)) {
-      return ['当前已有进行中的跑团，请先使用 .room pause 或 .room stop 结束。'];
+      return campaignOutputFromParts(['当前已有进行中的跑团，请先使用 .room pause 或 .room stop 结束。']);
     }
 
     // 检查是否有暂停中的 session
     const paused = this.findPausedSession(groupId);
     if (paused) {
-      return [
+      return campaignOutputFromParts([
         '⚠️ 该群有暂停中的跑团记录。\n' +
         '• 使用 .room resume 继续上次跑团\n' +
         '• 使用 .room stop 彻底结束后再开新团',
-      ];
+      ]);
     }
 
     // 从房间读取 KP 配置（模板 + 自定义提示词）
@@ -178,7 +187,7 @@ export class CampaignHandler {
       : this.store.getGroupActiveCharacters(groupId);
 
     // 生成多段开场白
-    return this.generateRichOpening(state, tid, characters);
+    return campaignOutputFromParts(await this.generateRichOpening(state, tid, characters));
   }
 
   /**
@@ -209,14 +218,14 @@ export class CampaignHandler {
   /**
    * 继续最近一次暂停的跑团，生成回顾摘要。
    */
-  async resumeSession(groupId: number): Promise<string[]> {
+  async resumeSession(groupId: number): Promise<CampaignOutput> {
     if (this.sessions.has(groupId)) {
-      return ['当前已有进行中的跑团。'];
+      return campaignOutputFromParts(['当前已有进行中的跑团。']);
     }
 
     const row = this.findPausedSession(groupId);
     if (!row) {
-      return ['没有找到可以继续的跑团记录。使用 .room start 开始新的跑团。'];
+      return campaignOutputFromParts(['没有找到可以继续的跑团记录。使用 .room start 开始新的跑团。']);
     }
 
     // 恢复状态
@@ -258,7 +267,7 @@ export class CampaignHandler {
 
     console.log(`[Campaign] 继续: group=${groupId} session=${row.id}`);
 
-    return this.generateSessionRecap(state);
+    return campaignOutputFromParts(await this.generateSessionRecap(state));
   }
 
   /**
@@ -469,36 +478,51 @@ export class CampaignHandler {
 
     session.state.trackPlayer(userId);
     const pcName = this.resolvePcName(session.sessionId, userId, displayName);
+    const channelId = session.state.getPlayerChannel(userId);
+    const focusChannelId = session.state.getFocusChannel();
 
     // 并发锁：如果正在处理中，将消息排队
     let lock = this.groupLocks.get(groupId);
     if (!lock) {
-      lock = { processing: false, pending: [] };
+      lock = { processing: false, pendingByChannel: new Map() };
       this.groupLocks.set(groupId, lock);
     }
 
+    if (channelId !== focusChannelId) {
+      this.enqueuePending(lock, { userId, displayName: pcName, text, channelId });
+      const urgentReason = this.detectUrgentSceneEvent(text);
+      if (urgentReason) {
+        session.state.markChannelInterrupt(channelId, urgentReason, userId);
+        return {
+          text: `⚠️ [${channelId}] 频道发生紧急事件，建议使用 .scene focus ${channelId}`,
+          images: [],
+          queued: true,
+        };
+      }
+      return { text: null, images: [], queued: true };
+    }
+
+    if (session.state.hasBlockingInterrupt(channelId)) {
+      return {
+        text: `⚠️ 其他场景频道存在未处理的紧急事件，请先使用 .scene list 查看并切换焦点处理。`,
+        images: [],
+      };
+    }
+
     if (lock.processing) {
-      lock.pending.push({ userId, displayName: pcName, text });
+      this.enqueuePending(lock, { userId, displayName: pcName, text, channelId });
       return { text: null, images: [], queued: true };
     }
 
     lock.processing = true;
 
     try {
-      // 处理当前消息
-      let result = await this.processPlayerInput(session, userId, pcName, text, onThinking);
+      session.state.clearChannelInterrupt(channelId, userId);
 
-      // drain loop：处理积压消息
-      while (lock.pending.length > 0) {
-        const batch = lock.pending.splice(0);
-        // 将积压消息写入历史并合并为一条
-        const merged = batch.map((m) => `${m.displayName}：${m.text}`).join('\n');
-        const mergedResult = await this.processPlayerInput(
-          session, batch[0].userId, batch[0].displayName, merged, undefined,
-        );
-        // 用最新结果替换（KP 会看到合并后的完整上下文）
-        if (mergedResult.text) result = mergedResult;
-      }
+      // 处理当前消息
+      let result = await this.processPlayerInput(session, userId, pcName, text, channelId, onThinking);
+
+      result = await this.drainFocusedQueue(groupId, session, lock, result);
 
       return result;
     } finally {
@@ -512,6 +536,7 @@ export class CampaignHandler {
     userId: number,
     displayName: string,
     text: string,
+    channelId: string,
     onThinking?: () => void,
   ): Promise<CampaignOutput> {
     const input: KPInput = {
@@ -519,6 +544,7 @@ export class CampaignHandler {
       userId,
       displayName,
       content: text,
+      channelId,
     };
 
     const output = await session.pipeline.process(input, onThinking);
@@ -533,7 +559,7 @@ export class CampaignHandler {
 
     const reply = output.shouldRespond ? output.text : null;
     if (reply) session.state.advanceSegmentIfTitleMatches(reply);
-    return { text: reply, images: output.images ?? [] };
+    return { text: reply, images: output.images ?? [], privateMessages: output.privateMessages ?? [] };
   }
 
   async handleForceKP(
@@ -552,19 +578,21 @@ export class CampaignHandler {
     }
 
     const pcName = this.resolvePcName(session.sessionId, userId, displayName);
+    const channelId = session.state.getPlayerChannel(userId);
 
     const input: KPInput = {
       kind: 'force_kp',
       userId,
       displayName: pcName,
       content: text || '（玩家请求 KP 继续推进剧情）',
+      channelId,
     };
 
     console.log(`[Campaign] group=${groupId} user=${userId} force_kp text="${text.slice(0, 30)}"`);
     const output = await session.pipeline.process(input, onThinking);
     const reply = output.shouldRespond ? output.text : null;
     if (reply) session.state.advanceSegmentIfTitleMatches(reply);
-    return { text: reply, images: output.images ?? [] };
+    return { text: reply, images: output.images ?? [], privateMessages: output.privateMessages ?? [] };
   }
 
   async handleDiceResult(
@@ -583,6 +611,7 @@ export class CampaignHandler {
     }
 
     const pcName = this.resolvePcName(session.sessionId, rollerId, rollerName);
+    const channelId = session.state.getPlayerChannel(rollerId);
 
     const input: KPInput = {
       kind: 'dice_result',
@@ -590,12 +619,13 @@ export class CampaignHandler {
       displayName: pcName,
       content: resultText,
       diceRollerId: rollerId,
+      channelId,
     };
 
     const output = await session.pipeline.process(input, onThinking);
     const reply = output.shouldRespond ? output.text : null;
     if (reply) session.state.advanceSegmentIfTitleMatches(reply);
-    return { text: reply, images: output.images ?? [] };
+    return { text: reply, images: output.images ?? [], privateMessages: output.privateMessages ?? [] };
   }
 
   // ─── 查询 ────────────────────────────────────────────────────────────────────
@@ -606,6 +636,225 @@ export class CampaignHandler {
 
   getSession(groupId: number): GroupSession | undefined {
     return this.sessions.get(groupId);
+  }
+
+  async handleSceneCommand(
+    groupId: number,
+    userId: number,
+    displayName: string,
+    args: string[],
+    onThinking?: () => void,
+  ): Promise<CampaignOutput> {
+    const session = this.sessions.get(groupId);
+    if (!session) return { text: '当前没有进行中的跑团。', images: [] };
+    if (!this.isSessionMember(session.sessionId, userId)) {
+      return { text: null, images: [] };
+    }
+
+    const subCommand = (args[0] ?? 'list').toLowerCase();
+
+    if (subCommand === 'list' || subCommand === 'status') {
+      return { text: this.buildSceneStatusText(session), images: [] };
+    }
+
+    if (subCommand === 'focus') {
+      const channelId = (args[1] ?? '').trim();
+      if (!channelId) {
+        return { text: '用法：.scene focus <频道名>', images: [] };
+      }
+      session.state.setFocusChannel(channelId, userId);
+      const focusText = `镜头已切换到频道【${channelId}】。`;
+      const queuedResult = await this.processQueuedChannelNow(groupId, session, channelId, onThinking);
+      if (queuedResult.text) {
+        return {
+          text: `${focusText}\n\n${queuedResult.text}`,
+          images: queuedResult.images,
+          privateMessages: queuedResult.privateMessages,
+        };
+      }
+      return { text: focusText, images: [] };
+    }
+
+    if (subCommand === 'join' || subCommand === 'goto') {
+      const channelId = (args[1] ?? '').trim();
+      if (!channelId) {
+        return { text: '用法：.scene join <频道名>', images: [] };
+      }
+      session.state.assignPlayerToChannel(userId, channelId, userId);
+      return { text: `已将你切换到频道【${channelId}】。`, images: [] };
+    }
+
+    if (subCommand === 'move') {
+      const targetUserId = Number(args[1]);
+      const channelId = (args[2] ?? '').trim();
+      if (!Number.isFinite(targetUserId) || !channelId) {
+        return { text: '用法：.scene move <QQ号> <频道名>', images: [] };
+      }
+      session.state.assignPlayerToChannel(targetUserId, channelId, userId);
+      return { text: `已将玩家 ${targetUserId} 切换到频道【${channelId}】。`, images: [] };
+    }
+
+    if (subCommand === 'merge') {
+      const fromChannel = (args[1] ?? '').trim();
+      const toChannel = (args[2] ?? 'main').trim();
+      if (!fromChannel) {
+        return { text: '用法：.scene merge <来源频道> [目标频道]', images: [] };
+      }
+      const fromState = session.state.getChannelState(fromChannel);
+      for (const playerId of fromState.playerIds) {
+        session.state.assignPlayerToChannel(playerId, toChannel, userId);
+      }
+      if (session.state.getFocusChannel() === fromChannel) {
+        session.state.setFocusChannel(toChannel, userId);
+      }
+      return { text: `已将频道【${fromChannel}】并入【${toChannel}】。`, images: [] };
+    }
+
+    if (subCommand === 'clear') {
+      const channelId = (args[1] ?? session.state.getFocusChannel()).trim();
+      session.state.clearChannelInterrupt(channelId, userId);
+      return { text: `已清除频道【${channelId}】的紧急标记。`, images: [] };
+    }
+
+    return {
+      text:
+        '用法：\n' +
+        '.scene list\n' +
+        '.scene focus <频道名>\n' +
+        '.scene join <频道名>\n' +
+        '.scene move <QQ号> <频道名>\n' +
+        '.scene merge <来源频道> [目标频道]\n' +
+        '.scene clear [频道名]',
+      images: [],
+    };
+  }
+
+  private enqueuePending(
+    lock: { processing: boolean; pendingByChannel: Map<string, PendingChannelMessage[]> },
+    message: PendingChannelMessage,
+  ): void {
+    const queue = lock.pendingByChannel.get(message.channelId) ?? [];
+    queue.push(message);
+    lock.pendingByChannel.set(message.channelId, queue);
+  }
+
+  private async drainFocusedQueue(
+    groupId: number,
+    session: GroupSession,
+    lock: { processing: boolean; pendingByChannel: Map<string, PendingChannelMessage[]> },
+    current: CampaignOutput,
+  ): Promise<CampaignOutput> {
+    let result = current;
+    while (true) {
+      const focusChannelId = session.state.getFocusChannel();
+      const batch = lock.pendingByChannel.get(focusChannelId);
+      if (!batch || batch.length === 0) break;
+      lock.pendingByChannel.delete(focusChannelId);
+      const merged = batch.map((item) => `${item.displayName}：${item.text}`).join('\n');
+      session.state.clearChannelInterrupt(focusChannelId, batch[0]?.userId);
+      const next = await this.processPlayerInput(
+        session,
+        batch[0].userId,
+        batch[0].displayName,
+        merged,
+        focusChannelId,
+        undefined,
+      );
+      result = this.mergeCampaignOutputs(result, next);
+    }
+    return result;
+  }
+
+  private async processQueuedChannelNow(
+    groupId: number,
+    session: GroupSession,
+    channelId: string,
+    onThinking?: () => void,
+  ): Promise<CampaignOutput> {
+    let lock = this.groupLocks.get(groupId);
+    if (!lock) {
+      lock = { processing: false, pendingByChannel: new Map() };
+      this.groupLocks.set(groupId, lock);
+    }
+
+    if (lock.processing) {
+      return { text: null, images: [] };
+    }
+
+    const queue = lock.pendingByChannel.get(channelId);
+    if (!queue || queue.length === 0) {
+      return { text: null, images: [] };
+    }
+
+    lock.processing = true;
+    try {
+      lock.pendingByChannel.delete(channelId);
+      const merged = queue.map((item) => `${item.displayName}：${item.text}`).join('\n');
+      session.state.clearChannelInterrupt(channelId, queue[0]?.userId);
+      const result = await this.processPlayerInput(
+        session,
+        queue[0].userId,
+        queue[0].displayName,
+        merged,
+        channelId,
+        onThinking,
+      );
+      return this.drainFocusedQueue(groupId, session, lock, result);
+    } finally {
+      lock.processing = false;
+    }
+  }
+
+  private mergeCampaignOutputs(base: CampaignOutput, next: CampaignOutput): CampaignOutput {
+    return {
+      text: next.text ?? base.text,
+      images: next.images.length > 0 ? next.images : base.images,
+      privateMessages: [...(base.privateMessages ?? []), ...(next.privateMessages ?? [])],
+      queued: base.queued || next.queued,
+    };
+  }
+
+  private buildSceneStatusText(session: GroupSession): string {
+    const focusChannelId = session.state.getFocusChannel();
+    const channels = session.state.getActiveChannels();
+    const lines = [
+      `当前镜头焦点：${focusChannelId}`,
+      `活跃频道：${channels.join('、')}`,
+      '',
+    ];
+
+    for (const channelId of channels) {
+      const state = session.state.getChannelState(channelId);
+      const players = state.playerIds.map((playerId) =>
+        this.resolvePcName(session.sessionId, playerId, String(playerId)),
+      );
+      lines.push(
+        `${channelId === focusChannelId ? '▶' : '•'} ${channelId}` +
+        `${state.interruptPending ? ' [紧急]' : ''}` +
+        `：${players.length > 0 ? players.join('、') : '暂无调查员'}`,
+      );
+      if (state.currentScene?.name) {
+        lines.push(`  场景：${state.currentScene.name}`);
+      }
+      if (state.pendingRolls.length > 0) {
+        lines.push(`  待结算检定：${state.pendingRolls.map((roll) => `${roll.characterName}/${roll.skillName}`).join('、')}`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  private detectUrgentSceneEvent(text: string): string | null {
+    const trimmed = text.trim();
+    const urgentPatterns: Array<[RegExp, string]> = [
+      [/\b(sc|ti)\b/i, '理智冲击'],
+      [/(开枪|射击|斗殴|攻击|追逐|追杀|陷阱|流血|爆炸|怪物|尖叫|濒死|受伤)/, '即时危险'],
+    ];
+
+    for (const [pattern, reason] of urgentPatterns) {
+      if (pattern.test(trimmed)) return reason;
+    }
+    return null;
   }
 
   // ─── 私有：AI 生成 ─────────────────────────────────────────────────────────
@@ -911,4 +1160,14 @@ export class CampaignHandler {
       )
       .get(groupId) ?? null;
   }
+}
+
+function campaignOutputFromParts(parts: string[]): CampaignOutput {
+  const textParts = parts.map((part) => part.trim()).filter(Boolean);
+  return {
+    text: textParts.length === 1 ? textParts[0] : null,
+    textParts: textParts.length > 0 ? textParts : undefined,
+    images: [],
+    privateMessages: [],
+  };
 }

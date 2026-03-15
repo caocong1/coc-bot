@@ -39,7 +39,8 @@ import { DashScopeClient } from '../ai/client/DashScopeClient';
 import { CheckResolver } from '../rules/coc7/CheckResolver';
 import { SanityResolver } from '../rules/coc7/SanityResolver';
 import { ModeResolver } from '../runtime/ModeResolver';
-import { CampaignHandler } from '../runtime/CampaignHandler';
+import { CampaignHandler, type CampaignOutput } from '../runtime/CampaignHandler';
+import { deliverCampaignOutput, sendPrivateMessageWithFallback } from '../runtime/CampaignOutputDelivery';
 import { openDatabase, migrateCoreSchema } from '../storage/Database';
 import { TokenStore } from '../storage/TokenStore';
 import { ApiRouter } from '../api/ApiRouter';
@@ -181,35 +182,6 @@ registry.register(new ModCommand(db));
 
 /* ─── message handling ─── */
 
-/** 顺序发送多条消息，间隔 800ms，避免刷屏和 QQ 限速 */
-async function sendMessages(groupId: number, messages: string[]): Promise<void> {
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i].trim();
-    if (!msg) continue;
-    await actionClient.sendGroupMessage(groupId, msg);
-    if (i < messages.length - 1) {
-      await new Promise<void>((r) => setTimeout(r, 800));
-    }
-  }
-}
-
-/** 发送 KP 回复文字 + 关联图片（图片在文字后 800ms 发出） */
-async function sendCampaignOutput(
-  groupId: number,
-  text: string | null,
-  images: Array<{ absPath: string; caption: string; id: string }>,
-): Promise<void> {
-  if (text) {
-    await actionClient.sendGroupMessage(groupId, text);
-  }
-  for (const img of images) {
-    await new Promise<void>((r) => setTimeout(r, 800));
-    // 说明文字格式：📷 caption（ID: img-xxx，可用 .regen img-xxx 重新生成）
-    const caption = `📷 ${img.caption || '图片'}（ID: ${img.id}，可用 .regen ${img.id} 重新生成）`;
-    await actionClient.sendGroupImage(groupId, img.absPath, caption);
-  }
-}
-
 async function handleMessage(ctx: MessageContext, senderName?: string): Promise<void> {
   const mode = modeResolver.resolveMode(ctx);
 
@@ -236,13 +208,17 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
         onThinking,
       ).catch((err) => {
         console.error('[Bot] campaign handler error:', err);
-        return { text: null, images: [] as Array<{ absPath: string; caption: string; id: string }>, queued: false };
+        return {
+          text: null,
+          images: [] as Array<{ absPath: string; caption: string; id: string }>,
+          privateMessages: [],
+          queued: false,
+        } as CampaignOutput;
       });
-      // 排队的消息不撤回提示、不发送输出（由合并处理负责）
-      if (output.queued) return;
+      if (output.queued && !output.text && (output.privateMessages?.length ?? 0) === 0 && output.images.length === 0) return;
       // 撤回"思考中"提示
       if (thinkingMsgId) actionClient.deleteMsg(thinkingMsgId).catch(() => {});
-      await sendCampaignOutput(gid, output.text, output.images);
+      await deliverCampaignOutput(actionClient, gid, output);
     }
     return;
   }
@@ -260,10 +236,36 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
       gid, ctx.userId, senderName ?? String(ctx.userId), extraText, onThinking,
     ).catch((err) => {
       console.error('[Bot] forceKP error:', err);
-      return { text: null, images: [] as Array<{ absPath: string; caption: string; id: string }> };
+      return {
+        text: null,
+        images: [] as Array<{ absPath: string; caption: string; id: string }>,
+        privateMessages: [],
+      } as CampaignOutput;
     });
     if (thinkingMsgId) actionClient.deleteMsg(thinkingMsgId).catch(() => {});
-    await sendCampaignOutput(gid, output.text, output.images);
+    await deliverCampaignOutput(actionClient, gid, output);
+    return;
+  }
+
+  if (cmd.name === 'scene' && ctx.groupId) {
+    if (!campaignHandler) return;
+    const gid = ctx.groupId;
+    let thinkingMsgId = 0;
+    const onThinking = () => {
+      actionClient.sendGroupMessage(gid, '💭 KP 正在切换镜头...').then((id) => { thinkingMsgId = id; }).catch(() => {});
+    };
+    const output = await campaignHandler.handleSceneCommand(
+      gid,
+      ctx.userId,
+      senderName ?? String(ctx.userId),
+      cmd.args ?? [],
+      onThinking,
+    ).catch((err) => {
+      console.error('[Bot] scene error:', err);
+      return { text: 'scene 命令执行失败。', images: [], privateMessages: [] } as CampaignOutput;
+    });
+    if (thinkingMsgId) actionClient.deleteMsg(thinkingMsgId).catch(() => {});
+    await deliverCampaignOutput(actionClient, gid, output);
     return;
   }
 
@@ -279,11 +281,16 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
     if (subCmd === 'start' || subCmd === 'on') {
       const templateId = cmd.args?.[1];
       await actionClient.sendGroupMessage(ctx.groupId, '⏳ 守秘人正在准备开场，请稍候...');
-      const parts = await campaignHandler.startSession(ctx.groupId, templateId).catch((err) => {
+      const output = await campaignHandler.startSession(ctx.groupId, templateId).catch((err) => {
         console.error('[Bot] startSession error:', err);
-        return [`⚔️ 跑团模式已开启（模板：${templateId ?? 'classic'}）\n守秘人已就位，请各位调查员就位。`];
+        return {
+          text: null,
+          textParts: [`⚔️ 跑团模式已开启（模板：${templateId ?? 'classic'}）\n守秘人已就位，请各位调查员就位。`],
+          images: [],
+          privateMessages: [],
+        } as CampaignOutput;
       });
-      await sendMessages(ctx.groupId, parts);
+      await deliverCampaignOutput(actionClient, ctx.groupId, output);
       return;
     }
 
@@ -297,11 +304,15 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
     // resume
     if (subCmd === 'resume') {
       await actionClient.sendGroupMessage(ctx.groupId, '⏳ 守秘人正在整理记忆，请稍候...');
-      const parts = await campaignHandler.resumeSession(ctx.groupId).catch((err) => {
+      const output = await campaignHandler.resumeSession(ctx.groupId).catch((err) => {
         console.error('[Bot] resumeSession error:', err);
-        return ['恢复跑团时发生错误，请检查日志。'];
+        return {
+          text: '恢复跑团时发生错误，请检查日志。',
+          images: [],
+          privateMessages: [],
+        } as CampaignOutput;
       });
-      await sendMessages(ctx.groupId, parts);
+      await deliverCampaignOutput(actionClient, ctx.groupId, output);
       return;
     }
 
@@ -360,10 +371,14 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
           onDiceThinking,
         ).catch((err) => {
           console.error('[Bot] campaign dice feedback error:', err);
-          return { text: null, images: [] as Array<{ absPath: string; caption: string; id: string }> };
+          return {
+            text: null,
+            images: [] as Array<{ absPath: string; caption: string; id: string }>,
+            privateMessages: [],
+          } as CampaignOutput;
         });
         if (diceThinkingId) actionClient.deleteMsg(diceThinkingId).catch(() => {});
-        await sendCampaignOutput(diceGid, diceOutput.text, diceOutput.images);
+        await deliverCampaignOutput(actionClient, diceGid, diceOutput);
       }
     }
   } catch (err) {
@@ -377,8 +392,16 @@ async function sendResult(ctx: MessageContext, result: CommandResult): Promise<v
   try {
     // 暗骰：私聊发结果，群里发提示
     if (result.private) {
-      await actionClient.sendPrivateMessage(ctx.userId, result.text);
-      if (result.publicHint && ctx.groupId) {
+      const delivered = await sendPrivateMessageWithFallback(
+        actionClient,
+        ctx.userId,
+        result.text,
+        {
+          groupId: ctx.groupId,
+          failureNotice: `⚠️ 无法向 ${ctx.userId} 发送私聊结果，请先添加机器人好友后再试。`,
+        },
+      );
+      if (delivered && result.publicHint && ctx.groupId) {
         await actionClient.sendGroupMessage(ctx.groupId, result.publicHint);
       }
       return;
@@ -388,7 +411,7 @@ async function sendResult(ctx: MessageContext, result: CommandResult): Promise<v
     if (ctx.messageType === 'group' && ctx.groupId) {
       await actionClient.sendGroupMessage(ctx.groupId, result.text);
     } else {
-      await actionClient.sendPrivateMessage(ctx.userId, result.text);
+      await sendPrivateMessageWithFallback(actionClient, ctx.userId, result.text);
     }
   } catch (err) {
     console.error('[Bot] send message error:', err);

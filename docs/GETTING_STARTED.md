@@ -204,6 +204,21 @@ Bot 内置 Web 控制台，分为**玩家端**和**管理端**，通过浏览器
 | `.room list` | 查看我参与的活跃房间 |
 | `.room info <房间ID>` | 查看房间成员和状态 |
 
+### 场景频道命令
+
+用于分头调查、镜头切换和紧急事件处理：
+
+| 命令 | 说明 |
+|------|------|
+| `.scene list` | 查看当前焦点频道、活跃频道、频道内调查员、待结算检定 |
+| `.scene focus <频道名>` | 将群内镜头切到指定频道，并立刻处理该频道积压消息 |
+| `.scene join <频道名>` | 把自己切换到指定频道 |
+| `.scene move <QQ号> <频道名>` | 将指定玩家移动到某个频道 |
+| `.scene merge <来源频道> [目标频道]` | 合并频道，默认并回 `main` |
+| `.scene clear [频道名]` | 清除频道的紧急标记 |
+
+> 当非焦点频道出现战斗、追逐、理智冲击、陷阱等高危情况时，bot 会在群里提示切换 `focus`。
+
 ### AI KP 介入逻辑
 
 | 触发条件 | KP 行为 |
@@ -237,6 +252,7 @@ Bot 内置 Web 控制台，分为**玩家端**和**管理端**，通过浏览器
 - `characters` — 角色卡
 - `active_cards` — 激活绑定（userId:groupId → characterId）
 - `kp_sessions` — 跑团会话（status: running / paused / ended）
+- `kp_events` — 跑团事件流（canonical runtime history）
 - `kp_scenes` — 当前场景
 - `kp_clues` — 线索
 - `kp_messages` — 对话历史（含摘要压缩标记）

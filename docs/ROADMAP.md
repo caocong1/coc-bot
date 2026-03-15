@@ -86,6 +86,7 @@
 #### 数据库
 
 - [x] `kp_sessions` — 跑团会话表（含 `status`、`scenario_file_path`、`current_segment_id` 字段）
+- [x] `kp_events` — 跑团事件流（`seq/id/type/channel_id/visibility/payload_json`）
 - [x] `kp_scenes` — 当前场景（每 session 一条）
 - [x] `kp_clues` — 线索表（区分 KP 知晓 / 玩家已发现）
 - [x] `kp_messages` — 对话消息历史（支持 `is_summarized` 标记）
@@ -104,6 +105,8 @@
 - [x] 玩家追踪（`trackPlayer` / `getPlayerIds`）
 - [x] 模组全文（`setScenario` / `getScenarioText`）— 进程重启自动恢复
 - [x] 快照接口（`snapshot()`）供 ContextBuilder 读取
+- [x] 事件回放快照（`snapshotFromEvents()`）和 shadow compare
+- [x] 场景频道（`SceneChannel`）：焦点频道、玩家归属、频道中断
 - [x] 分段管理（`saveSegments` / `getSegments` / `getCurrentSegmentId` / `setCurrentSegmentId`）
 - [x] 自动场景推进（`advanceSegmentIfTitleMatches`）— KP 回复含下一段标题关键词时自动前进指针
 
@@ -114,8 +117,8 @@
 | 层 | 内容 |
 |----|------|
 | 1 | KP 人格 + CoC 守秘人原则（场景/NPC/战斗/理智四大原则，铁则） |
-| 2 | 当前场景状态、等待骰子、已发现线索 |
-| 3 | 所有玩家角色卡（实时数值，取前 20 技能） |
+| 2 | 当前频道的场景状态、等待骰子、已发现线索 |
+| 3 | 当前频道相关玩家角色卡（实时数值，取前 20 技能） |
 | 4 | RAG：规则库检索结果 |
 | 5C | 动态场景分段窗口（优先）：当前段完整原文 + 相邻段摘要 + 远端段仅标题 |
 | 5A | 模组全文注入（有全文且无分段时使用，适配 qwen3.5-plus 1M 上下文） |
@@ -139,8 +142,10 @@
   - 第一层：AI 内部掌握所有 KP 知识
   - 第二层：`qwen3.5-flash` 二次审查，过滤 `[KP ONLY]` 信息泄露
 - [x] 滚动摘要压缩：超过 40 条消息时异步压缩最旧 20 条
+- [x] 结构化指令抽取：`[SET_SCENE]` / `[DISCOVER_CLUE]` / `[PRIVATE_TO]`
+- [x] 输出合规兜底：去除编号列表，屏蔽直接 `HP/MP/SAN +/-N`
 - [x] 每次 KP 回复后自动检测场景推进（`advanceSegmentIfTitleMatches`）
-- [x] 并发控制：per-group 消息锁 + 排队合并，AI 思考中新消息不会丢失
+- [x] 并发控制：per-group 锁 + per-channel 队列，非焦点频道消息不会丢失
 - [x] 60 秒超时保护 + 双次重试 + 用户可见错误提示
 - [x] 非房间成员消息过滤（不触发 AI）
 
@@ -173,6 +178,8 @@
   - 非房间成员骰子结果不触发 AI
 - [x] `.kp` 强制 KP 介入：同样检查成员资格
 - [x] PC 名称解析：消息记录中显示角色名（`resolvePcName()`）
+- [x] `.scene list/focus/join/move/merge/clear`
+- [x] 非焦点频道紧急中断提示（建议切换焦点）
 
 #### 服务入口（`server/index.ts`）
 

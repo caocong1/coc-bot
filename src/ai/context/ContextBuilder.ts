@@ -15,9 +15,10 @@
  */
 
 import type { Character } from '@shared/types/Character';
+import { getSkillDisplayName } from '@shared/coc7/skillNames';
 import type { KPTemplate } from '../config/KPTemplateRegistry';
 import { ALL_DIMENSIONS, getDimensionTier } from '../config/DimensionDescriptors';
-import type { SessionSnapshot, SceneSegment, ScenarioImage } from '../../runtime/SessionState';
+import type { SessionSnapshot, SceneSegment, ScenarioImage, ViewerScope } from '../../runtime/SessionState';
 import type { KnowledgeChunk } from '../../knowledge/retrieval/KnowledgeService';
 
 // ─── 公开类型 ─────────────────────────────────────────────────────────────────
@@ -65,6 +66,12 @@ export interface BuildOptions {
   scenarioImages?: ScenarioImage[];
   /** 房间级自定义 KP 提示词，追加到人格层 */
   customPrompts?: string;
+  /** 当前构建的场景频道 */
+  channelId?: string;
+  /** 当前查看上下文的视角 */
+  viewerScope?: ViewerScope;
+  /** 当前频道内的调查员 userId 列表 */
+  channelPlayerIds?: number[];
 }
 
 // ─── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -105,10 +112,13 @@ export class ContextBuilder {
   build(template: KPTemplate, snapshot: SessionSnapshot, options: BuildOptions): BuiltContext {
     const maxRecent = options.maxRecentMessages ?? 30;
     const layerStats: Record<string, number> = {};
+    const channelCharacters = options.channelPlayerIds?.length
+      ? options.characters.filter((character) => options.channelPlayerIds?.includes(character.playerId))
+      : options.characters;
 
     const layer1 = this.buildKPPersonality(template, options.customPrompts);
     const layer2 = this.buildSceneState(snapshot, options.scenarioImages);
-    const layer3 = this.buildCharacterSheets(options.characters);
+    const layer3 = this.buildCharacterSheets(channelCharacters);
     const layer4 = this.buildRuleContext(options.ruleChunks ?? []);
     const layer5 = (options.sceneSegments && options.sceneSegments.length > 0 && options.currentSegmentId)
       ? this.buildTieredScenario(options.sceneSegments, options.currentSegmentId, options.scenarioLabel)
@@ -264,6 +274,10 @@ ${this.buildBehavioralProfile(template)}
 - 不使用 Markdown 标题、项目符号或编号列表
 - 检定指令单独成行：叙事段落后空一行，再写「需要【技能名】检定，请发送 .ra 技能名」
 - NPC 对话一位说话人一段，避免多人台词挤在一起
+- 若需要更新当前场景，在回复末尾追加 \`[SET_SCENE:场景名|场景描述|NPC1,NPC2]\`
+- 若本轮形成了新的玩家已知线索，在回复末尾追加 \`[DISCOVER_CLUE:标题|玩家可见描述]\`
+- 若只有特定调查员应私下得知某条信息，在回复末尾追加 \`[PRIVATE_TO:调查员名1,调查员名2]私密内容[/PRIVATE_TO]\`
+- 这些指令只用于系统抽取，不要在正文中解释它们
 - 少用连续省略号、感叹号和过长修辞句——QQ 群聊里节奏比文风更重要`;
   }
 
@@ -271,6 +285,18 @@ ${this.buildBehavioralProfile(template)}
 
   private buildSceneState(snapshot: SessionSnapshot, images?: ScenarioImage[]): string {
     const parts: string[] = ['# 当前场景状态'];
+
+    parts.push(`**当前场景频道**：${snapshot.channelId}`);
+    if (snapshot.focusChannelId !== snapshot.channelId) {
+      parts.push(`**当前镜头焦点**：${snapshot.focusChannelId}`);
+    }
+    if (snapshot.activeChannels.length > 1) {
+      parts.push(`**活跃频道**：${snapshot.activeChannels.join('、')}`);
+    }
+    if (snapshot.interruptChannels.length > 0) {
+      parts.push(`⚠️ 注意：${snapshot.interruptChannels.join('、')} 存在紧急未处理事件，避免推进大量游戏时间。`);
+    }
+    parts.push('');
 
     // 游戏内时间
     if (snapshot.ingameTime) {
@@ -367,7 +393,7 @@ ${this.buildBehavioralProfile(template)}
         .filter(([, v]) => v > 0)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 20)
-        .map(([k, v]) => `${k}${v}`)
+        .map(([k, v]) => `${getSkillDisplayName(k)}${v}`)
         .join(' ');
       if (notableSkills) lines.push(`技能（前20）：${notableSkills}`);
 

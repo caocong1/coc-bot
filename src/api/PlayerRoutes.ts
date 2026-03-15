@@ -28,6 +28,7 @@ import type { TokenStore } from '../storage/TokenStore';
 import type { CharacterStore } from '../commands/sheet/CharacterStore';
 import type { CampaignHandler } from '../runtime/CampaignHandler';
 import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
+import { deliverCampaignOutput } from '../runtime/CampaignOutputDelivery';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { parseExcelCharacter } from '../import/ExcelCharacterParser';
@@ -610,11 +611,8 @@ export class PlayerRoutes {
       this.db.run("UPDATE campaign_rooms SET status = 'running', updated_at = ? WHERE id = ?", [now, roomId]);
       this.actionClient.sendGroupMessage(groupId, '✅ 全员就绪！守秘人正在准备，请稍候...').catch(() => {});
 
-      this.campaignHandler.startSession(groupId, undefined, roomId).then(async (parts) => {
-        for (const part of parts) {
-          await this.actionClient!.sendGroupMessage(groupId, part);
-          await new Promise<void>((r) => setTimeout(r, 800));
-        }
+      this.campaignHandler.startSession(groupId, undefined, roomId).then(async (output) => {
+        await deliverCampaignOutput(this.actionClient!, groupId, output);
       }).catch((err) => {
         console.error('[PlayerRoutes] Web 开团失败:', err);
         this.actionClient!.sendGroupMessage(groupId, `⚠️ 开团失败：${String(err)}`).catch(() => {});

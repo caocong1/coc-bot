@@ -65,6 +65,23 @@ export function migrateCoreSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_kp_sessions_campaign ON kp_sessions(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_kp_sessions_group ON kp_sessions(group_id);
 
+    CREATE TABLE IF NOT EXISTS kp_events (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
+      session_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      channel_id TEXT NOT NULL DEFAULT 'main',
+      actor_id INTEGER,
+      visibility TEXT NOT NULL DEFAULT 'public',
+      payload_json TEXT NOT NULL,
+      ingame_time TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_kp_events_session_seq ON kp_events(session_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_kp_events_session_channel_seq ON kp_events(session_id, channel_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_kp_events_session_created ON kp_events(session_id, created_at);
+
     -- 当前场景（每个 session 只保留最新一条）
     CREATE TABLE IF NOT EXISTS kp_scenes (
       session_id TEXT PRIMARY KEY,

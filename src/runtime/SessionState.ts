@@ -2,22 +2,56 @@
  * AI KP 会话状态
  *
  * 管理一场跑团期间的所有动态状态：
- *  - 当前场景 / 章节
+ *  - 当前场景 / 场景频道
  *  - 已发现线索（区分 KP 知道 vs 玩家知道）
  *  - 等待骰子状态（谁在等什么检定结果）
  *  - 对话消息历史（含玩家 RP、KP 回复、骰子结果）
  *  - 摘要历史（旧消息压缩后的文本）
  *
- * 全部状态持久化到 SQLite，进程重启后可恢复。
+ * v1.2 开始引入双写事件流：
+ *  - 旧散表继续保留并写入，作为回滚窗口
+ *  - kp_events 作为 canonical runtime history
+ *  - SessionState 优先从事件流回放重建缓存
  */
 
 import { existsSync, readFileSync } from 'fs';
 import type { Database } from 'bun:sqlite';
 
+// ─── 常量 ──────────────────────────────────────────────────────────────────────
+
+const DEFAULT_CHANNEL_ID = 'main';
+const DEFAULT_VISIBILITY = 'public';
+const KP_EVENT_SHADOW_COMPARE =
+  process.env.KP_EVENT_SHADOW_COMPARE === undefined ||
+  process.env.KP_EVENT_SHADOW_COMPARE === '1' ||
+  process.env.KP_EVENT_SHADOW_COMPARE?.toLowerCase() === 'true';
+
 // ─── 公开类型 ─────────────────────────────────────────────────────────────────
 
 /** 消息角色 */
 export type MessageRole = 'player' | 'kp' | 'dice' | 'system';
+
+/** 会话可见性 */
+export type SessionVisibility = 'public' | 'kp_only' | `private:${string}`;
+
+/** 事件类型 */
+export type SessionEventType =
+  | 'message'
+  | 'scene_change'
+  | 'check_request'
+  | 'check_result'
+  | 'clue_discovered'
+  | 'time_advance'
+  | 'player_joined'
+  | 'channel_focus'
+  | 'channel_assignment'
+  | 'channel_interrupt';
+
+/** 查看上下文的视角 */
+export interface ViewerScope {
+  userId?: number;
+  includeKpOnly?: boolean;
+}
 
 /** 对话消息 */
 export interface SessionMessage {
@@ -32,6 +66,10 @@ export interface SessionMessage {
   timestamp: Date;
   /** 是否已被摘要压缩（压缩后不再放入原文上下文） */
   isSummarized: boolean;
+  /** 场景频道 ID */
+  channelId: string;
+  /** 该消息的可见性 */
+  visibility: SessionVisibility;
 }
 
 /** 线索 */
@@ -74,6 +112,10 @@ export interface PendingRoll {
   /** KP 请求投骰时的说明文本 */
   reason: string;
   requestedAt: Date;
+  /** 所属场景频道，默认 main */
+  channelId?: string;
+  /** 是否为紧急状态（非焦点频道下可能形成时间屏障） */
+  interruptNeeded?: boolean;
 }
 
 /** 当前场景信息 */
@@ -112,6 +154,30 @@ export interface TimelineEvent {
   createdAt: Date;
 }
 
+/** 场景频道状态 */
+export interface SceneChannelState {
+  id: string;
+  currentScene: SceneInfo | null;
+  playerIds: number[];
+  pendingRolls: PendingRoll[];
+  recentMessages: SessionMessage[];
+  interruptPending: boolean;
+}
+
+/** 会话事件 */
+export interface SessionEvent<TPayload = Record<string, unknown>> {
+  seq: number;
+  id: string;
+  sessionId: string;
+  type: SessionEventType;
+  channelId: string;
+  actorId?: number;
+  visibility: SessionVisibility;
+  payload: TPayload;
+  ingameTime: string | null;
+  createdAt: Date;
+}
+
 /** 会话状态快照（供 ContextBuilder 读取） */
 export interface SessionSnapshot {
   sessionId: string;
@@ -120,12 +186,121 @@ export interface SessionSnapshot {
   currentScene: SceneInfo | null;
   discoveredClues: Clue[];
   pendingRolls: PendingRoll[];
-  /** 未被摘要的近期消息（原文） */
+  /** 未被摘要压缩的近期消息（原文） */
   recentMessages: SessionMessage[];
   /** 已压缩的摘要文本列表（从旧到新） */
   summaries: string[];
   /** 当前游戏内时间 */
   ingameTime: string | null;
+  /** 当前焦点频道 */
+  focusChannelId: string;
+  /** 当前快照所属频道 */
+  channelId: string;
+  /** 活跃频道 */
+  activeChannels: string[];
+  /** 存在未处理紧急事件的频道 */
+  interruptChannels: string[];
+}
+
+// ─── 事件 payload ─────────────────────────────────────────────────────────────
+
+interface MessageEventPayload {
+  id: string;
+  role: MessageRole;
+  userId?: number;
+  displayName?: string;
+  content: string;
+  timestamp: string;
+  isSummarized?: boolean;
+}
+
+interface SceneChangeEventPayload {
+  scene: SceneInfo | null;
+}
+
+interface CheckRequestEventPayload {
+  roll: SerializedPendingRoll;
+}
+
+interface CheckResultEventPayload {
+  playerId?: number;
+  clearAll?: boolean;
+  resultText?: string;
+}
+
+interface ClueDiscoveredEventPayload {
+  clue: SerializedClue;
+  byUserId?: number;
+}
+
+interface TimeAdvanceEventPayload {
+  mode: 'set' | 'advance';
+  description: string;
+  trigger: 'ai' | 'system' | 'admin';
+  messageId?: string;
+  deltaMinutes: number | null;
+  ingameTime: string;
+}
+
+interface PlayerJoinedEventPayload {
+  userId: number;
+}
+
+interface ChannelFocusEventPayload {
+  channelId: string;
+}
+
+interface ChannelAssignmentEventPayload {
+  userId: number;
+  channelId: string;
+}
+
+interface ChannelInterruptEventPayload {
+  channelId: string;
+  reason: string;
+  active: boolean;
+}
+
+type KnownEventPayload =
+  | MessageEventPayload
+  | SceneChangeEventPayload
+  | CheckRequestEventPayload
+  | CheckResultEventPayload
+  | ClueDiscoveredEventPayload
+  | TimeAdvanceEventPayload
+  | PlayerJoinedEventPayload
+  | ChannelFocusEventPayload
+  | ChannelAssignmentEventPayload
+  | ChannelInterruptEventPayload;
+
+interface AppendEventOptions {
+  channelId?: string;
+  actorId?: number;
+  visibility?: SessionVisibility;
+  ingameTime?: string | null;
+  createdAt?: Date;
+}
+
+interface LegacySnapshot {
+  currentScene: SceneInfo | null;
+  discoveredClues: Clue[];
+  pendingRolls: PendingRoll[];
+  playerIds: number[];
+  recentMessages: SessionMessage[];
+  ingameTime: string | null;
+}
+
+interface ReplayedState {
+  focusChannelId: string;
+  channelScenes: Map<string, SceneInfo | null>;
+  playerChannels: Map<number, string>;
+  playerIds: number[];
+  discoveredClues: Clue[];
+  pendingRolls: PendingRoll[];
+  recentMessages: SessionMessage[];
+  ingameTime: string | null;
+  activeChannels: Set<string>;
+  interruptChannels: Set<string>;
 }
 
 // ─── 实现 ─────────────────────────────────────────────────────────────────────
@@ -136,45 +311,156 @@ export class SessionState {
   readonly campaignId: string;
   readonly groupId: number;
 
+  private readonly enableLegacyWrites = true;
+  private readonly readFromEvents = true;
+  private readonly enableShadowCompare = KP_EVENT_SHADOW_COMPARE;
+
   // 内存缓存
   private _currentScene: SceneInfo | null = null;
   private _pendingRolls: PendingRoll[] = [];
+  private _playerIds: number[] = [];
+  private _events: SessionEvent<KnownEventPayload>[] = [];
+  private _focusChannelId = DEFAULT_CHANNEL_ID;
+  private _channelScenes = new Map<string, SceneInfo | null>([[DEFAULT_CHANNEL_ID, null]]);
+  private _playerChannels = new Map<number, string>();
+  private _activeChannels = new Set<string>([DEFAULT_CHANNEL_ID]);
+  private _interruptChannels = new Set<string>();
+  private _derivedSummaryCache = new Map<string, { maxSeq: number; summaries: string[] }>();
+  private _recentMessagesCache: SessionMessage[] = [];
+  private _discoveredCluesCache: Clue[] = [];
   /** 已加载的模组全文（来自 data/knowledge/raw/）*/
   private _scenarioText: string | null = null;
   /** 当前游戏内时间 */
   private _ingameTime: string | null = null;
+  /** 当前会话加载的模组图片（内存，从 manifest 读取后注入） */
+  private _scenarioImages: ScenarioImage[] = [];
 
   constructor(db: Database, sessionId: string, campaignId: string, groupId: number) {
     this.db = db;
     this.sessionId = sessionId;
     this.campaignId = campaignId;
     this.groupId = groupId;
-    this._loadScene();
-    this._loadPendingRolls();
     this._loadScenarioText();
-    this._loadIngameTime();
+    this._loadState();
   }
 
   // ─── 场景管理 ───────────────────────────────────────────────────────────────
 
   get currentScene(): SceneInfo | null {
-    return this._currentScene;
+    return this._channelScenes.get(this._focusChannelId) ?? this._currentScene;
   }
 
-  setScene(scene: SceneInfo): void {
-    this._currentScene = scene;
-    this.db.run(
-      `INSERT OR REPLACE INTO kp_scenes
-         (session_id, name, description, active_npcs_json, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        this.sessionId,
-        scene.name,
-        scene.description,
-        JSON.stringify(scene.activeNpcs),
-        new Date().toISOString(),
-      ],
+  setScene(scene: SceneInfo, options: { channelId?: string; actorId?: number; visibility?: SessionVisibility } = {}): void {
+    const channelId = options.channelId ?? this._focusChannelId;
+    const now = new Date();
+    let event: SessionEvent<SceneChangeEventPayload> | undefined;
+    this.db.transaction(() => {
+      event = this.writeEventRecord(
+        'scene_change',
+        { scene },
+        {
+          channelId,
+          actorId: options.actorId,
+          visibility: options.visibility ?? DEFAULT_VISIBILITY,
+          createdAt: now,
+        },
+      );
+
+      if (this.enableLegacyWrites) {
+        this.db.run(
+          `INSERT OR REPLACE INTO kp_scenes
+             (session_id, name, description, active_npcs_json, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            this.sessionId,
+            scene.name,
+            scene.description,
+            JSON.stringify(scene.activeNpcs),
+            now.toISOString(),
+          ],
+        );
+      }
+    })();
+    if (event) this.commitEventRecord(event);
+
+    this._shadowCompare('setScene');
+  }
+
+  getFocusChannel(): string {
+    return this._focusChannelId;
+  }
+
+  setFocusChannel(channelId: string, actorId?: number): void {
+    const normalized = normalizeChannelId(channelId);
+    if (normalized === this._focusChannelId) return;
+    this.appendEvent(
+      'channel_focus',
+      { channelId: normalized },
+      { channelId: normalized, actorId, visibility: DEFAULT_VISIBILITY },
     );
+  }
+
+  getPlayerChannel(userId: number): string {
+    return this._playerChannels.get(userId) ?? DEFAULT_CHANNEL_ID;
+  }
+
+  assignPlayerToChannel(userId: number, channelId: string, actorId?: number): void {
+    const normalized = normalizeChannelId(channelId);
+    if (this.getPlayerChannel(userId) === normalized) return;
+    this.appendEvent(
+      'channel_assignment',
+      { userId, channelId: normalized },
+      { channelId: normalized, actorId, visibility: DEFAULT_VISIBILITY },
+    );
+  }
+
+  getActiveChannels(): string[] {
+    return Array.from(this._activeChannels).sort((a, b) => {
+      if (a === DEFAULT_CHANNEL_ID) return -1;
+      if (b === DEFAULT_CHANNEL_ID) return 1;
+      return a.localeCompare(b);
+    });
+  }
+
+  getChannelState(channelId: string, viewerScope: ViewerScope = {}): SceneChannelState {
+    const normalized = normalizeChannelId(channelId);
+    const playerIds = this._playerIds.filter((userId) => this.getPlayerChannel(userId) === normalized);
+    return {
+      id: normalized,
+      currentScene: this._channelScenes.get(normalized) ?? null,
+      playerIds,
+      pendingRolls: this.getPendingRollsForChannel(normalized),
+      recentMessages: this.getRecentMessages(40, { channelId: normalized, viewerScope }),
+      interruptPending: this._interruptChannels.has(normalized),
+    };
+  }
+
+  markChannelInterrupt(channelId: string, reason: string, actorId?: number): void {
+    const normalized = normalizeChannelId(channelId);
+    if (this._interruptChannels.has(normalized)) return;
+    this.appendEvent(
+      'channel_interrupt',
+      { channelId: normalized, reason, active: true },
+      { channelId: normalized, actorId, visibility: DEFAULT_VISIBILITY },
+    );
+  }
+
+  clearChannelInterrupt(channelId: string, actorId?: number): void {
+    const normalized = normalizeChannelId(channelId);
+    if (!this._interruptChannels.has(normalized)) return;
+    this.appendEvent(
+      'channel_interrupt',
+      { channelId: normalized, reason: 'clear', active: false },
+      { channelId: normalized, actorId, visibility: DEFAULT_VISIBILITY },
+    );
+  }
+
+  hasBlockingInterrupt(exceptChannelId?: string): boolean {
+    const except = exceptChannelId ? normalizeChannelId(exceptChannelId) : null;
+    for (const channelId of this._interruptChannels) {
+      if (!except || channelId !== except) return true;
+    }
+    return false;
   }
 
   // ─── 线索管理 ───────────────────────────────────────────────────────────────
@@ -196,24 +482,56 @@ export class SessionState {
     );
   }
 
-  discoverClue(clueId: string, byUserId: number): boolean {
-    const result = this.db.run(
-      `UPDATE kp_clues
-          SET is_discovered = 1, discovered_at = ?, discovered_by = ?
-        WHERE id = ? AND session_id = ? AND is_discovered = 0`,
-      [new Date().toISOString(), byUserId, clueId, this.sessionId],
-    );
-    return result.changes > 0;
+  discoverClue(clueId: string, byUserId: number, options: { channelId?: string; visibility?: SessionVisibility } = {}): boolean {
+    const now = new Date();
+    let discovered = false;
+    let event: SessionEvent<ClueDiscoveredEventPayload> | undefined;
+
+    this.db.transaction(() => {
+      const result = this.db.run(
+        `UPDATE kp_clues
+            SET is_discovered = 1, discovered_at = ?, discovered_by = ?
+          WHERE id = ? AND session_id = ? AND is_discovered = 0`,
+        [now.toISOString(), byUserId, clueId, this.sessionId],
+      );
+      if (result.changes <= 0) return;
+
+      const clueRow = this.db
+        .query<DbClueRow, [string, string]>(
+          `SELECT * FROM kp_clues WHERE session_id = ? AND id = ? LIMIT 1`,
+        )
+        .get(this.sessionId, clueId);
+      if (!clueRow) return;
+
+      event = this.writeEventRecord(
+        'clue_discovered',
+        {
+          clue: clueToSerialized(rowToClue(clueRow)),
+          byUserId,
+        },
+        {
+          channelId: options.channelId ?? this.getPlayerChannel(byUserId),
+          actorId: byUserId,
+          visibility: options.visibility ?? DEFAULT_VISIBILITY,
+          createdAt: now,
+        },
+      );
+      discovered = true;
+    })();
+
+    if (event) this.commitEventRecord(event);
+    if (discovered) {
+      this._shadowCompare('discoverClue');
+      return true;
+    }
+    return false;
   }
 
   getDiscoveredClues(): Clue[] {
-    return this.db
-      .query<DbClueRow, [string]>(
-        `SELECT * FROM kp_clues WHERE session_id = ? AND is_discovered = 1
-         ORDER BY discovered_at ASC`,
-      )
-      .all(this.sessionId)
-      .map(rowToClue);
+    if (this.readFromEvents && this._events.length > 0) {
+      return [...this._discoveredCluesCache];
+    }
+    return this._readLegacyDiscoveredClues();
   }
 
   getAllClues(): Clue[] {
@@ -229,47 +547,147 @@ export class SessionState {
     return [...this._pendingRolls];
   }
 
-  addPendingRoll(roll: PendingRoll): void {
-    // 同一玩家的旧请求覆盖
-    this._pendingRolls = this._pendingRolls.filter((r) => r.playerId !== roll.playerId);
-    this._pendingRolls.push(roll);
-    this._savePendingRolls();
+  addPendingRoll(
+    roll: PendingRoll,
+    options: { channelId?: string; actorId?: number; visibility?: SessionVisibility } = {},
+  ): void {
+    const normalized: PendingRoll = {
+      ...roll,
+      channelId: normalizeChannelId(options.channelId ?? roll.channelId ?? this.getPlayerChannel(roll.playerId)),
+    };
+    const nextPendingRolls = [
+      ...this._pendingRolls.filter((r) => r.playerId !== normalized.playerId),
+      normalized,
+    ];
+    let event: SessionEvent<CheckRequestEventPayload> | undefined;
+    this.db.transaction(() => {
+      event = this.writeEventRecord(
+        'check_request',
+        { roll: pendingRollToSerialized(normalized) },
+        {
+          channelId: normalized.channelId,
+          actorId: options.actorId ?? roll.playerId,
+          visibility: options.visibility ?? DEFAULT_VISIBILITY,
+          createdAt: normalized.requestedAt,
+        },
+      );
+      this._savePendingRollsValue(nextPendingRolls);
+    })();
+    if (event) this.commitEventRecord(event);
+    this._pendingRolls = nextPendingRolls;
+    this._shadowCompare('addPendingRoll');
   }
 
-  clearPendingRoll(playerId: number): void {
-    this._pendingRolls = this._pendingRolls.filter((r) => r.playerId !== playerId);
-    this._savePendingRolls();
+  clearPendingRoll(
+    playerId: number,
+    options: { channelId?: string; actorId?: number; resultText?: string; visibility?: SessionVisibility } = {},
+  ): void {
+    const channelId = normalizeChannelId(options.channelId ?? this.getPlayerChannel(playerId));
+    const nextPendingRolls = this._pendingRolls.filter((r) => r.playerId !== playerId);
+    let event: SessionEvent<CheckResultEventPayload> | undefined;
+    this.db.transaction(() => {
+      event = this.writeEventRecord(
+        'check_result',
+        { playerId, resultText: options.resultText },
+        {
+          channelId,
+          actorId: options.actorId ?? playerId,
+          visibility: options.visibility ?? DEFAULT_VISIBILITY,
+        },
+      );
+      this._savePendingRollsValue(nextPendingRolls);
+    })();
+    if (event) this.commitEventRecord(event);
+    this._pendingRolls = nextPendingRolls;
+    this._shadowCompare('clearPendingRoll');
   }
 
-  clearAllPendingRolls(): void {
-    this._pendingRolls = [];
-    this._savePendingRolls();
+  clearAllPendingRolls(
+    options: { actorId?: number; visibility?: SessionVisibility } = {},
+  ): void {
+    const nextPendingRolls: PendingRoll[] = [];
+    let event: SessionEvent<CheckResultEventPayload> | undefined;
+    this.db.transaction(() => {
+      event = this.writeEventRecord(
+        'check_result',
+        { clearAll: true },
+        {
+          channelId: this._focusChannelId,
+          actorId: options.actorId,
+          visibility: options.visibility ?? DEFAULT_VISIBILITY,
+        },
+      );
+      this._savePendingRollsValue(nextPendingRolls);
+    })();
+    if (event) this.commitEventRecord(event);
+    this._pendingRolls = nextPendingRolls;
+    this._shadowCompare('clearAllPendingRolls');
+  }
+
+  getPendingRollsForChannel(channelId: string): PendingRoll[] {
+    const normalized = normalizeChannelId(channelId);
+    return this._pendingRolls.filter((roll) => normalizeChannelId(roll.channelId) === normalized);
   }
 
   // ─── 消息历史 ───────────────────────────────────────────────────────────────
 
-  addMessage(msg: Omit<SessionMessage, 'sessionId' | 'isSummarized'>): SessionMessage {
+  addMessage(
+    msg: Omit<SessionMessage, 'sessionId' | 'isSummarized' | 'channelId' | 'visibility'> & {
+      channelId?: string;
+      visibility?: SessionVisibility;
+    },
+  ): SessionMessage {
+    const channelId = normalizeChannelId(msg.channelId ?? this.getPlayerChannel(msg.userId ?? 0) ?? this._focusChannelId);
+    const visibility = msg.visibility ?? DEFAULT_VISIBILITY;
     const full: SessionMessage = {
       ...msg,
       sessionId: this.sessionId,
       isSummarized: false,
+      channelId,
+      visibility,
     };
+    let event: SessionEvent<MessageEventPayload> | undefined;
+    this.db.transaction(() => {
+      event = this.writeEventRecord(
+        'message',
+        {
+          id: full.id,
+          role: full.role,
+          userId: full.userId,
+          displayName: full.displayName,
+          content: full.content,
+          timestamp: full.timestamp.toISOString(),
+          isSummarized: false,
+        },
+        {
+          channelId,
+          actorId: full.userId,
+          visibility,
+          ingameTime: this._ingameTime,
+          createdAt: full.timestamp,
+        },
+      );
 
-    this.db.run(
-      `INSERT INTO kp_messages
-         (id, session_id, role, user_id, display_name, content, timestamp, is_summarized)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
-      [
-        full.id,
-        full.sessionId,
-        full.role,
-        full.userId ?? null,
-        full.displayName ?? null,
-        full.content,
-        full.timestamp.toISOString(),
-      ],
-    );
+      if (this.enableLegacyWrites) {
+        this.db.run(
+          `INSERT INTO kp_messages
+             (id, session_id, role, user_id, display_name, content, timestamp, is_summarized)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+          [
+            full.id,
+            full.sessionId,
+            full.role,
+            full.userId ?? null,
+            full.displayName ?? null,
+            full.content,
+            full.timestamp.toISOString(),
+          ],
+        );
+      }
+    })();
+    if (event) this.commitEventRecord(event);
 
+    this._shadowCompare('addMessage');
     return full;
   }
 
@@ -277,16 +695,28 @@ export class SessionState {
    * 返回未被摘要压缩的消息，按时间正序。
    * limit 默认 40 条，防止单次拉取过多。
    */
-  getRecentMessages(limit = 40): SessionMessage[] {
-    return this.db
-      .query<DbMessageRow, [string, number]>(
-        `SELECT * FROM kp_messages
-          WHERE session_id = ? AND is_summarized = 0
-          ORDER BY timestamp ASC
-          LIMIT ?`,
-      )
-      .all(this.sessionId, limit)
-      .map(rowToMessage);
+  getRecentMessages(
+    limit = 40,
+    options: { channelId?: string; viewerScope?: ViewerScope } = {},
+  ): SessionMessage[] {
+    if (!this.readFromEvents || this._events.length === 0) {
+      return this.db
+        .query<DbMessageRow, [string, number]>(
+          `SELECT * FROM kp_messages
+            WHERE session_id = ? AND is_summarized = 0
+            ORDER BY timestamp ASC
+            LIMIT ?`,
+        )
+        .all(this.sessionId, limit)
+        .map(rowToMessage)
+        .map((msg) => ({ ...msg, channelId: DEFAULT_CHANNEL_ID, visibility: DEFAULT_VISIBILITY }));
+    }
+
+    const channelId = normalizeChannelId(options.channelId ?? this._focusChannelId);
+    const visible = this._recentMessagesCache
+      .filter((msg) => msg.channelId === channelId)
+      .filter((msg) => isVisibleToViewer(msg.visibility, options.viewerScope ?? {}));
+    return visible.slice(-Math.max(0, limit));
   }
 
   /** 将一批消息标记为已摘要（不再出现在 recentMessages 里） */
@@ -300,17 +730,104 @@ export class SessionState {
     );
   }
 
+  getVisibleEvents(
+    viewerScope: ViewerScope = {},
+    channelId = this._focusChannelId,
+    limit = 50,
+  ): Array<SessionEvent<KnownEventPayload>> {
+    const normalized = normalizeChannelId(channelId);
+    const visible = this._events.filter((evt) => evt.channelId === normalized)
+      .filter((evt) => isVisibleToViewer(evt.visibility, viewerScope));
+    return visible.slice(-Math.max(0, limit));
+  }
+
+  getDerivedSummaries(
+    channelId = this._focusChannelId,
+    viewerScope: ViewerScope = {},
+    maxRecentRaw = 24,
+  ): string[] {
+    if (!this.readFromEvents || this._events.length === 0) {
+      return this.getSummaries();
+    }
+
+    const normalized = normalizeChannelId(channelId);
+    const visible = this.getVisibleEvents(viewerScope, normalized, Number.MAX_SAFE_INTEGER);
+    if (visible.length <= maxRecentRaw) {
+      return [];
+    }
+
+    const maxSeq = visible[visible.length - 1]?.seq ?? 0;
+    const cacheKey = buildSummaryCacheKey(normalized, viewerScope);
+    const cached = this._derivedSummaryCache.get(cacheKey);
+    if (cached && cached.maxSeq === maxSeq) {
+      return [...cached.summaries];
+    }
+
+    const olderEvents = visible.slice(0, Math.max(0, visible.length - maxRecentRaw));
+    const blockSize = 12;
+    const summaries: string[] = [];
+    for (let start = 0; start < olderEvents.length; start += blockSize) {
+      const block = olderEvents.slice(start, start + blockSize);
+      const lines = block
+        .map((event) => summarizeEventForContext(event))
+        .filter((line): line is string => Boolean(line));
+      if (lines.length === 0) continue;
+
+      const span = formatEventSpan(block[0], block[block.length - 1]);
+      const body = compact(lines.join('；'), 260);
+      summaries.push(span ? `${span}：${body}` : body);
+    }
+
+    this._derivedSummaryCache.set(cacheKey, { maxSeq, summaries });
+    return [...summaries];
+  }
+
   // ─── 玩家跟踪 ───────────────────────────────────────────────────────────────
 
   /** 记录参与本 session 的玩家 userId（首次发言时自动注册） */
-  trackPlayer(userId: number): void {
-    this.db.run(
-      'INSERT OR IGNORE INTO kp_session_players (session_id, user_id, joined_at) VALUES (?, ?, ?)',
-      [this.sessionId, userId, new Date().toISOString()],
-    );
+  trackPlayer(
+    userId: number,
+    options: { channelId?: string; actorId?: number } = {},
+  ): void {
+    const channelId = normalizeChannelId(options.channelId ?? this.getPlayerChannel(userId));
+    const exists = this._playerIds.includes(userId);
+    const shouldAssignChannel = !exists || this.getPlayerChannel(userId) !== channelId;
+    let joinedEvent: SessionEvent<PlayerJoinedEventPayload> | undefined;
+    let assignmentEvent: SessionEvent<ChannelAssignmentEventPayload> | undefined;
+    this.db.transaction(() => {
+      if (!exists) {
+        joinedEvent = this.writeEventRecord(
+          'player_joined',
+          { userId },
+          { channelId, actorId: options.actorId ?? userId, visibility: DEFAULT_VISIBILITY },
+        );
+      }
+
+      if (shouldAssignChannel) {
+        assignmentEvent = this.writeEventRecord(
+          'channel_assignment',
+          { userId, channelId },
+          { channelId, actorId: options.actorId ?? userId, visibility: DEFAULT_VISIBILITY },
+        );
+      }
+
+      if (this.enableLegacyWrites) {
+        this.db.run(
+          'INSERT OR IGNORE INTO kp_session_players (session_id, user_id, joined_at) VALUES (?, ?, ?)',
+          [this.sessionId, userId, new Date().toISOString()],
+        );
+      }
+    })();
+    if (joinedEvent) this.commitEventRecord(joinedEvent);
+    if (assignmentEvent) this.commitEventRecord(assignmentEvent);
+
+    this._shadowCompare('trackPlayer');
   }
 
   getPlayerIds(): number[] {
+    if (this.readFromEvents && this._events.length > 0) {
+      return [...this._playerIds];
+    }
     return this.db
       .query<{ user_id: number }, [string]>(
         'SELECT user_id FROM kp_session_players WHERE session_id = ? ORDER BY joined_at ASC',
@@ -437,21 +954,107 @@ export class SessionState {
   }
 
   /** 设置绝对游戏时间（开场 / SET_TIME 标记 / 管理员手动） */
-  setIngameTime(time: string, description: string, trigger: 'ai' | 'system' | 'admin', messageId?: string): void {
-    this._ingameTime = time;
-    this.db.run('UPDATE kp_sessions SET ingame_time = ?, updated_at = ? WHERE id = ?',
-      [time, new Date().toISOString(), this.sessionId]);
-    this._insertTimelineEvent(time, null, description, trigger, messageId);
+  setIngameTime(
+    time: string,
+    description: string,
+    trigger: 'ai' | 'system' | 'admin',
+    messageId?: string,
+    options: { channelId?: string; actorId?: number; visibility?: SessionVisibility } = {},
+  ): void {
+    let targetTime = time;
+    const baseTime = this._ingameTime;
+    if (baseTime && this._interruptChannels.size > 0) {
+      const deltaMinutes = diffMinutesBetweenTimes(baseTime, targetTime);
+      if (deltaMinutes !== null && Math.abs(deltaMinutes) > 30) {
+        console.warn(`[TimeBarrier] 存在未处理的频道中断 ${[...this._interruptChannels].join(',')}, 大幅时间推进被限制`);
+        targetTime = addMinutesToTime(baseTime, Math.sign(deltaMinutes) * 30);
+      }
+    }
+
+    const now = new Date();
+    let event: SessionEvent<TimeAdvanceEventPayload> | undefined;
+    this.db.transaction(() => {
+      event = this.writeEventRecord(
+        'time_advance',
+        {
+          mode: 'set',
+          description,
+          trigger,
+          messageId,
+          deltaMinutes: null,
+          ingameTime: targetTime,
+        },
+        {
+          channelId: options.channelId ?? this._focusChannelId,
+          actorId: options.actorId,
+          visibility: options.visibility ?? DEFAULT_VISIBILITY,
+          ingameTime: targetTime,
+          createdAt: now,
+        },
+      );
+
+      if (this.enableLegacyWrites) {
+        this.db.run('UPDATE kp_sessions SET ingame_time = ?, updated_at = ? WHERE id = ?',
+          [targetTime, now.toISOString(), this.sessionId]);
+        this._insertTimelineEvent(targetTime, null, description, trigger, messageId, now);
+      }
+    })();
+
+    if (event) this.commitEventRecord(event);
+    this._ingameTime = targetTime;
+
+    this._shadowCompare('setIngameTime');
   }
 
   /** 按分钟数推进游戏时间（TIME_ADVANCE 标记 / 管理员手动） */
-  advanceIngameTime(deltaMinutes: number, description: string, trigger: 'ai' | 'system' | 'admin', messageId?: string): void {
-    if (!this._ingameTime) return;
-    const newTime = addMinutesToTime(this._ingameTime, deltaMinutes);
+  advanceIngameTime(
+    deltaMinutes: number,
+    description: string,
+    trigger: 'ai' | 'system' | 'admin',
+    messageId?: string,
+    options: { channelId?: string; actorId?: number; visibility?: SessionVisibility } = {},
+  ): void {
+    const baseTime = this._ingameTime;
+    if (!baseTime) return;
+    let limitedDeltaMinutes = deltaMinutes;
+    if (this._interruptChannels.size > 0 && Math.abs(limitedDeltaMinutes) > 30) {
+      console.warn(`[TimeBarrier] 存在未处理的频道中断 ${[...this._interruptChannels].join(',')}, 大幅时间推进被限制`);
+      limitedDeltaMinutes = Math.sign(limitedDeltaMinutes) * 30;
+    }
+    const newTime = addMinutesToTime(baseTime, limitedDeltaMinutes);
+    const now = new Date();
+    let event: SessionEvent<TimeAdvanceEventPayload> | undefined;
+    this.db.transaction(() => {
+      event = this.writeEventRecord(
+        'time_advance',
+        {
+          mode: 'advance',
+          description,
+          trigger,
+          messageId,
+          deltaMinutes: limitedDeltaMinutes,
+          ingameTime: newTime,
+        },
+        {
+          channelId: options.channelId ?? this._focusChannelId,
+          actorId: options.actorId,
+          visibility: options.visibility ?? DEFAULT_VISIBILITY,
+          ingameTime: newTime,
+          createdAt: now,
+        },
+      );
+
+      if (this.enableLegacyWrites) {
+        this.db.run('UPDATE kp_sessions SET ingame_time = ?, updated_at = ? WHERE id = ?',
+          [newTime, now.toISOString(), this.sessionId]);
+        this._insertTimelineEvent(newTime, limitedDeltaMinutes, description, trigger, messageId, now);
+      }
+    })();
+
+    if (event) this.commitEventRecord(event);
     this._ingameTime = newTime;
-    this.db.run('UPDATE kp_sessions SET ingame_time = ?, updated_at = ? WHERE id = ?',
-      [newTime, new Date().toISOString(), this.sessionId]);
-    this._insertTimelineEvent(newTime, deltaMinutes, description, trigger, messageId);
+
+    this._shadowCompare('advanceIngameTime');
   }
 
   /** 查询时间轴事件 */
@@ -464,87 +1067,35 @@ export class SessionState {
       .map(rowToTimelineEvent);
   }
 
-  private _insertTimelineEvent(
-    ingameTime: string, deltaMinutes: number | null,
-    description: string, trigger: string, messageId?: string,
-  ): void {
-    const id = `te-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    this.db.run(
-      `INSERT INTO kp_timeline_events (id, session_id, ingame_time, delta_minutes, description, trigger, message_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, this.sessionId, ingameTime, deltaMinutes, description, trigger, messageId ?? null, new Date().toISOString()],
-    );
-  }
-
-  private _loadIngameTime(): void {
-    const row = this.db.query<{ ingame_time: string | null }, [string]>(
-      'SELECT ingame_time FROM kp_sessions WHERE id = ?',
-    ).get(this.sessionId);
-    this._ingameTime = row?.ingame_time ?? null;
-  }
-
   // ─── 快照 ─────────────────────────────────────────────────────────────────
 
-  snapshot(): SessionSnapshot {
+  snapshot(channelId = this._focusChannelId, viewerScope: ViewerScope = {}): SessionSnapshot {
+    if (this.readFromEvents && this._events.length > 0) {
+      return this.snapshotFromEvents(channelId, viewerScope);
+    }
+    return this.snapshotFromLegacy(channelId);
+  }
+
+  snapshotFromEvents(channelId = this._focusChannelId, viewerScope: ViewerScope = {}): SessionSnapshot {
+    const normalized = normalizeChannelId(channelId);
     return {
       sessionId: this.sessionId,
       campaignId: this.campaignId,
       groupId: this.groupId,
-      currentScene: this._currentScene,
-      discoveredClues: this.getDiscoveredClues(),
-      pendingRolls: this.pendingRolls,
-      recentMessages: this.getRecentMessages(40),
-      summaries: this.getSummaries(),
+      currentScene: this._channelScenes.get(normalized) ?? null,
+      discoveredClues: [...this._discoveredCluesCache],
+      pendingRolls: this.getPendingRollsForChannel(normalized),
+      recentMessages: this.getRecentMessages(40, { channelId: normalized, viewerScope }),
+      summaries: this.getDerivedSummaries(normalized, viewerScope),
       ingameTime: this._ingameTime,
+      focusChannelId: this._focusChannelId,
+      channelId: normalized,
+      activeChannels: this.getActiveChannels(),
+      interruptChannels: Array.from(this._interruptChannels),
     };
   }
 
-  // ─── 私有 ─────────────────────────────────────────────────────────────────
-
-  private _loadScene(): void {
-    const row = this.db
-      .query<DbSceneRow, [string]>(
-        `SELECT * FROM kp_scenes WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1`,
-      )
-      .get(this.sessionId);
-
-    if (row) {
-      this._currentScene = {
-        name: row.name,
-        description: row.description,
-        activeNpcs: JSON.parse(row.active_npcs_json) as string[],
-      };
-    }
-  }
-
-  private _loadPendingRolls(): void {
-    const row = this.db
-      .query<{ rolls_json: string }, [string]>(
-        `SELECT rolls_json FROM kp_pending_rolls WHERE session_id = ? LIMIT 1`,
-      )
-      .get(this.sessionId);
-
-    if (row) {
-      const parsed = JSON.parse(row.rolls_json) as PendingRoll[];
-      this._pendingRolls = parsed.map((r) => ({
-        ...r,
-        requestedAt: new Date(r.requestedAt),
-      }));
-    }
-  }
-
-  private _savePendingRolls(): void {
-    this.db.run(
-      `INSERT OR REPLACE INTO kp_pending_rolls (session_id, rolls_json, updated_at)
-       VALUES (?, ?, ?)`,
-      [this.sessionId, JSON.stringify(this._pendingRolls), new Date().toISOString()],
-    );
-  }
-
-  // ─── 模组图片 ────────────────────────────────────────────────────────────────
-
-  /** 当前会话加载的模组图片（内存，从 manifest 读取后注入） */
-  private _scenarioImages: ScenarioImage[] = [];
+  // ─── 模组图片 / 模组全文 ────────────────────────────────────────────────────
 
   setScenarioImages(images: ScenarioImage[]): void {
     this._scenarioImages = images;
@@ -558,8 +1109,6 @@ export class SessionState {
   resolveImage(imgId: string): ScenarioImage | undefined {
     return this._scenarioImages.find((img) => img.id === imgId);
   }
-
-  // ─── 模组全文 ────────────────────────────────────────────────────────────────
 
   /**
    * 从 data/knowledge/raw/ 加载模组原始文本，注入到 ContextBuilder 层 5。
@@ -594,6 +1143,357 @@ export class SessionState {
     return row.scenario_file_path.split('||')[0] ?? null;
   }
 
+  // ─── 私有 ─────────────────────────────────────────────────────────────────
+
+  private appendEvent<TPayload extends KnownEventPayload>(
+    type: SessionEventType,
+    payload: TPayload,
+    options: AppendEventOptions = {},
+  ): SessionEvent<TPayload> {
+    const event = this.writeEventRecord(type, payload, options);
+    return this.commitEventRecord(event);
+  }
+
+  private writeEventRecord<TPayload extends KnownEventPayload>(
+    type: SessionEventType,
+    payload: TPayload,
+    options: AppendEventOptions = {},
+  ): SessionEvent<TPayload> {
+    const channelId = normalizeChannelId(options.channelId ?? DEFAULT_CHANNEL_ID);
+    const createdAt = options.createdAt ?? new Date();
+    const visibility = options.visibility ?? DEFAULT_VISIBILITY;
+    const id = `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    this.db.run(
+      `INSERT INTO kp_events
+         (id, session_id, type, channel_id, actor_id, visibility, payload_json, ingame_time, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        this.sessionId,
+        type,
+        channelId,
+        options.actorId ?? null,
+        visibility,
+        JSON.stringify(payload),
+        options.ingameTime ?? this._ingameTime,
+        createdAt.toISOString(),
+      ],
+    );
+    const row = this.db
+      .query<DbEventRow, [string]>(
+        `SELECT seq, id, session_id, type, channel_id, actor_id, visibility, payload_json, ingame_time, created_at
+         FROM kp_events WHERE id = ? LIMIT 1`,
+      )
+      .get(id);
+    if (!row) {
+      throw new Error(`Failed to read back kp_events row: ${id}`);
+    }
+    return rowToEvent(row) as SessionEvent<TPayload>;
+  }
+
+  private commitEventRecord<TPayload extends KnownEventPayload>(event: SessionEvent<TPayload>): SessionEvent<TPayload> {
+    this._events.push(event as SessionEvent<KnownEventPayload>);
+    this._applyEvent(event as SessionEvent<KnownEventPayload>);
+    return event;
+  }
+
+  private _loadState(): void {
+    this._events = this._readEvents();
+    if (this.readFromEvents && this._events.length > 0) {
+      this._rebuildFromEvents();
+      return;
+    }
+
+    // 兼容旧数据：无事件时回退 legacy 散表
+    const legacy = this._readLegacySnapshot();
+    this._currentScene = legacy.currentScene;
+    this._channelScenes.set(DEFAULT_CHANNEL_ID, legacy.currentScene);
+    this._pendingRolls = legacy.pendingRolls;
+    this._playerIds = legacy.playerIds;
+    this._playerChannels = new Map(legacy.playerIds.map((userId) => [userId, DEFAULT_CHANNEL_ID]));
+    this._recentMessagesCache = legacy.recentMessages;
+    this._discoveredCluesCache = legacy.discoveredClues;
+    this._ingameTime = legacy.ingameTime;
+  }
+
+  private _readEvents(): Array<SessionEvent<KnownEventPayload>> {
+    return this.db
+      .query<DbEventRow, [string]>(
+        `SELECT seq, id, session_id, type, channel_id, actor_id, visibility, payload_json, ingame_time, created_at
+         FROM kp_events
+         WHERE session_id = ?
+         ORDER BY seq ASC`,
+      )
+      .all(this.sessionId)
+      .map((row) => rowToEvent(row) as SessionEvent<KnownEventPayload>);
+  }
+
+  private _rebuildFromEvents(): void {
+    const legacyScene = this._readLegacyScene();
+    const legacyIngameTime = this._readLegacyIngameTime();
+    const legacyPlayerIds = this._readLegacyPlayerIds();
+    const state: ReplayedState = {
+      focusChannelId: DEFAULT_CHANNEL_ID,
+      channelScenes: new Map<string, SceneInfo | null>([[DEFAULT_CHANNEL_ID, legacyScene]]),
+      playerChannels: new Map<number, string>(legacyPlayerIds.map((userId) => [userId, DEFAULT_CHANNEL_ID])),
+      playerIds: [...legacyPlayerIds],
+      discoveredClues: [],
+      pendingRolls: [],
+      recentMessages: [],
+      ingameTime: legacyIngameTime,
+      activeChannels: new Set<string>([DEFAULT_CHANNEL_ID]),
+      interruptChannels: new Set<string>(),
+    };
+
+    const seenPlayers = new Set<number>(legacyPlayerIds);
+    const pendingByPlayer = new Map<number, PendingRoll>();
+    const discoveredById = new Map<string, Clue>();
+
+    for (const event of this._events) {
+      state.activeChannels.add(event.channelId);
+
+      switch (event.type) {
+        case 'message': {
+          const payload = event.payload as MessageEventPayload;
+          state.recentMessages.push({
+            id: payload.id,
+            sessionId: this.sessionId,
+            role: payload.role,
+            userId: payload.userId,
+            displayName: payload.displayName,
+            content: payload.content,
+            timestamp: new Date(payload.timestamp),
+            isSummarized: payload.isSummarized === true,
+            channelId: event.channelId,
+            visibility: event.visibility,
+          });
+          break;
+        }
+        case 'scene_change': {
+          const payload = event.payload as SceneChangeEventPayload;
+          state.channelScenes.set(event.channelId, payload.scene ?? null);
+          break;
+        }
+        case 'check_request': {
+          const payload = event.payload as CheckRequestEventPayload;
+          const roll = serializedToPendingRoll(payload.roll);
+          pendingByPlayer.set(roll.playerId, roll);
+          state.activeChannels.add(normalizeChannelId(roll.channelId));
+          break;
+        }
+        case 'check_result': {
+          const payload = event.payload as CheckResultEventPayload;
+          if (payload.clearAll) {
+            pendingByPlayer.clear();
+          } else if (payload.playerId !== undefined) {
+            pendingByPlayer.delete(payload.playerId);
+          }
+          break;
+        }
+        case 'clue_discovered': {
+          const payload = event.payload as ClueDiscoveredEventPayload;
+          discoveredById.set(payload.clue.id, serializedToClue(payload.clue));
+          break;
+        }
+        case 'time_advance': {
+          const payload = event.payload as TimeAdvanceEventPayload;
+          state.ingameTime = payload.ingameTime;
+          break;
+        }
+        case 'player_joined': {
+          const payload = event.payload as PlayerJoinedEventPayload;
+          if (!seenPlayers.has(payload.userId)) {
+            seenPlayers.add(payload.userId);
+            state.playerIds.push(payload.userId);
+          }
+          if (!state.playerChannels.has(payload.userId)) {
+            state.playerChannels.set(payload.userId, event.channelId);
+          }
+          break;
+        }
+        case 'channel_focus': {
+          const payload = event.payload as ChannelFocusEventPayload;
+          state.focusChannelId = normalizeChannelId(payload.channelId);
+          state.activeChannels.add(state.focusChannelId);
+          break;
+        }
+        case 'channel_assignment': {
+          const payload = event.payload as ChannelAssignmentEventPayload;
+          const normalized = normalizeChannelId(payload.channelId);
+          state.playerChannels.set(payload.userId, normalized);
+          state.activeChannels.add(normalized);
+          if (!seenPlayers.has(payload.userId)) {
+            seenPlayers.add(payload.userId);
+            state.playerIds.push(payload.userId);
+          }
+          break;
+        }
+        case 'channel_interrupt': {
+          const payload = event.payload as ChannelInterruptEventPayload;
+          const normalized = normalizeChannelId(payload.channelId);
+          if (payload.active) state.interruptChannels.add(normalized);
+          else state.interruptChannels.delete(normalized);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    state.pendingRolls = Array.from(pendingByPlayer.values());
+    state.discoveredClues = Array.from(discoveredById.values())
+      .sort((a, b) => (a.discoveredAt?.getTime() ?? 0) - (b.discoveredAt?.getTime() ?? 0));
+
+    this._focusChannelId = state.focusChannelId;
+    this._channelScenes = state.channelScenes;
+    this._currentScene = state.channelScenes.get(state.focusChannelId) ?? null;
+    this._playerChannels = state.playerChannels;
+    this._playerIds = state.playerIds;
+    this._pendingRolls = state.pendingRolls;
+    this._recentMessagesCache = state.recentMessages;
+    this._discoveredCluesCache = state.discoveredClues;
+    this._ingameTime = state.ingameTime;
+    this._activeChannels = state.activeChannels;
+    this._interruptChannels = state.interruptChannels;
+  }
+
+  private _applyEvent(_event: SessionEvent<KnownEventPayload>): void {
+    // 简单起见，统一回放保证状态机只有一份逻辑
+    this._rebuildFromEvents();
+  }
+
+  private _readLegacySnapshot(): LegacySnapshot {
+    return {
+      currentScene: this._readLegacyScene(),
+      discoveredClues: this._readLegacyDiscoveredClues(),
+      pendingRolls: this._readLegacyPendingRolls(),
+      playerIds: this._readLegacyPlayerIds(),
+      recentMessages: this._readLegacyRecentMessages(40),
+      ingameTime: this._readLegacyIngameTime(),
+    };
+  }
+
+  private snapshotFromLegacy(channelId = DEFAULT_CHANNEL_ID): SessionSnapshot {
+    const legacy = this._readLegacySnapshot();
+    return {
+      sessionId: this.sessionId,
+      campaignId: this.campaignId,
+      groupId: this.groupId,
+      currentScene: legacy.currentScene,
+      discoveredClues: legacy.discoveredClues,
+      pendingRolls: legacy.pendingRolls,
+      recentMessages: legacy.recentMessages.filter((msg) => msg.channelId === channelId),
+      summaries: this.getSummaries(),
+      ingameTime: legacy.ingameTime,
+      focusChannelId: DEFAULT_CHANNEL_ID,
+      channelId,
+      activeChannels: [DEFAULT_CHANNEL_ID],
+      interruptChannels: [],
+    };
+  }
+
+  private _readLegacyScene(): SceneInfo | null {
+    const row = this.db
+      .query<DbSceneRow, [string]>(
+        `SELECT * FROM kp_scenes WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1`,
+      )
+      .get(this.sessionId);
+
+    if (!row) return null;
+    return {
+      name: row.name,
+      description: row.description,
+      activeNpcs: JSON.parse(row.active_npcs_json) as string[],
+    };
+  }
+
+  private _readLegacyDiscoveredClues(): Clue[] {
+    return this.db
+      .query<DbClueRow, [string]>(
+        `SELECT * FROM kp_clues WHERE session_id = ? AND is_discovered = 1
+         ORDER BY discovered_at ASC`,
+      )
+      .all(this.sessionId)
+      .map(rowToClue);
+  }
+
+  private _readLegacyPendingRolls(): PendingRoll[] {
+    const row = this.db
+      .query<{ rolls_json: string }, [string]>(
+        `SELECT rolls_json FROM kp_pending_rolls WHERE session_id = ? LIMIT 1`,
+      )
+      .get(this.sessionId);
+    if (!row) return [];
+    const parsed = JSON.parse(row.rolls_json) as Array<PendingRoll & { requestedAt: string }>;
+    return parsed.map((roll) => ({
+      ...roll,
+      requestedAt: new Date(roll.requestedAt),
+      channelId: normalizeChannelId(roll.channelId),
+    }));
+  }
+
+  private _readLegacyPlayerIds(): number[] {
+    return this.db
+      .query<{ user_id: number }, [string]>(
+        'SELECT user_id FROM kp_session_players WHERE session_id = ? ORDER BY joined_at ASC',
+      )
+      .all(this.sessionId)
+      .map((row) => row.user_id);
+  }
+
+  private _readLegacyRecentMessages(limit = 40): SessionMessage[] {
+    return this.db
+      .query<DbMessageRow, [string, number]>(
+        `SELECT * FROM kp_messages
+          WHERE session_id = ? AND is_summarized = 0
+          ORDER BY timestamp ASC
+          LIMIT ?`,
+      )
+      .all(this.sessionId, limit)
+      .map(rowToMessage)
+      .map((msg) => ({
+        ...msg,
+        channelId: DEFAULT_CHANNEL_ID,
+        visibility: DEFAULT_VISIBILITY,
+      }));
+  }
+
+  private _readLegacyIngameTime(): string | null {
+    const row = this.db.query<{ ingame_time: string | null }, [string]>(
+      'SELECT ingame_time FROM kp_sessions WHERE id = ?',
+    ).get(this.sessionId);
+    return row?.ingame_time ?? null;
+  }
+
+  private _savePendingRolls(): void {
+    this._savePendingRollsValue(this._pendingRolls);
+  }
+
+  private _savePendingRollsValue(rolls: PendingRoll[]): void {
+    if (!this.enableLegacyWrites) return;
+    this.db.run(
+      `INSERT OR REPLACE INTO kp_pending_rolls (session_id, rolls_json, updated_at)
+       VALUES (?, ?, ?)`,
+      [this.sessionId, JSON.stringify(rolls), new Date().toISOString()],
+    );
+  }
+
+  private _insertTimelineEvent(
+    ingameTime: string,
+    deltaMinutes: number | null,
+    description: string,
+    trigger: string,
+    messageId?: string,
+    createdAt = new Date(),
+  ): void {
+    const id = `te-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    this.db.run(
+      `INSERT INTO kp_timeline_events (id, session_id, ingame_time, delta_minutes, description, trigger, message_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, this.sessionId, ingameTime, deltaMinutes, description, trigger, messageId ?? null, createdAt.toISOString()],
+    );
+  }
+
   private _loadScenarioText(): void {
     const row = this.db
       .query<{ scenario_file_path: string | null }, [string]>(
@@ -606,6 +1506,52 @@ export class SessionState {
     const filePath = parts[1];
     if (filePath && existsSync(filePath)) {
       this._scenarioText = readFileSync(filePath, 'utf-8');
+    }
+  }
+
+  private getSummarizedMessageIds(): Set<string> {
+    const rows = this.db
+      .query<{ message_ids_json: string }, [string]>(
+        `SELECT message_ids_json FROM kp_summaries WHERE session_id = ?`,
+      )
+      .all(this.sessionId);
+    const ids = new Set<string>();
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.message_ids_json) as unknown;
+        if (Array.isArray(parsed)) {
+          for (const id of parsed) {
+            if (typeof id === 'string') ids.add(id);
+          }
+        }
+      } catch {
+        // ignore bad cache rows
+      }
+    }
+    return ids;
+  }
+
+  private _shadowCompare(reason: string): void {
+    if (!this.enableShadowCompare || !this.readFromEvents || this._events.length === 0) return;
+    if (this._activeChannels.size > 1 || this._focusChannelId !== DEFAULT_CHANNEL_ID) return;
+
+    try {
+      const legacy = this._readLegacySnapshot();
+      const replay = this.snapshotFromEvents(DEFAULT_CHANNEL_ID, {});
+      const mismatches: string[] = [];
+
+      if (!sceneEquals(legacy.currentScene, replay.currentScene)) mismatches.push('currentScene');
+      if (!clueListEquals(legacy.discoveredClues, replay.discoveredClues)) mismatches.push('discoveredClues');
+      if (!pendingRollListEquals(legacy.pendingRolls, replay.pendingRolls)) mismatches.push('pendingRolls');
+      if (!numberListEquals(legacy.playerIds, this._playerIds)) mismatches.push('playerIds');
+      if (!messageListEquals(legacy.recentMessages, replay.recentMessages)) mismatches.push('recentMessages');
+      if ((legacy.ingameTime ?? null) !== (replay.ingameTime ?? null)) mismatches.push('ingameTime');
+
+      if (mismatches.length > 0) {
+        console.warn(`[SessionState] shadow compare mismatch after ${reason}: ${mismatches.join(', ')}`);
+      }
+    } catch (err) {
+      console.warn('[SessionState] shadow compare failed:', err);
     }
   }
 }
@@ -642,6 +1588,39 @@ interface DbMessageRow {
   is_summarized: number;
 }
 
+interface DbTimelineRow {
+  id: string;
+  session_id: string;
+  ingame_time: string;
+  delta_minutes: number | null;
+  description: string;
+  trigger: string;
+  message_id: string | null;
+  created_at: string;
+}
+
+interface DbEventRow {
+  seq: number;
+  id: string;
+  session_id: string;
+  type: string;
+  channel_id: string | null;
+  actor_id: number | null;
+  visibility: string | null;
+  payload_json: string;
+  ingame_time: string | null;
+  created_at: string;
+}
+
+interface SerializedPendingRoll extends Omit<PendingRoll, 'requestedAt' | 'channelId'> {
+  requestedAt: string;
+  channelId?: string;
+}
+
+interface SerializedClue extends Omit<Clue, 'discoveredAt'> {
+  discoveredAt?: string;
+}
+
 function rowToClue(row: DbClueRow): Clue {
   return {
     id: row.id,
@@ -665,18 +1644,9 @@ function rowToMessage(row: DbMessageRow): SessionMessage {
     content: row.content,
     timestamp: new Date(row.timestamp),
     isSummarized: row.is_summarized === 1,
+    channelId: DEFAULT_CHANNEL_ID,
+    visibility: DEFAULT_VISIBILITY,
   };
-}
-
-interface DbTimelineRow {
-  id: string;
-  session_id: string;
-  ingame_time: string;
-  delta_minutes: number | null;
-  description: string;
-  trigger: string;
-  message_id: string | null;
-  created_at: string;
 }
 
 function rowToTimelineEvent(row: DbTimelineRow): TimelineEvent {
@@ -692,6 +1662,219 @@ function rowToTimelineEvent(row: DbTimelineRow): TimelineEvent {
   };
 }
 
+function rowToEvent(row: DbEventRow): SessionEvent<KnownEventPayload> {
+  return {
+    seq: row.seq,
+    id: row.id,
+    sessionId: row.session_id,
+    type: row.type as SessionEventType,
+    channelId: normalizeChannelId(row.channel_id),
+    actorId: row.actor_id ?? undefined,
+    visibility: normalizeVisibility(row.visibility),
+    payload: JSON.parse(row.payload_json) as KnownEventPayload,
+    ingameTime: row.ingame_time ?? null,
+    createdAt: new Date(row.created_at),
+  };
+}
+
+function pendingRollToSerialized(roll: PendingRoll): SerializedPendingRoll {
+  return {
+    ...roll,
+    requestedAt: roll.requestedAt.toISOString(),
+    channelId: normalizeChannelId(roll.channelId),
+  };
+}
+
+function serializedToPendingRoll(roll: SerializedPendingRoll): PendingRoll {
+  return {
+    ...roll,
+    requestedAt: new Date(roll.requestedAt),
+    channelId: normalizeChannelId(roll.channelId),
+  };
+}
+
+function clueToSerialized(clue: Clue): SerializedClue {
+  return {
+    ...clue,
+    discoveredAt: clue.discoveredAt?.toISOString(),
+  };
+}
+
+function serializedToClue(clue: SerializedClue): Clue {
+  return {
+    ...clue,
+    discoveredAt: clue.discoveredAt ? new Date(clue.discoveredAt) : undefined,
+  };
+}
+
+function normalizeChannelId(channelId?: string | null): string {
+  return channelId?.trim() || DEFAULT_CHANNEL_ID;
+}
+
+function normalizeVisibility(value?: string | null): SessionVisibility {
+  if (!value) return DEFAULT_VISIBILITY;
+  if (value === 'public' || value === 'kp_only' || value.startsWith('private:')) {
+    return value as SessionVisibility;
+  }
+  return DEFAULT_VISIBILITY;
+}
+
+export function buildPrivateVisibility(userIds: number | number[]): SessionVisibility {
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  const normalized = Array.from(new Set(ids.map((id) => Math.trunc(id)).filter((id) => Number.isFinite(id) && id > 0)));
+  if (normalized.length === 0) return DEFAULT_VISIBILITY;
+  return `private:${normalized.join(',')}`;
+}
+
+export function parsePrivateVisibility(visibility: SessionVisibility): number[] {
+  if (!visibility.startsWith('private:')) return [];
+  return visibility.slice('private:'.length)
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((id) => Number.isFinite(id) && id > 0);
+}
+
+function isVisibleToViewer(visibility: SessionVisibility, viewerScope: ViewerScope): boolean {
+  if (visibility === 'public') return true;
+  if (visibility === 'kp_only') return viewerScope.includeKpOnly === true;
+  if (!visibility.startsWith('private:')) return false;
+  if (viewerScope.includeKpOnly) return true;
+  if (!viewerScope.userId) return false;
+  return parsePrivateVisibility(visibility).includes(viewerScope.userId);
+}
+
+function buildSummaryCacheKey(channelId: string, viewerScope: ViewerScope): string {
+  const viewer = viewerScope.includeKpOnly
+    ? `kp:${viewerScope.userId ?? 'all'}`
+    : viewerScope.userId
+      ? `user:${viewerScope.userId}`
+      : 'public';
+  return `${channelId}::${viewer}`;
+}
+
+function summarizeEventForContext(event: SessionEvent<KnownEventPayload>): string | null {
+  switch (event.type) {
+    case 'message': {
+      const payload = event.payload as MessageEventPayload;
+      const speaker = payload.role === 'kp'
+        ? 'KP'
+        : payload.displayName || (payload.userId ? `玩家${payload.userId}` : '系统');
+      return `${speaker}：${compact(payload.content, 80)}`;
+    }
+    case 'scene_change': {
+      const payload = event.payload as SceneChangeEventPayload;
+      if (!payload.scene) return '场景被清空';
+      return `场景转到${payload.scene.name}${payload.scene.description ? `（${compact(payload.scene.description, 48)}）` : ''}`;
+    }
+    case 'check_request': {
+      const payload = event.payload as CheckRequestEventPayload;
+      return `${payload.roll.characterName}需要进行${payload.roll.skillName}检定`;
+    }
+    case 'check_result': {
+      const payload = event.payload as CheckResultEventPayload;
+      if (payload.clearAll) return '等待中的检定请求已被清空';
+      if (payload.playerId !== undefined) {
+        return `玩家${payload.playerId}的检定结果已结算${payload.resultText ? `（${compact(payload.resultText, 48)}）` : ''}`;
+      }
+      return null;
+    }
+    case 'clue_discovered': {
+      const payload = event.payload as ClueDiscoveredEventPayload;
+      return `发现线索：${payload.clue.title}（${compact(payload.clue.playerDescription, 60)}）`;
+    }
+    case 'time_advance': {
+      const payload = event.payload as TimeAdvanceEventPayload;
+      if (payload.mode === 'set') {
+        return `时间设为${payload.ingameTime}`;
+      }
+      return `时间推进${payload.deltaMinutes ?? 0}分钟，到${payload.ingameTime}`;
+    }
+    case 'player_joined': {
+      const payload = event.payload as PlayerJoinedEventPayload;
+      return `玩家${payload.userId}加入跑团`;
+    }
+    case 'channel_focus': {
+      const payload = event.payload as ChannelFocusEventPayload;
+      return `镜头切换到频道 ${payload.channelId}`;
+    }
+    case 'channel_assignment': {
+      const payload = event.payload as ChannelAssignmentEventPayload;
+      return `玩家${payload.userId}进入频道 ${payload.channelId}`;
+    }
+    case 'channel_interrupt': {
+      const payload = event.payload as ChannelInterruptEventPayload;
+      return payload.active
+        ? `频道 ${payload.channelId} 出现紧急事件：${compact(payload.reason, 48)}`
+        : `频道 ${payload.channelId} 的紧急状态已解除`;
+    }
+    default:
+      return null;
+  }
+}
+
+function formatEventSpan(first: SessionEvent<KnownEventPayload>, last: SessionEvent<KnownEventPayload>): string {
+  const firstLabel = first.ingameTime ?? first.createdAt.toISOString();
+  const lastLabel = last.ingameTime ?? last.createdAt.toISOString();
+  if (firstLabel === lastLabel) return firstLabel;
+  return `${firstLabel} 至 ${lastLabel}`;
+}
+
+function numberListEquals(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}
+
+function sceneEquals(a: SceneInfo | null, b: SceneInfo | null): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return a.name === b.name &&
+    a.description === b.description &&
+    a.activeNpcs.join('|') === b.activeNpcs.join('|');
+}
+
+function clueListEquals(a: Clue[], b: Clue[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((left, index) => {
+    const right = b[index];
+    return left.id === right.id &&
+      left.title === right.title &&
+      left.playerDescription === right.playerDescription &&
+      left.keeperContent === right.keeperContent &&
+      (left.discoveredBy ?? null) === (right.discoveredBy ?? null);
+  });
+}
+
+function pendingRollListEquals(a: PendingRoll[], b: PendingRoll[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((left, index) => {
+    const right = b[index];
+    return left.playerId === right.playerId &&
+      left.characterName === right.characterName &&
+      left.skillName === right.skillName &&
+      left.difficulty === right.difficulty &&
+      left.reason === right.reason &&
+      normalizeChannelId(left.channelId) === normalizeChannelId(right.channelId);
+  });
+}
+
+function messageListEquals(a: SessionMessage[], b: SessionMessage[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((left, index) => {
+    const right = b[index];
+    return left.id === right.id &&
+      left.role === right.role &&
+      left.userId === right.userId &&
+      left.displayName === right.displayName &&
+      left.content === right.content;
+  });
+}
+
+function compact(text: string, maxLen: number): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLen) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLen - 1))}…`;
+}
+
 /**
  * 游戏内时间算术：将 "YYYY-MM-DDTHH:MM" 加上指定分钟数
  * JS Date 对 1925 等历史日期的基本算术是正确的
@@ -704,4 +1887,18 @@ export function addMinutesToTime(isoTime: string, minutes: number): string {
   base.setMinutes(base.getMinutes() + minutes);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}T${pad(base.getHours())}:${pad(base.getMinutes())}`;
+}
+
+function diffMinutesBetweenTimes(fromIsoTime: string, toIsoTime: string): number | null {
+  const from = parseIsoTime(fromIsoTime);
+  const to = parseIsoTime(toIsoTime);
+  if (!from || !to) return null;
+  return Math.round((to.getTime() - from.getTime()) / 60000);
+}
+
+function parseIsoTime(isoTime: string): Date | null {
+  const match = isoTime.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
 }

@@ -26,6 +26,7 @@ import type { CampaignHandler } from '../runtime/CampaignHandler';
 import { ImageLibrary } from '../knowledge/images/ImageLibrary';
 import type { DashScopeClient } from '../ai/client/DashScopeClient';
 import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
+import { deliverCampaignOutput, normalizeCampaignTextParts } from '../runtime/CampaignOutputDelivery';
 import { addMinutesToTime } from '../runtime/SessionState';
 
 type KnowledgeCategory = 'rules' | 'scenario' | 'keeper_secret';
@@ -206,10 +207,10 @@ export class AdminRoutes {
   private async startSession(groupId: number, req: Request): Promise<Response> {
     if (!this.campaignHandler) return Response.json({ error: 'AI 客户端未配置' }, { status: 503 });
     const body = await req.json().catch(() => ({})) as { templateId?: string };
-    const parts = await this.campaignHandler.startSession(groupId, body.templateId).catch((e) => {
+    const output = await this.campaignHandler.startSession(groupId, body.templateId).catch((e) => {
       throw e;
     });
-    return Response.json({ parts });
+    return Response.json({ parts: normalizeCampaignTextParts(output) });
   }
 
   private pauseSession(groupId: number): Response {
@@ -220,8 +221,8 @@ export class AdminRoutes {
 
   private async resumeSession(groupId: number): Promise<Response> {
     if (!this.campaignHandler) return Response.json({ error: 'AI 客户端未配置' }, { status: 503 });
-    const parts = await this.campaignHandler.resumeSession(groupId);
-    return Response.json({ parts });
+    const output = await this.campaignHandler.resumeSession(groupId);
+    return Response.json({ parts: normalizeCampaignTextParts(output) });
   }
 
   private stopSession(groupId: number): Response {
@@ -945,12 +946,9 @@ export class AdminRoutes {
     this.db.run("UPDATE campaign_rooms SET status = 'running', updated_at = ? WHERE id = ?", [now, roomId]);
 
     const groupId = room.group_id;
-    this.campaignHandler.startSession(groupId, undefined, roomId).then(async (parts) => {
+    this.campaignHandler.startSession(groupId, undefined, roomId).then(async (output) => {
       if (this.napcat) {
-        for (const part of parts) {
-          await this.napcat.sendGroupMessage(groupId, part);
-          await new Promise<void>((r) => setTimeout(r, 800));
-        }
+        await deliverCampaignOutput(this.napcat, groupId, output);
       }
     }).catch((err) => {
       console.error('[AdminRoutes] 开团失败:', err);

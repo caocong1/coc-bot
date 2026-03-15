@@ -18,9 +18,10 @@ import { DashScopeClient } from '../client/DashScopeClient';
 import { ContextBuilder } from '../context/ContextBuilder';
 import { KPTemplateRegistry } from '../config/KPTemplateRegistry';
 import { KnowledgeService, type KnowledgeCategory } from '../../knowledge/retrieval/KnowledgeService';
-import { SessionState, type PendingRoll } from '../../runtime/SessionState';
+import { SessionState, buildPrivateVisibility, type PendingRoll, type SceneInfo, type SessionVisibility, type ViewerScope } from '../../runtime/SessionState';
 import { CharacterStore } from '../../commands/sheet/CharacterStore';
 import type { Character } from '@shared/types/Character';
+import { getSkillDisplayName, resolveSkillKey } from '@shared/coc7/skillNames';
 
 // ─── 公开类型 ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,12 @@ export interface KPInput {
   content: string;
   /** 骰子结果时附带：发起检定的玩家 userId */
   diceRollerId?: number;
+  /** 场景频道 ID */
+  channelId?: string;
+  /** 本轮输入可见性 */
+  visibility?: SessionVisibility;
+  /** 当前上下文查看视角 */
+  viewerScope?: ViewerScope;
 }
 
 /** 需要展示给玩家的图片 */
@@ -56,6 +63,8 @@ export interface KPOutput {
    * 调用方负责按顺序发送，800ms 间隔。
    */
   images?: KPImage[];
+  /** 需要通过私聊投递给特定玩家的附加信息 */
+  privateMessages?: Array<{ userId: number; text: string }>;
   /** 调试信息 */
   debug?: {
     interventionReason: string;
@@ -78,6 +87,26 @@ export interface KPPipelineOptions {
   summaryTriggerCount?: number;
   /** 数据库实例（用于加载自定义模板） */
   db?: import('bun:sqlite').Database;
+}
+
+interface PrivateDirective {
+  targets: string[];
+  content: string;
+}
+
+interface SceneDirective {
+  scene: SceneInfo;
+}
+
+interface ClueDirective {
+  title: string;
+  playerDescription: string;
+}
+
+interface PendingRollDirective {
+  skillName: string;
+  difficulty: 'normal' | 'hard' | 'extreme';
+  reason: string;
 }
 
 // ─── 实现 ─────────────────────────────────────────────────────────────────────
@@ -122,6 +151,9 @@ export class KPPipeline {
   }
 
   async process(input: KPInput, onThinking?: () => void): Promise<KPOutput> {
+    const channelId = input.channelId ?? this.state.getPlayerChannel(input.userId);
+    const viewerScope = input.viewerScope ?? {};
+
     // 1. 将输入消息写入历史
     const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     this.state.addMessage({
@@ -131,11 +163,13 @@ export class KPPipeline {
       displayName: input.displayName,
       content: input.content,
       timestamp: new Date(),
+      channelId,
+      visibility: input.visibility,
     });
 
     // 骰子结果：清除对应玩家的等待投骰状态
     if (input.kind === 'dice_result' && input.diceRollerId !== undefined) {
-      this.state.clearPendingRoll(input.diceRollerId);
+      this.state.clearPendingRoll(input.diceRollerId, { channelId, actorId: input.userId });
     }
 
     // 2. 判断是否介入
@@ -160,7 +194,8 @@ export class KPPipeline {
     ]);
 
     // 4. 获取玩家角色卡
-    const snapshot = this.state.snapshot();
+    const snapshot = this.state.snapshot(channelId, viewerScope);
+    const channelState = this.state.getChannelState(channelId, viewerScope);
     const characters = this.getSessionCharacters(snapshot.groupId);
 
     // 5. 组装上下文
@@ -189,6 +224,9 @@ export class KPPipeline {
         maxRecentMessages: 30,
         scenarioImages: scenarioImages.length > 0 ? scenarioImages : undefined,
         customPrompts: this.customPrompts || undefined,
+        channelId,
+        viewerScope,
+        channelPlayerIds: channelState.playerIds,
       },
     );
 
@@ -207,8 +245,11 @@ export class KPPipeline {
     // 7. 提取 [SHOW_IMAGE:xxx] 标记（在 guardrail 之前，防止被过滤模型删除）
     const { cleanText: draftNoImg, imageIds } = extractShowImageMarkers(draft);
 
-    // 7.5 提取 [TIME_ADVANCE:Xm] 和 [SET_TIME:...] 标记
-    const { cleanText: draftClean, timeMarkers } = extractTimeMarkers(draftNoImg);
+    // 7.5 提取结构化指令（在 guardrail 之前剥离）
+    const { cleanText: withoutPrivate, directives: privateDirectives } = extractPrivateDirectives(draftNoImg);
+    const { cleanText: withoutScene, directives: sceneDirectives } = extractSceneDirectives(withoutPrivate);
+    const { cleanText: withoutClue, directives: clueDirectives } = extractClueDirectives(withoutScene);
+    const { cleanText: draftClean, timeMarkers } = extractTimeMarkers(withoutClue);
 
     // 8. 守密人过滤（仅过滤文字部分）
     const t1 = Date.now();
@@ -227,36 +268,68 @@ export class KPPipeline {
       }
     }
 
-    const finalText = this.enhanceCheckRequests(filteredText, characters);
+    const compliance = this.applyComplianceCheck(this.enhanceCheckRequests(filteredText, characters));
+    if (compliance.warnings.length > 0) {
+      console.warn(`[KPPipeline] compliance warnings: ${compliance.warnings.join(', ')}`);
+    }
+    const finalText = compliance.text;
+    const privateMessages = this.resolvePrivateMessages(privateDirectives, characters, input);
 
     // 10. 写入 KP 回复到历史
     const kpMsgId = `kp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    this.state.addMessage({
-      id: kpMsgId,
-      role: 'kp',
-      content: finalText,
-      timestamp: new Date(),
-    });
+    if (finalText.trim()) {
+      this.state.addMessage({
+        id: kpMsgId,
+        role: 'kp',
+        content: finalText,
+        timestamp: new Date(),
+        channelId,
+      });
+    }
+
+    for (let index = 0; index < privateMessages.length; index++) {
+      const privateMessage = privateMessages[index];
+      this.state.addMessage({
+        id: `${kpMsgId}-priv-${index}`,
+        role: 'kp',
+        content: privateMessage.text,
+        timestamp: new Date(),
+        channelId,
+        visibility: buildPrivateVisibility(privateMessage.userId),
+      });
+    }
 
     // 10.5 应用时间标记到会话状态
     for (const marker of timeMarkers) {
       if (marker.type === 'advance') {
         const mins = parseInt(marker.value, 10);
         if (mins > 0 && mins <= 1440) {
-          this.state.advanceIngameTime(mins, `推进 ${mins} 分钟`, 'ai', kpMsgId);
+          this.state.advanceIngameTime(mins, `推进 ${mins} 分钟`, 'ai', kpMsgId, { channelId });
         }
       } else if (marker.type === 'set') {
-        this.state.setIngameTime(marker.value, '设定时间', 'ai', kpMsgId);
+        this.state.setIngameTime(marker.value, '设定时间', 'ai', kpMsgId, { channelId });
       }
+    }
+
+    this.applySceneDirectives(sceneDirectives, channelId);
+    this.applyClueDirectives(clueDirectives, input.userId, channelId);
+    this.applyPendingRollDirectives(finalText, input, characters, channelId);
+    for (const privateMessage of privateMessages) {
+      this.applyPendingRollDirectives(privateMessage.text, {
+        ...input,
+        userId: privateMessage.userId,
+        displayName: this.getCharacterDisplayName(privateMessage.userId, characters, input.displayName),
+      }, characters, channelId, buildPrivateVisibility(privateMessage.userId));
     }
 
     // 11. 检查是否需要触发摘要压缩
     this.maybeTriggerSummary();
 
     return {
-      shouldRespond: true,
+      shouldRespond: finalText.trim().length > 0 || privateMessages.length > 0 || images.length > 0,
       text: finalText,
       images: images.length > 0 ? images : undefined,
+      privateMessages: privateMessages.length > 0 ? privateMessages : undefined,
       debug: {
         interventionReason: intervention.reason,
         layerStats,
@@ -300,7 +373,7 @@ export class KPPipeline {
     }
 
     // 有等待骰子 且 当前消息看起来是投骰后行动
-    if (this.state.pendingRolls.length > 0 &&
+    if (this.state.getPendingRollsForChannel(input.channelId ?? this.state.getPlayerChannel(input.userId)).length > 0 &&
         /^[\d]+$/.test(text.replace(/\s/g, ''))) {
       return { shouldIntervene: true, reason: 'pending_roll_response' };
     }
@@ -507,6 +580,155 @@ export class KPPipeline {
     });
   }
 
+  private resolvePrivateMessages(
+    directives: PrivateDirective[],
+    characters: Character[],
+    input: KPInput,
+  ): Array<{ userId: number; text: string }> {
+    const deliveries: Array<{ userId: number; text: string }> = [];
+    const seen = new Set<string>();
+
+    for (const directive of directives) {
+      const text = directive.content.trim();
+      if (!text) continue;
+      const targets = this.resolveDirectiveTargets(directive.targets, characters, input);
+      for (const userId of targets) {
+        const key = `${userId}:${text}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        deliveries.push({ userId, text });
+      }
+    }
+
+    if (deliveries.length === 0 && directives.length > 0) {
+      deliveries.push({ userId: input.userId, text: directives.map((item) => item.content.trim()).filter(Boolean).join('\n\n') });
+    }
+
+    return deliveries.filter((item) => item.text.trim().length > 0).map((item) => ({ ...item, text: item.text.trim() }));
+  }
+
+  private resolveDirectiveTargets(targets: string[], characters: Character[], input: KPInput): number[] {
+    const resolved = new Set<number>();
+    const normalizedTargets = targets.map((item) => normalizeTargetToken(item)).filter(Boolean);
+    for (const token of normalizedTargets) {
+      if (/^\d+$/.test(token)) {
+        resolved.add(Number(token));
+        continue;
+      }
+
+      for (const character of characters) {
+        if (normalizeTargetToken(character.name) === token) {
+          resolved.add(character.playerId);
+        }
+      }
+
+      if (normalizeTargetToken(input.displayName) === token) {
+        resolved.add(input.userId);
+      }
+    }
+
+    if (resolved.size === 0) {
+      resolved.add(input.userId);
+    }
+
+    return Array.from(resolved);
+  }
+
+  private getCharacterDisplayName(userId: number, characters: Character[], fallback: string): string {
+    return characters.find((character) => character.playerId === userId)?.name ?? fallback;
+  }
+
+  private applySceneDirectives(directives: SceneDirective[], channelId: string): void {
+    const directive = directives[directives.length - 1];
+    if (!directive) return;
+    this.state.setScene(directive.scene, { channelId });
+  }
+
+  private applyClueDirectives(directives: ClueDirective[], userId: number, channelId: string): void {
+    if (directives.length === 0) return;
+    const existingClues = this.state.getAllClues();
+    for (const directive of directives) {
+      const title = directive.title.trim();
+      const playerDescription = directive.playerDescription.trim();
+      if (!title || !playerDescription) continue;
+
+      let clue = existingClues.find((item) => item.title === title);
+      if (!clue) {
+        const clueId = `clue-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        this.state.addClue({
+          id: clueId,
+          title,
+          keeperContent: playerDescription,
+          playerDescription,
+        });
+        clue = this.state.getAllClues().find((item) => item.id === clueId);
+      }
+
+      if (clue && !clue.isDiscovered) {
+        this.state.discoverClue(clue.id, userId, { channelId });
+      }
+    }
+  }
+
+  private applyPendingRollDirectives(
+    text: string,
+    input: Pick<KPInput, 'userId' | 'displayName'>,
+    characters: Character[],
+    channelId: string,
+    visibility: SessionVisibility = 'public',
+  ): void {
+    const directives = extractPendingRollDirectives(text);
+    if (directives.length === 0) return;
+    const characterName = this.getCharacterDisplayName(input.userId, characters, input.displayName);
+    const existing = this.state.getPendingRollsForChannel(channelId);
+
+    for (const directive of directives) {
+      const duplicate = existing.find((roll) =>
+        roll.playerId === input.userId &&
+        roll.skillName === directive.skillName &&
+        roll.reason === directive.reason,
+      );
+      if (duplicate) continue;
+
+      this.state.addPendingRoll(
+        {
+          playerId: input.userId,
+          characterName,
+          skillName: directive.skillName,
+          difficulty: directive.difficulty,
+          reason: directive.reason,
+          requestedAt: new Date(),
+          channelId,
+        },
+        { channelId, actorId: input.userId, visibility },
+      );
+    }
+  }
+
+  private applyComplianceCheck(text: string): { text: string; warnings: string[] } {
+    let nextText = text;
+    const warnings: string[] = [];
+
+    const menuLineCount = countNumberedMenuLines(nextText);
+    if (menuLineCount >= 3) {
+      warnings.push('menu_stripped');
+      nextText = stripNumberedMenuPrefixes(nextText);
+    }
+
+    if (hasDirectNumericBroadcast(nextText)) {
+      warnings.push('numeric_broadcast');
+    }
+
+    if (hasPlayerAgencyOverstep(nextText)) {
+      warnings.push('player_agency_overstep');
+    }
+
+    return {
+      text: normalizeComplianceText(nextText),
+      warnings,
+    };
+  }
+
   // ─── 工具 ────────────────────────────────────────────────────────────────────
 
   private getSessionCharacters(groupId: number): Character[] {
@@ -583,12 +805,20 @@ export class KPPipeline {
     if (attrKey === '_san') return char.derived?.san ?? null;
     if (attrKey && char.attributes?.[attrKey] !== undefined) return char.attributes[attrKey];
 
+    const resolvedSkillKey = resolveSkillKey(skillName, Object.keys(char.skills ?? {}));
+    if (resolvedSkillKey && char.skills?.[resolvedSkillKey] !== undefined) {
+      return char.skills[resolvedSkillKey];
+    }
+
     // 精确匹配 skills
     if (char.skills?.[skillName] !== undefined) return char.skills[skillName];
 
     // 模糊匹配 skills（如"侦查" vs "spot_hidden"对应的中文名可能不同）
     for (const [k, v] of Object.entries(char.skills ?? {})) {
-      if (k.includes(skillName) || skillName.includes(k)) return v;
+      const displayName = getSkillDisplayName(k);
+      if (k.includes(skillName) || skillName.includes(k) || displayName.includes(skillName) || skillName.includes(displayName)) {
+        return v;
+      }
     }
     return null;
   }
@@ -627,4 +857,120 @@ function extractTimeMarkers(text: string): { cleanText: string; timeMarkers: Tim
     return '';
   });
   return { cleanText: clean.trim(), timeMarkers: markers };
+}
+
+function extractPrivateDirectives(text: string): { cleanText: string; directives: PrivateDirective[] } {
+  const directives: PrivateDirective[] = [];
+  const cleanText = text.replace(/\[PRIVATE_TO:([^\]]+)\]([\s\S]*?)\[\/PRIVATE_TO\]/g, (_, rawTargets: string, rawContent: string) => {
+    directives.push({
+      targets: rawTargets.split(',').map((item) => item.trim()).filter(Boolean),
+      content: rawContent.trim(),
+    });
+    return '';
+  }).trim();
+  return { cleanText, directives };
+}
+
+function extractSceneDirectives(text: string): { cleanText: string; directives: SceneDirective[] } {
+  const directives: SceneDirective[] = [];
+  const cleanText = text.replace(/\[SET_SCENE:([^|\]]+)\|([^|\]]*)\|([^\]]*)\]/g, (_, name: string, description: string, rawNpcs: string) => {
+    directives.push({
+      scene: {
+        name: name.trim(),
+        description: description.trim(),
+        activeNpcs: rawNpcs.split(',').map((item) => item.trim()).filter(Boolean),
+      },
+    });
+    return '';
+  }).trim();
+  return { cleanText, directives };
+}
+
+function extractClueDirectives(text: string): { cleanText: string; directives: ClueDirective[] } {
+  const directives: ClueDirective[] = [];
+  const cleanText = text.replace(/\[DISCOVER_CLUE:([^|\]]+)\|([^\]]+)\]/g, (_, title: string, description: string) => {
+    directives.push({
+      title: title.trim(),
+      playerDescription: description.trim(),
+    });
+    return '';
+  }).trim();
+  return { cleanText, directives };
+}
+
+function extractPendingRollDirectives(text: string): PendingRollDirective[] {
+  const directives: PendingRollDirective[] = [];
+  const seen = new Set<string>();
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+
+  for (const line of lines) {
+    const match = line.match(/需要【(.+?)】检定/);
+    if (!match) continue;
+    const skillName = match[1].trim();
+    const difficulty = line.includes('极难') ? 'extreme' : line.includes('困难') ? 'hard' : 'normal';
+    const directive: PendingRollDirective = {
+      skillName,
+      difficulty,
+      reason: compactInline(line, 120),
+    };
+    const key = `${directive.skillName}:${directive.difficulty}:${directive.reason}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    directives.push(directive);
+  }
+
+  return directives;
+}
+
+function normalizeComplianceText(text: string): string {
+  const normalizedLines = text
+    .split('\n')
+    .map((line) => line.replace(/^\s*\d+[.)、]\s*/g, '').trimEnd())
+    .filter((line, index, arr) => !(line === '' && arr[index - 1] === ''));
+
+  return normalizedLines
+    .join('\n')
+    .replace(/\b(HP|MP|SAN)\s*[+\-－]\s*\d+\b/gi, '相关数值变化待结算')
+    .replace(/理智\s*[+\-－]\s*\d+/g, '相关数值变化待结算')
+    .trim();
+}
+
+function countNumberedMenuLines(text: string): number {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^\s*(?:[1-4][.、)）]\s*\*?\*?|\d+\.\s+\*\*)/.test(line))
+    .length;
+}
+
+function stripNumberedMenuPrefixes(text: string): string {
+  return text.replace(/^\s*(?:[1-4][.、)）]\s*\*?\*?|\d+\.\s+\*\*)/gm, '');
+}
+
+function hasDirectNumericBroadcast(text: string): boolean {
+  const numericPattern = /\b(?:HP|MP|SAN)\s*[+\-－]\s*\d+\b|当前\s*(?:HP|MP|SAN)\s*\d+/i;
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .some((line) => {
+      if (!numericPattern.test(line)) return false;
+      if (/请发送\s+\.(?:ra|sc)\b/i.test(line)) return false;
+      if (/需要【.+?】检定/.test(line)) return false;
+      return true;
+    });
+}
+
+function hasPlayerAgencyOverstep(text: string): boolean {
+  return /(你决定|你选择了|你毫不犹豫|你鼓起勇气)/.test(text);
+}
+
+function normalizeTargetToken(value: string): string {
+  return value.toLowerCase().replace(/[\s【】（）()：:，,]/g, '').trim();
+}
+
+function compactInline(text: string, max = 120): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, Math.max(0, max - 1))}…`;
 }

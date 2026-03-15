@@ -17,6 +17,7 @@ import type { ParsedCommand } from '../CommandParser';
 import type { TokenStore } from '../../storage/TokenStore';
 import type { CampaignHandler } from '../../runtime/CampaignHandler';
 import type { NapCatActionClient } from '../../adapters/napcat/NapCatActionClient';
+import { deliverCampaignOutput } from '../../runtime/CampaignOutputDelivery';
 import { ModCommand } from '../module/ModCommand';
 
 const WEB_BASE_URL = process.env.WEB_BASE_URL ?? 'http://localhost:5173';
@@ -194,11 +195,8 @@ export class RoomCommand {
 
     this.actionClient.sendGroupMessage(groupId, '✅ 全员就绪！守秘人正在准备，请稍候...').catch(() => {});
 
-    this.campaignHandler.startSession(groupId, undefined, roomId).then(async (parts) => {
-      for (const part of parts) {
-        await this.actionClient!.sendGroupMessage(groupId, part);
-        await new Promise<void>((r) => setTimeout(r, 800));
-      }
+    this.campaignHandler.startSession(groupId, undefined, roomId).then(async (output) => {
+      await deliverCampaignOutput(this.actionClient!, groupId, output);
     }).catch((err) => {
       console.error('[RoomCommand] 开团失败:', err);
       this.actionClient!.sendGroupMessage(groupId, `⚠️ 开团失败：${String(err)}`).catch(() => {});
@@ -456,11 +454,8 @@ export class RoomCommand {
     const groupId = ctx.groupId;
 
     // 异步执行，立即返回提示
-    this.campaignHandler.resumeSession(groupId).then(async (parts) => {
-      for (const part of parts) {
-        await this.actionClient!.sendGroupMessage(groupId, part);
-        await new Promise<void>((r) => setTimeout(r, 800));
-      }
+    this.campaignHandler.resumeSession(groupId).then(async (output) => {
+      await deliverCampaignOutput(this.actionClient!, groupId, output);
     }).catch((err) => {
       console.error('[RoomCommand] 继续跑团失败:', err);
       this.actionClient!.sendGroupMessage(groupId, `⚠️ 继续跑团失败：${String(err)}`).catch(() => {});

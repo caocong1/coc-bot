@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+## [0.6.0] - 2026-03-15
+
+### Added
+- **AI KP 事件流底座**：新增 `kp_events` 作为跑团运行历史表，`SessionState` 支持事件回放重建快照
+- **SceneChannel 场景频道**：支持 `focusChannel`、玩家频道归属、紧急频道标记和 `.scene` 命令
+- **私聊 sidecar**：AI KP 可通过 `[PRIVATE_TO:调查员]...[/PRIVATE_TO]` 指令向特定玩家发送私密信息
+
+### Changed
+- **ContextBuilder**：按当前频道过滤角色卡与消息历史，旧历史摘要改为事件派生摘要缓存
+- **KPPipeline**：新增场景/线索/私密指令抽取，输出合规兜底，并把检定请求落回 `PendingRoll`
+- **CampaignHandler**：从单队列升级为按频道排队，非焦点频道消息不丢失，紧急事件会提示切换焦点
+
+### Fixed
+- **私聊 sidecar 投递**：`CampaignOutput.privateMessages` 现已在 bot 发送层真正走 QQ 私聊发送，并带失败告警
+- **私聊失败群内回退**：所有经 `server/index.ts` 发出的私聊，在失败时都会向对应群发送错误提示，避免静默丢失
+- **私聊节流与统一投递**：开团/恢复、Web 自动开团和 `.room` 自动开团现统一走 `CampaignOutput` 投递器，批量私聊之间增加 800ms 节流
+- **时间屏障**：存在未处理频道中断时，`TIME_ADVANCE` / `SET_TIME` 的大跨度时间推进会被限制并写入警告
+- **双写原子性**：核心 dual-write mutator 改为事务化，事件表与 legacy 表不会再出现半提交
+- **输出合规检查**：KP 回复新增轻量规则校验，显式检测编号菜单、数值直报和替玩家决策措辞
+
 ## [0.5.0] - 2026-03-14
 
 ### Added

@@ -14,8 +14,8 @@ coc-bot/
 │   │
 │   ├── runtime/                 # 消息路由、模式切换、Campaign 管理
 │   │   ├── ModeResolver.ts
-│   │   ├── CampaignHandler.ts   # Campaign 模式处理（并发锁 + 成员过滤）
-│   │   ├── SessionState.ts      # 会话状态管理
+│   │   ├── CampaignHandler.ts   # Campaign 模式处理（焦点频道 + per-channel 队列 + 成员过滤）
+│   │   ├── SessionState.ts      # 会话状态管理（kp_events 回放 + SceneChannel + 派生摘要）
 │   │   ├── MessageRouter.ts
 │   │   └── VisibilityPlanner.ts
 │   │
@@ -48,9 +48,9 @@ coc-bot/
 │   │   │   ├── DimensionDescriptors.ts  # 五维行为描述表（基调/灵活度/引导度/致命度/节奏 × 5 档位）
 │   │   │   └── PromptComposer.ts
 │   │   ├── context/
-│   │   │   └── ContextBuilder.ts        # 7 层上下文组装
+│   │   │   └── ContextBuilder.ts        # 7 层上下文组装（按频道/视角过滤）
 │   │   └── pipeline/
-│   │       └── KPPipeline.ts            # AI KP 主流水线（含重试逻辑）
+│   │       └── KPPipeline.ts            # AI KP 主流水线（生成 + 指令抽取 + guardrail）
 │   │
 │   ├── memory/                  # 事件日志、摘要
 │   │   ├── events/
@@ -195,7 +195,8 @@ AI 系统层，负责：
 
 存储层，单文件管理所有 SQLite 表定义和内联迁移：
 - `characters` / `active_cards` — 角色卡
-- `kp_sessions` / `kp_scenes` / `kp_clues` / `kp_messages` / `kp_summaries` / `kp_pending_rolls` — AI KP 状态
+- `kp_sessions` / `kp_events` — AI KP canonical state
+- `kp_scenes` / `kp_clues` / `kp_messages` / `kp_summaries` / `kp_pending_rolls` — legacy compatibility + cache
 - `kp_templates` — 自定义 KP 人格模板
 - `scenario_modules` / `scenario_module_files` — 模组管理
 - `campaign_rooms` / `campaign_room_members` — 跑团房间
