@@ -225,6 +225,36 @@ export const adminApi = {
   generateModuleImage: (moduleId: string, data: { description: string; label?: string; size?: string }) =>
     request<{ ok: boolean; id: string }>(`/admin/modules/${moduleId}/images/generate`, { method: 'POST', body: JSON.stringify(data) }, 'admin'),
   moduleImageUrl: (moduleId: string, fileId: string) => `/api/admin/modules/${moduleId}/images/${fileId}`,
+  listModuleEntities: (moduleId: string, status?: ReviewStatus[]) =>
+    request<ScenarioEntity[]>(`/admin/modules/${moduleId}/entities${status?.length ? `?status=${status.join(',')}` : ''}`, {}, 'admin'),
+  createModuleEntity: (moduleId: string, data: Partial<ScenarioEntity>) =>
+    request<{ id: string }>(`/admin/modules/${moduleId}/entities`, { method: 'POST', body: JSON.stringify(data) }, 'admin'),
+  getModuleEntity: (moduleId: string, entityId: string) =>
+    request<ScenarioEntity>(`/admin/modules/${moduleId}/entities/${entityId}`, {}, 'admin'),
+  updateModuleEntity: (moduleId: string, entityId: string, data: Partial<ScenarioEntity>) =>
+    request<{ ok: boolean }>(`/admin/modules/${moduleId}/entities/${entityId}`, { method: 'PUT', body: JSON.stringify(data) }, 'admin'),
+  deleteModuleEntity: (moduleId: string, entityId: string) =>
+    request<{ ok: boolean }>(`/admin/modules/${moduleId}/entities/${entityId}`, { method: 'DELETE' }, 'admin'),
+  reviewModuleEntity: (moduleId: string, entityId: string, reviewStatus: ReviewStatus) =>
+    request<{ ok: boolean }>(`/admin/modules/${moduleId}/entities/${entityId}/review`, { method: 'POST', body: JSON.stringify({ reviewStatus }) }, 'admin'),
+  listModuleItems: (moduleId: string, status?: ReviewStatus[]) =>
+    request<ScenarioItem[]>(`/admin/modules/${moduleId}/items${status?.length ? `?status=${status.join(',')}` : ''}`, {}, 'admin'),
+  createModuleItem: (moduleId: string, data: Partial<ScenarioItem>) =>
+    request<{ id: string }>(`/admin/modules/${moduleId}/items`, { method: 'POST', body: JSON.stringify(data) }, 'admin'),
+  getModuleItem: (moduleId: string, itemId: string) =>
+    request<ScenarioItem>(`/admin/modules/${moduleId}/items/${itemId}`, {}, 'admin'),
+  updateModuleItem: (moduleId: string, itemId: string, data: Partial<ScenarioItem>) =>
+    request<{ ok: boolean }>(`/admin/modules/${moduleId}/items/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }, 'admin'),
+  deleteModuleItem: (moduleId: string, itemId: string) =>
+    request<{ ok: boolean }>(`/admin/modules/${moduleId}/items/${itemId}`, { method: 'DELETE' }, 'admin'),
+  reviewModuleItem: (moduleId: string, itemId: string, reviewStatus: ReviewStatus) =>
+    request<{ ok: boolean }>(`/admin/modules/${moduleId}/items/${itemId}/review`, { method: 'POST', body: JSON.stringify({ reviewStatus }) }, 'admin'),
+  getModuleRulePack: (moduleId: string, status?: ReviewStatus[]) =>
+    request<ModuleRulePack | null>(`/admin/modules/${moduleId}/rule-pack${status?.length ? `?status=${status.join(',')}` : ''}`, {}, 'admin'),
+  updateModuleRulePack: (moduleId: string, data: Partial<ModuleRulePack>) =>
+    request<{ ok: boolean }>(`/admin/modules/${moduleId}/rule-pack`, { method: 'PUT', body: JSON.stringify(data) }, 'admin'),
+  reviewModuleRulePack: (moduleId: string, reviewStatus: ReviewStatus) =>
+    request<{ ok: boolean }>(`/admin/modules/${moduleId}/rule-pack/review`, { method: 'POST', body: JSON.stringify({ reviewStatus }) }, 'admin'),
 };
 
 // ─── 类型定义 ─────────────────────────────────────────────────────────────────
@@ -308,8 +338,108 @@ export interface ModuleFile {
   createdAt: string;
 }
 
+export type ReviewStatus = 'draft' | 'approved' | 'rejected';
+
+export interface ScenarioAttack {
+  name: string;
+  skill: number | null;
+  damage: string;
+  rof: number | null;
+}
+
+export interface ScenarioCombatProfile {
+  hp: number | null;
+  armor: number | null;
+  mov: number | null;
+  build: number | null;
+  attacks: ScenarioAttack[];
+}
+
+export interface ScenarioEntityRelation {
+  targetId: string;
+  relation: string;
+  notes?: string;
+}
+
+export interface ScenarioEntity {
+  id: string;
+  moduleId: string | null;
+  source: 'module' | 'session';
+  type: 'npc' | 'creature';
+  name: string;
+  identity: string;
+  motivation: string;
+  publicImage: string;
+  hiddenTruth: string;
+  speakingStyle: string;
+  faction: string;
+  dangerLevel: string;
+  defaultLocation: string;
+  attributes: Record<string, number>;
+  skills: Record<string, number>;
+  combat: ScenarioCombatProfile;
+  freeText: string;
+  relationships: ScenarioEntityRelation[];
+  isKey: boolean;
+  reviewStatus: ReviewStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScenarioItem {
+  id: string;
+  moduleId: string | null;
+  source: 'module' | 'session';
+  name: string;
+  category: string;
+  publicDescription: string;
+  kpNotes: string;
+  defaultOwner: string;
+  defaultLocation: string;
+  visibilityCondition: string;
+  usage: string;
+  isKey: boolean;
+  reviewStatus: ReviewStatus;
+  createdAt: string;
+  updatedAt: string;
+  currentOwner?: string | null;
+  currentLocation?: string | null;
+  stateNotes?: string;
+}
+
+export interface ModuleRulePack {
+  id: string;
+  moduleId: string;
+  sanRules: string;
+  combatRules: string;
+  deathRules: string;
+  timeRules: string;
+  revelationRules: string;
+  forbiddenAssumptions: string;
+  freeText: string;
+  reviewStatus: ReviewStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModuleDraftCounters {
+  draft: number;
+  approved: number;
+  rejected: number;
+}
+
+export interface ModuleExtractionDraftStatus {
+  entities: ModuleDraftCounters;
+  items: ModuleDraftCounters;
+  rulePack: ReviewStatus | null;
+}
+
 export interface ModuleDetail extends ScenarioModule {
   files: ModuleFile[];
+  entities: ScenarioEntity[];
+  items: ScenarioItem[];
+  rulePack: ModuleRulePack | null;
+  extractionDraftStatus: ModuleExtractionDraftStatus;
 }
 
 export interface CreateModulePayload {

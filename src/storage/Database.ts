@@ -230,6 +230,73 @@ export function migrateCoreSchema(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_scenario_module_files_module ON scenario_module_files(module_id);
 
+    CREATE TABLE IF NOT EXISTS module_entities (
+      id TEXT PRIMARY KEY,
+      module_id TEXT NOT NULL REFERENCES scenario_modules(id),
+      type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      identity TEXT,
+      motivation TEXT,
+      public_image TEXT,
+      hidden_truth TEXT,
+      speaking_style TEXT,
+      faction TEXT,
+      danger_level TEXT,
+      default_location TEXT,
+      attributes_json TEXT NOT NULL DEFAULT '{}',
+      skills_json TEXT NOT NULL DEFAULT '{}',
+      combat_json TEXT NOT NULL DEFAULT '{}',
+      free_text TEXT NOT NULL DEFAULT '',
+      relationships_json TEXT NOT NULL DEFAULT '[]',
+      is_key INTEGER NOT NULL DEFAULT 0,
+      review_status TEXT NOT NULL DEFAULT 'draft',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_module_entities_module ON module_entities(module_id);
+    CREATE INDEX IF NOT EXISTS idx_module_entities_review ON module_entities(module_id, review_status);
+    CREATE INDEX IF NOT EXISTS idx_module_entities_key ON module_entities(module_id, is_key);
+
+    CREATE TABLE IF NOT EXISTS module_items (
+      id TEXT PRIMARY KEY,
+      module_id TEXT NOT NULL REFERENCES scenario_modules(id),
+      name TEXT NOT NULL,
+      category TEXT,
+      public_description TEXT,
+      kp_notes TEXT,
+      default_owner TEXT,
+      default_location TEXT,
+      visibility_condition TEXT,
+      usage TEXT,
+      is_key INTEGER NOT NULL DEFAULT 0,
+      review_status TEXT NOT NULL DEFAULT 'draft',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_module_items_module ON module_items(module_id);
+    CREATE INDEX IF NOT EXISTS idx_module_items_review ON module_items(module_id, review_status);
+    CREATE INDEX IF NOT EXISTS idx_module_items_key ON module_items(module_id, is_key);
+
+    CREATE TABLE IF NOT EXISTS module_rule_packs (
+      id TEXT PRIMARY KEY,
+      module_id TEXT NOT NULL REFERENCES scenario_modules(id),
+      san_rules TEXT NOT NULL DEFAULT '',
+      combat_rules TEXT NOT NULL DEFAULT '',
+      death_rules TEXT NOT NULL DEFAULT '',
+      time_rules TEXT NOT NULL DEFAULT '',
+      revelation_rules TEXT NOT NULL DEFAULT '',
+      forbidden_assumptions TEXT NOT NULL DEFAULT '',
+      free_text TEXT NOT NULL DEFAULT '',
+      review_status TEXT NOT NULL DEFAULT 'draft',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_module_rule_packs_module_unique ON module_rule_packs(module_id);
+    CREATE INDEX IF NOT EXISTS idx_module_rule_packs_review ON module_rule_packs(module_id, review_status);
+
     -- ── 用户设置（.set 默认骰 / .nn 称呼）────────────────────────────────────
     CREATE TABLE IF NOT EXISTS user_settings (
       user_id  INTEGER NOT NULL,

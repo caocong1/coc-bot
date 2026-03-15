@@ -226,6 +226,11 @@
 - [x] 图片服务端点：`/api/admin/modules/{moduleId}/images/{fileId}`
 - [x] 玩家端浏览模组（含约束预览）
 - [x] 创建房间时选择模组，自动继承约束（时代/职业限制/属性下限）
+- [x] 模组资产层：`module_entities` / `module_items` / `module_rule_packs`
+- [x] 模组自动提取扩展：元数据 / 资产候选 / 规则包候选三路独立执行
+- [x] Admin 模组子资源 API：实体 / 物品 / 规则包的列表、详情、更新和审核状态变更
+- [x] `ContextBuilder` 注入模组规则包、当前场景实体摘要、关键实体详情、关键物品详情
+- [x] 运行时 overlay：`register_entity` / `register_item` / `item_change` 写入 `kp_events`
 
 ### 13. 跑团房间系统
 

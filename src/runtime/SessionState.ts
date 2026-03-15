@@ -16,6 +16,18 @@
 
 import { existsSync, readFileSync } from 'fs';
 import type { Database } from 'bun:sqlite';
+import type {
+  ModuleRulePack,
+  ScenarioEntity,
+  ScenarioItem,
+  SessionEntityOverlay,
+  SessionItemOverlay,
+} from '@shared/types/ScenarioAssets';
+import {
+  getModuleRulePack,
+  listModuleEntities,
+  listModuleItems,
+} from '../storage/ModuleAssetStore';
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────────
 
@@ -45,7 +57,10 @@ export type SessionEventType =
   | 'player_joined'
   | 'channel_focus'
   | 'channel_assignment'
-  | 'channel_interrupt';
+  | 'channel_interrupt'
+  | 'register_entity'
+  | 'register_item'
+  | 'item_change';
 
 /** 查看上下文的视角 */
 export interface ViewerScope {
@@ -183,6 +198,7 @@ export interface SessionSnapshot {
   sessionId: string;
   campaignId: string;
   groupId: number;
+  moduleId: string | null;
   currentScene: SceneInfo | null;
   discoveredClues: Clue[];
   pendingRolls: PendingRoll[];
@@ -200,6 +216,14 @@ export interface SessionSnapshot {
   activeChannels: string[];
   /** 存在未处理紧急事件的频道 */
   interruptChannels: string[];
+  /** 当前频道可见的场景实体摘要 */
+  activeEntities: ScenarioEntity[];
+  /** 当前频道需要重点注入的关键实体详情 */
+  entityDetails: ScenarioEntity[];
+  /** 当前频道可互动的关键物品 */
+  sceneItems: ScenarioItem[];
+  /** 当前模组规则包（仅 approved） */
+  moduleRulePack: ModuleRulePack | null;
 }
 
 // ─── 事件 payload ─────────────────────────────────────────────────────────────
@@ -261,6 +285,22 @@ interface ChannelInterruptEventPayload {
   active: boolean;
 }
 
+interface RegisterEntityEventPayload {
+  entity: SessionEntityOverlay;
+}
+
+interface RegisterItemEventPayload {
+  item: SessionItemOverlay;
+}
+
+interface ItemChangeEventPayload {
+  itemName: string;
+  owner?: string;
+  location?: string;
+  stateNotes?: string;
+  usage?: string;
+}
+
 type KnownEventPayload =
   | MessageEventPayload
   | SceneChangeEventPayload
@@ -271,7 +311,10 @@ type KnownEventPayload =
   | PlayerJoinedEventPayload
   | ChannelFocusEventPayload
   | ChannelAssignmentEventPayload
-  | ChannelInterruptEventPayload;
+  | ChannelInterruptEventPayload
+  | RegisterEntityEventPayload
+  | RegisterItemEventPayload
+  | ItemChangeEventPayload;
 
 interface AppendEventOptions {
   channelId?: string;
@@ -452,6 +495,58 @@ export class SessionState {
       'channel_interrupt',
       { channelId: normalized, reason: 'clear', active: false },
       { channelId: normalized, actorId, visibility: DEFAULT_VISIBILITY },
+    );
+  }
+
+  registerEntity(
+    entity: SessionEntityOverlay,
+    options: { channelId?: string; actorId?: number; visibility?: SessionVisibility } = {},
+  ): void {
+    this.appendEvent(
+      'register_entity',
+      { entity: normalizeSessionEntityOverlay(entity, options.channelId) },
+      {
+        channelId: options.channelId ?? entity.channelId ?? this._focusChannelId,
+        actorId: options.actorId,
+        visibility: options.visibility ?? normalizeVisibility(entity.visibility),
+      },
+    );
+  }
+
+  registerItem(
+    item: SessionItemOverlay,
+    options: { channelId?: string; actorId?: number; visibility?: SessionVisibility } = {},
+  ): void {
+    this.appendEvent(
+      'register_item',
+      { item: normalizeSessionItemOverlay(item, options.channelId) },
+      {
+        channelId: options.channelId ?? item.channelId ?? this._focusChannelId,
+        actorId: options.actorId,
+        visibility: options.visibility ?? normalizeVisibility(item.visibility),
+      },
+    );
+  }
+
+  applyItemChange(
+    change: ItemChangeEventPayload,
+    options: { channelId?: string; actorId?: number; visibility?: SessionVisibility } = {},
+  ): void {
+    if (!change.itemName.trim()) return;
+    this.appendEvent(
+      'item_change',
+      {
+        itemName: change.itemName.trim(),
+        owner: change.owner?.trim(),
+        location: change.location?.trim(),
+        stateNotes: change.stateNotes?.trim(),
+        usage: change.usage?.trim(),
+      },
+      {
+        channelId: options.channelId ?? this._focusChannelId,
+        actorId: options.actorId,
+        visibility: options.visibility ?? DEFAULT_VISIBILITY,
+      },
     );
   }
 
@@ -1078,10 +1173,12 @@ export class SessionState {
 
   snapshotFromEvents(channelId = this._focusChannelId, viewerScope: ViewerScope = {}): SessionSnapshot {
     const normalized = normalizeChannelId(channelId);
+    const assetContext = this.buildModuleAssetContext(normalized, viewerScope);
     return {
       sessionId: this.sessionId,
       campaignId: this.campaignId,
       groupId: this.groupId,
+      moduleId: assetContext.moduleId,
       currentScene: this._channelScenes.get(normalized) ?? null,
       discoveredClues: [...this._discoveredCluesCache],
       pendingRolls: this.getPendingRollsForChannel(normalized),
@@ -1092,6 +1189,10 @@ export class SessionState {
       channelId: normalized,
       activeChannels: this.getActiveChannels(),
       interruptChannels: Array.from(this._interruptChannels),
+      activeEntities: assetContext.activeEntities,
+      entityDetails: assetContext.entityDetails,
+      sceneItems: assetContext.sceneItems,
+      moduleRulePack: assetContext.moduleRulePack,
     };
   }
 
@@ -1141,6 +1242,109 @@ export class SessionState {
       .get(this.sessionId);
     if (!row?.scenario_file_path) return null;
     return row.scenario_file_path.split('||')[0] ?? null;
+  }
+
+  getModuleId(): string | null {
+    const row = this.db
+      .query<{ module_id: string | null }, [string]>(
+        'SELECT module_id FROM campaign_rooms WHERE kp_session_id = ? ORDER BY updated_at DESC LIMIT 1',
+      )
+      .get(this.sessionId);
+    return row?.module_id ?? null;
+  }
+
+  private buildModuleAssetContext(channelId: string, viewerScope: ViewerScope): {
+    moduleId: string | null;
+    activeEntities: ScenarioEntity[];
+    entityDetails: ScenarioEntity[];
+    sceneItems: ScenarioItem[];
+    moduleRulePack: ModuleRulePack | null;
+  } {
+    const moduleId = this.getModuleId();
+    const scene = this._channelScenes.get(normalizeChannelId(channelId)) ?? this._currentScene;
+    const approvedEntities = moduleId ? listModuleEntities(this.db, moduleId, ['approved']) : [];
+    const approvedItems = moduleId ? listModuleItems(this.db, moduleId, ['approved']) : [];
+    const moduleRulePack = moduleId ? getModuleRulePack(this.db, moduleId, ['approved']) : null;
+    const visibleEvents = this._events.filter((event) => isVisibleToViewer(event.visibility, viewerScope));
+    const overlayEntities = new Map<string, SessionEntityOverlay>();
+    const overlayItems = new Map<string, SessionItemOverlay>();
+    const itemChanges = new Map<string, ItemChangeEventPayload>();
+
+    for (const event of visibleEvents) {
+      switch (event.type) {
+        case 'register_entity': {
+          const payload = event.payload as RegisterEntityEventPayload;
+          const entity = normalizeSessionEntityOverlay(payload.entity, event.channelId, event.visibility);
+          overlayEntities.set(normalizeAssetKey(entity.id || entity.name), entity);
+          break;
+        }
+        case 'register_item': {
+          const payload = event.payload as RegisterItemEventPayload;
+          const item = normalizeSessionItemOverlay(payload.item, event.channelId, event.visibility);
+          overlayItems.set(normalizeAssetKey(item.id || item.name), item);
+          break;
+        }
+        case 'item_change': {
+          const payload = event.payload as ItemChangeEventPayload;
+          itemChanges.set(normalizeAssetKey(payload.itemName), payload);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    const entitiesByKey = new Map<string, ScenarioEntity>();
+    for (const entity of approvedEntities) {
+      entitiesByKey.set(normalizeAssetKey(entity.id || entity.name), entity);
+      entitiesByKey.set(normalizeAssetKey(entity.name), entity);
+    }
+    for (const entity of overlayEntities.values()) {
+      entitiesByKey.set(normalizeAssetKey(entity.id || entity.name), entity);
+      entitiesByKey.set(normalizeAssetKey(entity.name), entity);
+    }
+
+    const itemsByKey = new Map<string, ScenarioItem>();
+    for (const item of approvedItems) {
+      const currentState = itemChanges.get(normalizeAssetKey(item.name));
+      itemsByKey.set(normalizeAssetKey(item.id || item.name), applyItemChangeToItem(item, currentState));
+      itemsByKey.set(normalizeAssetKey(item.name), applyItemChangeToItem(item, currentState));
+    }
+    for (const item of overlayItems.values()) {
+      const currentState = itemChanges.get(normalizeAssetKey(item.name));
+      const nextItem = applyItemChangeToItem(item, currentState);
+      itemsByKey.set(normalizeAssetKey(item.id || item.name), nextItem);
+      itemsByKey.set(normalizeAssetKey(item.name), nextItem);
+    }
+
+    const activeNpcNames = new Set((scene?.activeNpcs ?? []).map(normalizeAssetKey));
+    const sceneName = scene?.name ? normalizeAssetKey(scene.name) : '';
+    const allEntities = Array.from(new Map(Array.from(entitiesByKey.values()).map((entity) => [entity.id, entity])).values());
+    const activeEntities = scene
+      ? allEntities.filter((entity) =>
+          activeNpcNames.has(normalizeAssetKey(entity.name)) ||
+          normalizeAssetKey(entity.defaultLocation) === sceneName,
+        )
+      : [];
+    const entityDetails = activeEntities.filter((entity) => entity.isKey);
+
+    const allItems = Array.from(new Map(Array.from(itemsByKey.values()).map((item) => [item.id, item])).values());
+    const sceneItems = scene
+      ? allItems.filter((item) => {
+          if (!item.isKey) return false;
+          const ownerKey = normalizeAssetKey(item.currentOwner || item.defaultOwner);
+          const locationKey = normalizeAssetKey(item.currentLocation || item.defaultLocation);
+          return locationKey === sceneName || activeNpcNames.has(ownerKey);
+        })
+      : allItems.filter((item) => item.isKey && !item.currentLocation && !item.defaultLocation);
+
+    return {
+      moduleId,
+      activeEntities,
+      entityDetails,
+      sceneItems,
+      moduleRulePack,
+    };
   }
 
   // ─── 私有 ─────────────────────────────────────────────────────────────────
@@ -1375,10 +1579,12 @@ export class SessionState {
 
   private snapshotFromLegacy(channelId = DEFAULT_CHANNEL_ID): SessionSnapshot {
     const legacy = this._readLegacySnapshot();
+    const assetContext = this.buildModuleAssetContext(channelId, {});
     return {
       sessionId: this.sessionId,
       campaignId: this.campaignId,
       groupId: this.groupId,
+      moduleId: assetContext.moduleId,
       currentScene: legacy.currentScene,
       discoveredClues: legacy.discoveredClues,
       pendingRolls: legacy.pendingRolls,
@@ -1389,6 +1595,10 @@ export class SessionState {
       channelId,
       activeChannels: [DEFAULT_CHANNEL_ID],
       interruptChannels: [],
+      activeEntities: assetContext.activeEntities,
+      entityDetails: assetContext.entityDetails,
+      sceneItems: assetContext.sceneItems,
+      moduleRulePack: assetContext.moduleRulePack,
     };
   }
 
@@ -1719,6 +1929,53 @@ function normalizeVisibility(value?: string | null): SessionVisibility {
   return DEFAULT_VISIBILITY;
 }
 
+function normalizeSessionEntityOverlay(
+  entity: SessionEntityOverlay,
+  channelId?: string | null,
+  visibility?: string | null,
+): SessionEntityOverlay {
+  return {
+    ...entity,
+    moduleId: entity.moduleId ?? null,
+    source: 'session',
+    channelId: normalizeChannelId(channelId ?? entity.channelId),
+    visibility: normalizeVisibility(visibility ?? entity.visibility),
+    reviewStatus: 'approved',
+  };
+}
+
+function normalizeSessionItemOverlay(
+  item: SessionItemOverlay,
+  channelId?: string | null,
+  visibility?: string | null,
+): SessionItemOverlay {
+  return {
+    ...item,
+    moduleId: item.moduleId ?? null,
+    source: 'session',
+    channelId: normalizeChannelId(channelId ?? item.channelId),
+    visibility: normalizeVisibility(visibility ?? item.visibility),
+    reviewStatus: 'approved',
+    currentOwner: item.currentOwner ?? item.defaultOwner ?? '',
+    currentLocation: item.currentLocation ?? item.defaultLocation ?? '',
+  };
+}
+
+function applyItemChangeToItem(item: ScenarioItem, change?: ItemChangeEventPayload): ScenarioItem {
+  if (!change) return item;
+  return {
+    ...item,
+    currentOwner: change.owner?.trim() || item.currentOwner || item.defaultOwner || '',
+    currentLocation: change.location?.trim() || item.currentLocation || item.defaultLocation || '',
+    stateNotes: change.stateNotes?.trim() || item.stateNotes || '',
+    usage: change.usage?.trim() || item.usage,
+  };
+}
+
+function normalizeAssetKey(value?: string | null): string {
+  return (value ?? '').toLowerCase().replace(/[\s【】（）()：:，,、]/g, '').trim();
+}
+
 export function buildPrivateVisibility(userIds: number | number[]): SessionVisibility {
   const ids = Array.isArray(userIds) ? userIds : [userIds];
   const normalized = Array.from(new Set(ids.map((id) => Math.trunc(id)).filter((id) => Number.isFinite(id) && id > 0)));
@@ -1806,6 +2063,18 @@ function summarizeEventForContext(event: SessionEvent<KnownEventPayload>): strin
       return payload.active
         ? `频道 ${payload.channelId} 出现紧急事件：${compact(payload.reason, 48)}`
         : `频道 ${payload.channelId} 的紧急状态已解除`;
+    }
+    case 'register_entity': {
+      const payload = event.payload as RegisterEntityEventPayload;
+      return `临时实体加入：${payload.entity.name}${payload.entity.identity ? `（${compact(payload.entity.identity, 24)}）` : ''}`;
+    }
+    case 'register_item': {
+      const payload = event.payload as RegisterItemEventPayload;
+      return `临时物品加入：${payload.item.name}${payload.item.publicDescription ? `（${compact(payload.item.publicDescription, 36)}）` : ''}`;
+    }
+    case 'item_change': {
+      const payload = event.payload as ItemChangeEventPayload;
+      return `物品状态更新：${payload.itemName}${payload.owner ? ` → ${payload.owner}` : ''}${payload.location ? ` @ ${payload.location}` : ''}`;
     }
     default:
       return null;

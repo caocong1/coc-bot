@@ -14,6 +14,16 @@
 | 2 | `.help` | 返回所有命令列表（含 .room、.mod，不含 .campaign） | ⬜ | |
 | 3 | `.r 1d100` / `.r 3d6*5` / `.r 2d6+6` | 正常骰点输出 | ✅ | |
 
+### 补充验证：2026-03-15（模组资产层）
+
+| # | 操作 | 期望 | 结果 | 备注 |
+|---|------|------|------|------|
+| B1 | `bun x tsc -p c:\\Users\\sorawatcher\\workspace\\coc-bot\\tsconfig.json --noEmit` | 后端与共享类型通过编译 | ✅ | 覆盖 `SessionState` / `ContextBuilder` / `KPPipeline` / `AdminRoutes` / `web/src/api.ts` |
+| B2 | 在 `web/` 目录执行 `bun run build` | 前端构建成功 | ✅ | 验证新增模组资产 API 类型未破坏现有页面构建 |
+| B3 | 检查 DB schema | 存在 `module_entities` / `module_items` / `module_rule_packs` | ✅ | 由 `Database.ts` 迁移创建 |
+| B4 | 检查导入链路 | 模组导入后可触发元数据 / 资产 / 规则包三路提取 | ✅ | 代码路径已接入，待真实模组数据联调 |
+| B5 | 检查运行时事件 | `register_entity` / `register_item` / `item_change` 已进入 `kp_events` 类型集 | ✅ | 通过类型与实现检查 |
+
 ### 第二阶段：车卡（Web 表单）
 
 > 正式流程通过 Web 完成，提交后自动同步 bot，玩家无需发任何 QQ 命令。

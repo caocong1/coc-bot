@@ -28,6 +28,20 @@ import type { DashScopeClient } from '../ai/client/DashScopeClient';
 import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
 import { deliverCampaignOutput, normalizeCampaignTextParts } from '../runtime/CampaignOutputDelivery';
 import { addMinutesToTime } from '../runtime/SessionState';
+import type {
+  ModuleRulePack,
+  ReviewStatus,
+  ScenarioEntity,
+  ScenarioItem,
+} from '@shared/types/ScenarioAssets';
+import {
+  getModuleEntity,
+  getModuleItem,
+  getModuleRulePack,
+  listModuleEntities,
+  listModuleItems,
+  summarizeModuleDraftStatus,
+} from '../storage/ModuleAssetStore';
 
 type KnowledgeCategory = 'rules' | 'scenario' | 'keeper_secret';
 
@@ -39,6 +53,29 @@ interface ImportJob {
   error?: string;
   startedAt: string;
   finishedAt?: string;
+}
+
+interface ModuleMetadataDraft {
+  name?: string;
+  description?: string;
+  era?: string;
+  allowedOccupations?: string[];
+  minStats?: Record<string, number>;
+}
+
+interface ModuleAssetsDraft {
+  entities?: Array<Partial<ScenarioEntity>>;
+  items?: Array<Partial<ScenarioItem>>;
+}
+
+interface ModuleRulePackDraft {
+  sanRules?: string;
+  combatRules?: string;
+  deathRules?: string;
+  timeRules?: string;
+  revelationRules?: string;
+  forbiddenAssumptions?: string;
+  freeText?: string;
 }
 
 export class AdminRoutes {
@@ -147,6 +184,27 @@ export class AdminRoutes {
       if (method === 'GET' && segments[1] && !segments[2]) return this.getModule(segments[1]);
       if (method === 'PUT' && segments[1] && !segments[2]) return this.updateModule(segments[1], req);
       if (method === 'DELETE' && segments[1] && !segments[2]) return this.deleteModule(segments[1]);
+      if (segments[1] && segments[2] === 'entities') {
+        if (method === 'GET' && !segments[3]) return this.listModuleEntitiesRoute(segments[1], req);
+        if (method === 'POST' && !segments[3]) return this.createModuleEntityRoute(segments[1], req);
+        if (method === 'GET' && segments[3] && !segments[4]) return this.getModuleEntityRoute(segments[1], segments[3]);
+        if (method === 'PUT' && segments[3] && !segments[4]) return this.updateModuleEntityRoute(segments[1], segments[3], req);
+        if (method === 'DELETE' && segments[3] && !segments[4]) return this.deleteModuleEntityRoute(segments[1], segments[3]);
+        if (method === 'POST' && segments[3] && segments[4] === 'review') return this.updateModuleEntityReviewRoute(segments[1], segments[3], req);
+      }
+      if (segments[1] && segments[2] === 'items') {
+        if (method === 'GET' && !segments[3]) return this.listModuleItemsRoute(segments[1], req);
+        if (method === 'POST' && !segments[3]) return this.createModuleItemRoute(segments[1], req);
+        if (method === 'GET' && segments[3] && !segments[4]) return this.getModuleItemRoute(segments[1], segments[3]);
+        if (method === 'PUT' && segments[3] && !segments[4]) return this.updateModuleItemRoute(segments[1], segments[3], req);
+        if (method === 'DELETE' && segments[3] && !segments[4]) return this.deleteModuleItemRoute(segments[1], segments[3]);
+        if (method === 'POST' && segments[3] && segments[4] === 'review') return this.updateModuleItemReviewRoute(segments[1], segments[3], req);
+      }
+      if (segments[1] && segments[2] === 'rule-pack') {
+        if (method === 'GET') return this.getModuleRulePackRoute(segments[1], req);
+        if (method === 'PUT') return this.updateModuleRulePackRoute(segments[1], req);
+        if (method === 'POST' && segments[3] === 'review') return this.updateModuleRulePackReviewRoute(segments[1], req);
+      }
       // /modules/:id/files
       if (method === 'POST' && segments[1] && segments[2] === 'files') return this.uploadModuleFile(segments[1], req);
       if (method === 'DELETE' && segments[1] && segments[2] === 'files' && segments[3]) return this.deleteModuleFile(segments[1], segments[3]);
@@ -1069,6 +1127,10 @@ export class AdminRoutes {
       char_count: number; chunk_count: number; import_status: string; import_error: string | null;
       created_at: string;
     }, string>('SELECT * FROM scenario_module_files WHERE module_id = ? ORDER BY created_at', ).all(moduleId);
+    const entities = listModuleEntities(this.db, moduleId);
+    const items = listModuleItems(this.db, moduleId);
+    const rulePack = getModuleRulePack(this.db, moduleId);
+    const extractionDraftStatus = summarizeModuleDraftStatus(this.db, moduleId);
 
     return Response.json({
       id: m.id,
@@ -1090,6 +1152,10 @@ export class AdminRoutes {
         importError: f.import_error,
         createdAt: f.created_at,
       })),
+      entities,
+      items,
+      rulePack,
+      extractionDraftStatus,
       createdAt: m.created_at,
       updatedAt: m.updated_at,
     });
@@ -1127,9 +1193,217 @@ export class AdminRoutes {
       try { fs.unlinkSync(img.filename); } catch { /* 忽略 */ }
     }
 
+    this.db.run('DELETE FROM module_entities WHERE module_id = ?', [moduleId]);
+    this.db.run('DELETE FROM module_items WHERE module_id = ?', [moduleId]);
+    this.db.run('DELETE FROM module_rule_packs WHERE module_id = ?', [moduleId]);
     this.db.run('DELETE FROM scenario_module_files WHERE module_id = ?', [moduleId]);
     this.db.run('DELETE FROM scenario_modules WHERE id = ?', [moduleId]);
     return Response.json({ ok: true });
+  }
+
+  private listModuleEntitiesRoute(moduleId: string, req: Request): Response {
+    if (!this.moduleExists(moduleId)) return Response.json({ error: '模组不存在' }, { status: 404 });
+    const statuses = parseReviewStatusQuery(new URL(req.url).searchParams.get('status'));
+    return Response.json(listModuleEntities(this.db, moduleId, statuses));
+  }
+
+  private async createModuleEntityRoute(moduleId: string, req: Request): Promise<Response> {
+    if (!this.moduleExists(moduleId)) return Response.json({ error: '模组不存在' }, { status: 404 });
+    const body = await req.json().catch(() => ({})) as Partial<ScenarioEntity>;
+    const record = buildScenarioEntityRecord(body);
+    if (!record.name) return Response.json({ error: 'name required' }, { status: 400 });
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.db.run(
+      `INSERT INTO module_entities
+         (id, module_id, type, name, identity, motivation, public_image, hidden_truth,
+          speaking_style, faction, danger_level, default_location, attributes_json,
+          skills_json, combat_json, free_text, relationships_json, is_key, review_status,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, moduleId, record.type, record.name, record.identity, record.motivation, record.publicImage,
+        record.hiddenTruth, record.speakingStyle, record.faction, record.dangerLevel, record.defaultLocation,
+        JSON.stringify(record.attributes), JSON.stringify(record.skills), JSON.stringify(record.combat),
+        record.freeText, JSON.stringify(record.relationships), record.isKey ? 1 : 0, record.reviewStatus, now, now,
+      ],
+    );
+    return Response.json({ id }, { status: 201 });
+  }
+
+  private getModuleEntityRoute(moduleId: string, entityId: string): Response {
+    const entity = getModuleEntity(this.db, moduleId, entityId);
+    if (!entity) return Response.json({ error: '实体不存在' }, { status: 404 });
+    return Response.json(entity);
+  }
+
+  private async updateModuleEntityRoute(moduleId: string, entityId: string, req: Request): Promise<Response> {
+    const existing = getModuleEntity(this.db, moduleId, entityId);
+    if (!existing) return Response.json({ error: '实体不存在' }, { status: 404 });
+    const body = await req.json().catch(() => ({})) as Partial<ScenarioEntity>;
+    const merged = buildScenarioEntityRecord({ ...existing, ...body, reviewStatus: body.reviewStatus ?? existing.reviewStatus });
+    this.db.run(
+      `UPDATE module_entities SET
+         type = ?, name = ?, identity = ?, motivation = ?, public_image = ?, hidden_truth = ?,
+         speaking_style = ?, faction = ?, danger_level = ?, default_location = ?, attributes_json = ?,
+         skills_json = ?, combat_json = ?, free_text = ?, relationships_json = ?, is_key = ?,
+         review_status = ?, updated_at = ?
+       WHERE id = ? AND module_id = ?`,
+      [
+        merged.type, merged.name, merged.identity, merged.motivation, merged.publicImage, merged.hiddenTruth,
+        merged.speakingStyle, merged.faction, merged.dangerLevel, merged.defaultLocation,
+        JSON.stringify(merged.attributes), JSON.stringify(merged.skills), JSON.stringify(merged.combat),
+        merged.freeText, JSON.stringify(merged.relationships), merged.isKey ? 1 : 0,
+        merged.reviewStatus, new Date().toISOString(), entityId, moduleId,
+      ],
+    );
+    return Response.json({ ok: true });
+  }
+
+  private deleteModuleEntityRoute(moduleId: string, entityId: string): Response {
+    const result = this.db.run('DELETE FROM module_entities WHERE id = ? AND module_id = ?', [entityId, moduleId]);
+    if (result.changes === 0) return Response.json({ error: '实体不存在' }, { status: 404 });
+    return Response.json({ ok: true });
+  }
+
+  private async updateModuleEntityReviewRoute(moduleId: string, entityId: string, req: Request): Promise<Response> {
+    const entity = getModuleEntity(this.db, moduleId, entityId);
+    if (!entity) return Response.json({ error: '实体不存在' }, { status: 404 });
+    const body = await req.json().catch(() => ({})) as { reviewStatus?: ReviewStatus };
+    const reviewStatus = normalizeReviewStatus(body.reviewStatus);
+    if (!reviewStatus) return Response.json({ error: 'reviewStatus invalid' }, { status: 400 });
+    this.db.run(
+      'UPDATE module_entities SET review_status = ?, updated_at = ? WHERE id = ? AND module_id = ?',
+      [reviewStatus, new Date().toISOString(), entityId, moduleId],
+    );
+    return Response.json({ ok: true });
+  }
+
+  private listModuleItemsRoute(moduleId: string, req: Request): Response {
+    if (!this.moduleExists(moduleId)) return Response.json({ error: '模组不存在' }, { status: 404 });
+    const statuses = parseReviewStatusQuery(new URL(req.url).searchParams.get('status'));
+    return Response.json(listModuleItems(this.db, moduleId, statuses));
+  }
+
+  private async createModuleItemRoute(moduleId: string, req: Request): Promise<Response> {
+    if (!this.moduleExists(moduleId)) return Response.json({ error: '模组不存在' }, { status: 404 });
+    const body = await req.json().catch(() => ({})) as Partial<ScenarioItem>;
+    const record = buildScenarioItemRecord(body);
+    if (!record.name) return Response.json({ error: 'name required' }, { status: 400 });
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.db.run(
+      `INSERT INTO module_items
+         (id, module_id, name, category, public_description, kp_notes, default_owner,
+          default_location, visibility_condition, usage, is_key, review_status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, moduleId, record.name, record.category, record.publicDescription, record.kpNotes,
+        record.defaultOwner, record.defaultLocation, record.visibilityCondition, record.usage,
+        record.isKey ? 1 : 0, record.reviewStatus, now, now,
+      ],
+    );
+    return Response.json({ id }, { status: 201 });
+  }
+
+  private getModuleItemRoute(moduleId: string, itemId: string): Response {
+    const item = getModuleItem(this.db, moduleId, itemId);
+    if (!item) return Response.json({ error: '物品不存在' }, { status: 404 });
+    return Response.json(item);
+  }
+
+  private async updateModuleItemRoute(moduleId: string, itemId: string, req: Request): Promise<Response> {
+    const existing = getModuleItem(this.db, moduleId, itemId);
+    if (!existing) return Response.json({ error: '物品不存在' }, { status: 404 });
+    const body = await req.json().catch(() => ({})) as Partial<ScenarioItem>;
+    const merged = buildScenarioItemRecord({ ...existing, ...body, reviewStatus: body.reviewStatus ?? existing.reviewStatus });
+    this.db.run(
+      `UPDATE module_items SET
+         name = ?, category = ?, public_description = ?, kp_notes = ?, default_owner = ?,
+         default_location = ?, visibility_condition = ?, usage = ?, is_key = ?, review_status = ?, updated_at = ?
+       WHERE id = ? AND module_id = ?`,
+      [
+        merged.name, merged.category, merged.publicDescription, merged.kpNotes, merged.defaultOwner,
+        merged.defaultLocation, merged.visibilityCondition, merged.usage, merged.isKey ? 1 : 0,
+        merged.reviewStatus, new Date().toISOString(), itemId, moduleId,
+      ],
+    );
+    return Response.json({ ok: true });
+  }
+
+  private deleteModuleItemRoute(moduleId: string, itemId: string): Response {
+    const result = this.db.run('DELETE FROM module_items WHERE id = ? AND module_id = ?', [itemId, moduleId]);
+    if (result.changes === 0) return Response.json({ error: '物品不存在' }, { status: 404 });
+    return Response.json({ ok: true });
+  }
+
+  private async updateModuleItemReviewRoute(moduleId: string, itemId: string, req: Request): Promise<Response> {
+    const item = getModuleItem(this.db, moduleId, itemId);
+    if (!item) return Response.json({ error: '物品不存在' }, { status: 404 });
+    const body = await req.json().catch(() => ({})) as { reviewStatus?: ReviewStatus };
+    const reviewStatus = normalizeReviewStatus(body.reviewStatus);
+    if (!reviewStatus) return Response.json({ error: 'reviewStatus invalid' }, { status: 400 });
+    this.db.run(
+      'UPDATE module_items SET review_status = ?, updated_at = ? WHERE id = ? AND module_id = ?',
+      [reviewStatus, new Date().toISOString(), itemId, moduleId],
+    );
+    return Response.json({ ok: true });
+  }
+
+  private getModuleRulePackRoute(moduleId: string, req: Request): Response {
+    if (!this.moduleExists(moduleId)) return Response.json({ error: '模组不存在' }, { status: 404 });
+    const statuses = parseReviewStatusQuery(new URL(req.url).searchParams.get('status'));
+    return Response.json(getModuleRulePack(this.db, moduleId, statuses) ?? null);
+  }
+
+  private async updateModuleRulePackRoute(moduleId: string, req: Request): Promise<Response> {
+    if (!this.moduleExists(moduleId)) return Response.json({ error: '模组不存在' }, { status: 404 });
+    const existing = getModuleRulePack(this.db, moduleId);
+    const body = await req.json().catch(() => ({})) as Partial<ModuleRulePack>;
+    const merged = buildModuleRulePackRecord({ ...existing, ...body, reviewStatus: body.reviewStatus ?? existing?.reviewStatus ?? 'draft' }, moduleId);
+    if (existing) {
+      this.db.run(
+        `UPDATE module_rule_packs SET
+           san_rules = ?, combat_rules = ?, death_rules = ?, time_rules = ?, revelation_rules = ?,
+           forbidden_assumptions = ?, free_text = ?, review_status = ?, updated_at = ?
+         WHERE module_id = ?`,
+        [
+          merged.sanRules, merged.combatRules, merged.deathRules, merged.timeRules, merged.revelationRules,
+          merged.forbiddenAssumptions, merged.freeText, merged.reviewStatus, new Date().toISOString(), moduleId,
+        ],
+      );
+    } else {
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      this.db.run(
+        `INSERT INTO module_rule_packs
+           (id, module_id, san_rules, combat_rules, death_rules, time_rules, revelation_rules,
+            forbidden_assumptions, free_text, review_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id, moduleId, merged.sanRules, merged.combatRules, merged.deathRules, merged.timeRules,
+          merged.revelationRules, merged.forbiddenAssumptions, merged.freeText, merged.reviewStatus, now, now,
+        ],
+      );
+    }
+    return Response.json({ ok: true });
+  }
+
+  private async updateModuleRulePackReviewRoute(moduleId: string, req: Request): Promise<Response> {
+    const rulePack = getModuleRulePack(this.db, moduleId);
+    if (!rulePack) return Response.json({ error: '规则包不存在' }, { status: 404 });
+    const body = await req.json().catch(() => ({})) as { reviewStatus?: ReviewStatus };
+    const reviewStatus = normalizeReviewStatus(body.reviewStatus);
+    if (!reviewStatus) return Response.json({ error: 'reviewStatus invalid' }, { status: 400 });
+    this.db.run(
+      'UPDATE module_rule_packs SET review_status = ?, updated_at = ? WHERE module_id = ?',
+      [reviewStatus, new Date().toISOString(), moduleId],
+    );
+    return Response.json({ ok: true });
+  }
+
+  private moduleExists(moduleId: string): boolean {
+    return !!this.db.query<{ id: string }, string>('SELECT id FROM scenario_modules WHERE id = ?').get(moduleId);
   }
 
   private async uploadModuleFile(moduleId: string, req: Request): Promise<Response> {
@@ -1220,6 +1494,39 @@ export class AdminRoutes {
    * 只填充当前为空的字段，不覆盖已手动填写的内容。
    */
   private async autoFillModuleMetadata(moduleId: string, docPath: string): Promise<void> {
+    if (this.aiClient) {
+      const mod = this.db.query<{
+        name: string; description: string | null; era: string | null;
+        allowed_occupations: string; min_stats: string;
+      }, string>('SELECT name, description, era, allowed_occupations, min_stats FROM scenario_modules WHERE id = ?').get(moduleId);
+      if (mod) {
+        const text = await this.loadModuleImportText(docPath);
+        if (text && text.length >= 50) {
+          try {
+            const metadata = await this.extractModuleMetadataDraft(text.slice(0, 6000));
+            this.applyModuleMetadataDraft(moduleId, mod, metadata);
+          } catch (err) {
+            console.error('[AutoFill] 元数据提取失败:', err);
+          }
+
+          try {
+            const assets = await this.extractModuleAssetsDraft(text.slice(0, 12000));
+            this.saveModuleAssetDrafts(moduleId, assets);
+          } catch (err) {
+            console.error('[AutoFill] 资产提取失败:', err);
+          }
+
+          try {
+            const rulePack = await this.extractModuleRulePackDraft(text.slice(0, 12000));
+            this.saveModuleRulePackDraft(moduleId, rulePack);
+          } catch (err) {
+            console.error('[AutoFill] 规则包提取失败:', err);
+          }
+        }
+      }
+      return;
+    }
+
     console.log(`[AutoFill] === 开始 === moduleId=${moduleId}, docPath=${docPath}`);
     if (!this.aiClient) { console.log('[AutoFill] 跳过：aiClient 未配置'); return; }
 
@@ -1312,7 +1619,7 @@ export class AdminRoutes {
 
     try {
       console.log('[AutoFill] 调用 AI chat...');
-      const result = await this.aiClient.chat('qwen3.5-flash', [
+      const result = await (this.aiClient as unknown as DashScopeClient).chat('qwen3.5-flash', [
         { role: 'system', content: prompt },
         { role: 'user', content: excerpt },
       ]);
@@ -1379,6 +1686,269 @@ export class AdminRoutes {
     } catch (err) {
       console.error('[AutoFill] ❌ AI 解析失败:', err);
     }
+  }
+
+  private async loadModuleImportText(docPath: string): Promise<string> {
+    const { readFileSync, existsSync, readdirSync, statSync } = await import('fs');
+    let text = '';
+    const manifestPath = resolve('data/knowledge/manifest.json');
+    const docFileName = docPath.replace(/\\/g, '/').split('/').pop() ?? '';
+
+    if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+          files?: Array<{ sourcePath?: string; sourceRelativePath?: string; textPath?: string }>;
+        };
+        const entry = manifest.files?.find((file) =>
+          file.sourceRelativePath === docFileName ||
+          (file.sourcePath && file.sourcePath.replace(/\\/g, '/').split('/').pop() === docFileName),
+        );
+        if (entry?.textPath) {
+          const textFullPath = resolve(entry.textPath);
+          if (existsSync(textFullPath)) {
+            text = readFileSync(textFullPath, 'utf-8');
+          }
+        }
+      } catch (err) {
+        console.error('[AutoFill] manifest 读取失败:', err);
+      }
+    }
+
+    if (!text) {
+      const rawDir = resolve('data/knowledge/raw');
+      if (existsSync(rawDir)) {
+        const txtFiles = readdirSync(rawDir)
+          .filter((filename) => filename.endsWith('.txt'))
+          .map((filename) => ({ filename, mtime: statSync(resolve(rawDir, filename)).mtimeMs }))
+          .sort((a, b) => b.mtime - a.mtime);
+        if (txtFiles.length > 0) {
+          text = readFileSync(resolve(rawDir, txtFiles[0].filename), 'utf-8');
+        }
+      }
+    }
+
+    return text;
+  }
+
+  private async extractModuleMetadataDraft(excerpt: string): Promise<ModuleMetadataDraft> {
+    return this.extractJsonWithAi<ModuleMetadataDraft>(`你是一个 CoC（克苏鲁的呼唤）跑团模组分析专家。阅读以下模组文本的开头部分，提取关键信息。
+
+请以严格 JSON 格式输出（不要输出其他内容）：
+{
+  "name": "模组名称",
+  "description": "3-5句简明剧情简介，供玩家阅读，不要剧透关键情节和结局",
+  "era": "1920s 或 现代 或 其他时代描述",
+  "allowedOccupations": ["适合的职业1", "职业2"],
+  "minStats": {"属性名": 最低值}
+}
+
+规则：
+- description 必须玩家可见，不剧透
+- allowedOccupations 没有限制时输出 []
+- minStats 没有要求时输出 {}
+- 只输出 JSON`, excerpt);
+  }
+
+  private async extractModuleAssetsDraft(excerpt: string): Promise<ModuleAssetsDraft> {
+    return this.extractJsonWithAi<ModuleAssetsDraft>(`你是一个 CoC 模组资产提取器。请从文本中只提取最关键的模组资产候选。
+
+严格输出 JSON：
+{
+  "entities": [
+    {
+      "type": "npc 或 creature",
+      "name": "名称",
+      "identity": "身份",
+      "motivation": "动机",
+      "publicImage": "公开形象",
+      "hiddenTruth": "隐藏真相",
+      "speakingStyle": "说话风格",
+      "faction": "阵营",
+      "dangerLevel": "危险等级",
+      "defaultLocation": "默认地点",
+      "attributes": {"力量": 60},
+      "skills": {"侦查": 60},
+      "combat": {"hp": 12, "armor": 1, "mov": 8, "build": 1, "attacks": [{"name": "爪击", "skill": 60, "damage": "1D6", "rof": 1}]},
+      "freeText": "无法结构化但重要的补充",
+      "relationships": [{"targetId": "", "relation": "knows", "notes": "备注"}],
+      "isKey": true
+    }
+  ],
+  "items": [
+    {
+      "name": "名称",
+      "category": "类别",
+      "publicDescription": "玩家可见描述",
+      "kpNotes": "KP 备注",
+      "defaultOwner": "默认归属",
+      "defaultLocation": "默认位置",
+      "visibilityCondition": "可见条件",
+      "usage": "用途或效果",
+      "isKey": true
+    }
+  ]
+}
+
+规则：
+- 关键 NPC 只保留有名字、有动机、会与调查员互动的角色
+- 关键物品只保留推动剧情、解谜必须或有特殊效果的物品
+- 最多输出 10 个实体和 10 个物品
+- 不确定的字段用空字符串、空对象或空数组
+- 只输出 JSON`, excerpt);
+  }
+
+  private async extractModuleRulePackDraft(excerpt: string): Promise<ModuleRulePackDraft> {
+    return this.extractJsonWithAi<ModuleRulePackDraft>(`你是一个 CoC 模组规则包提取器。请只提取模组专属设定和会影响主持裁定的特殊规则。
+
+严格输出 JSON：
+{
+  "sanRules": "特殊理智规则，没有则空字符串",
+  "combatRules": "特殊战斗规则，没有则空字符串",
+  "deathRules": "死亡/濒死/复活相关特殊规则，没有则空字符串",
+  "timeRules": "时间推进或日程限制，没有则空字符串",
+  "revelationRules": "信息揭示边界和特殊方式，没有则空字符串",
+  "forbiddenAssumptions": "KP 默认不应自行假设的事项，没有则空字符串",
+  "freeText": "其他重要模组专属机制与设定，没有则空字符串"
+}
+
+规则：
+- 重点提取高于 CoC 通用规则的模组特例
+- 只输出 JSON`, excerpt);
+  }
+
+  private async extractJsonWithAi<T>(prompt: string, excerpt: string): Promise<T> {
+    const aiClient = this.aiClient;
+    if (!aiClient) throw new Error('AI client unavailable');
+    const result = await aiClient.chat('qwen3.5-flash', [
+      { role: 'system', content: prompt },
+      { role: 'user', content: excerpt },
+    ]);
+    const cleaned = result
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim();
+    return JSON.parse(cleaned) as T;
+  }
+
+  private applyModuleMetadataDraft(
+    moduleId: string,
+    mod: { name: string; description: string | null; era: string | null; allowed_occupations: string; min_stats: string },
+    data: ModuleMetadataDraft,
+  ): void {
+    const updates: string[] = [];
+    const values: string[] = [];
+    const hasOccs = mod.allowed_occupations && JSON.parse(mod.allowed_occupations).length > 0;
+    const hasStats = mod.min_stats && Object.keys(JSON.parse(mod.min_stats)).length > 0;
+
+    if (data.name && data.name !== mod.name) {
+      updates.push('name = ?');
+      values.push(data.name);
+    }
+    if (!mod.description && data.description) {
+      updates.push('description = ?');
+      values.push(data.description);
+    }
+    if (!mod.era && data.era) {
+      updates.push('era = ?');
+      values.push(data.era);
+    }
+    if (!hasOccs && data.allowedOccupations && data.allowedOccupations.length > 0) {
+      updates.push('allowed_occupations = ?');
+      values.push(JSON.stringify(data.allowedOccupations));
+    }
+    if (!hasStats && data.minStats && Object.keys(data.minStats).length > 0) {
+      updates.push('min_stats = ?');
+      values.push(JSON.stringify(data.minStats));
+    }
+
+    if (updates.length === 0) return;
+    updates.push('updated_at = ?');
+    values.push(new Date().toISOString());
+    values.push(moduleId);
+    this.db.run(`UPDATE scenario_modules SET ${updates.join(', ')} WHERE id = ?`, values);
+  }
+
+  private saveModuleAssetDrafts(moduleId: string, draft: ModuleAssetsDraft): void {
+    const entities = (draft.entities ?? []).slice(0, 10).map((item) => buildScenarioEntityRecord(item));
+    const items = (draft.items ?? []).slice(0, 10).map((item) => buildScenarioItemRecord(item));
+    const now = new Date().toISOString();
+
+    this.db.transaction(() => {
+      this.db.run(`DELETE FROM module_entities WHERE module_id = ? AND review_status IN ('draft', 'rejected')`, [moduleId]);
+      this.db.run(`DELETE FROM module_items WHERE module_id = ? AND review_status IN ('draft', 'rejected')`, [moduleId]);
+
+      for (const entity of entities) {
+        if (!entity.name) continue;
+        this.db.run(
+          `INSERT INTO module_entities
+             (id, module_id, type, name, identity, motivation, public_image, hidden_truth,
+              speaking_style, faction, danger_level, default_location, attributes_json,
+              skills_json, combat_json, free_text, relationships_json, is_key, review_status,
+              created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+          [
+            crypto.randomUUID(), moduleId, entity.type, entity.name, entity.identity, entity.motivation,
+            entity.publicImage, entity.hiddenTruth, entity.speakingStyle, entity.faction, entity.dangerLevel,
+            entity.defaultLocation, JSON.stringify(entity.attributes), JSON.stringify(entity.skills),
+            JSON.stringify(entity.combat), entity.freeText, JSON.stringify(entity.relationships),
+            entity.isKey ? 1 : 0, now, now,
+          ],
+        );
+      }
+
+      for (const item of items) {
+        if (!item.name) continue;
+        this.db.run(
+          `INSERT INTO module_items
+             (id, module_id, name, category, public_description, kp_notes, default_owner,
+              default_location, visibility_condition, usage, is_key, review_status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+          [
+            crypto.randomUUID(), moduleId, item.name, item.category, item.publicDescription, item.kpNotes,
+            item.defaultOwner, item.defaultLocation, item.visibilityCondition, item.usage,
+            item.isKey ? 1 : 0, now, now,
+          ],
+        );
+      }
+    })();
+  }
+
+  private saveModuleRulePackDraft(moduleId: string, draft: ModuleRulePackDraft): void {
+    const record = buildModuleRulePackRecord(draft, moduleId);
+    if (!record.sanRules && !record.combatRules && !record.deathRules && !record.timeRules &&
+        !record.revelationRules && !record.forbiddenAssumptions && !record.freeText) {
+      return;
+    }
+
+    const existing = getModuleRulePack(this.db, moduleId);
+    if (existing?.reviewStatus === 'approved') return;
+
+    const now = new Date().toISOString();
+    if (existing) {
+      this.db.run(
+        `UPDATE module_rule_packs SET
+           san_rules = ?, combat_rules = ?, death_rules = ?, time_rules = ?, revelation_rules = ?,
+           forbidden_assumptions = ?, free_text = ?, review_status = 'draft', updated_at = ?
+         WHERE module_id = ?`,
+        [
+          record.sanRules, record.combatRules, record.deathRules, record.timeRules,
+          record.revelationRules, record.forbiddenAssumptions, record.freeText, now, moduleId,
+        ],
+      );
+      return;
+    }
+
+    this.db.run(
+      `INSERT INTO module_rule_packs
+         (id, module_id, san_rules, combat_rules, death_rules, time_rules, revelation_rules,
+          forbidden_assumptions, free_text, review_status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+      [
+        crypto.randomUUID(), moduleId, record.sanRules, record.combatRules, record.deathRules,
+        record.timeRules, record.revelationRules, record.forbiddenAssumptions, record.freeText, now, now,
+      ],
+    );
   }
 
   private deleteModuleFile(moduleId: string, fileId: string): Response {
@@ -1449,4 +2019,117 @@ export class AdminRoutes {
       return Response.json({ error: '读取图片失败' }, { status: 500 });
     }
   }
+}
+
+function parseReviewStatusQuery(raw: string | null): ReviewStatus[] | undefined {
+  if (!raw?.trim()) return undefined;
+  const statuses = raw.split(',')
+    .map((item) => normalizeReviewStatus(item.trim()))
+    .filter((item): item is ReviewStatus => item !== null);
+  return statuses.length > 0 ? statuses : undefined;
+}
+
+function normalizeReviewStatus(value?: string | null): ReviewStatus | null {
+  if (value === 'draft' || value === 'approved' || value === 'rejected') return value;
+  return null;
+}
+
+function buildScenarioEntityRecord(input: Partial<ScenarioEntity> | undefined) {
+  return {
+    type: input?.type === 'creature' ? 'creature' : 'npc',
+    name: String(input?.name ?? '').trim(),
+    identity: String(input?.identity ?? '').trim(),
+    motivation: String(input?.motivation ?? '').trim(),
+    publicImage: String(input?.publicImage ?? '').trim(),
+    hiddenTruth: String(input?.hiddenTruth ?? '').trim(),
+    speakingStyle: String(input?.speakingStyle ?? '').trim(),
+    faction: String(input?.faction ?? '').trim(),
+    dangerLevel: String(input?.dangerLevel ?? '').trim(),
+    defaultLocation: String(input?.defaultLocation ?? '').trim(),
+    attributes: normalizeNumberRecord(input?.attributes),
+    skills: normalizeNumberRecord(input?.skills),
+    combat: normalizeCombat(input?.combat),
+    freeText: String(input?.freeText ?? '').trim(),
+    relationships: normalizeRelationships(input?.relationships),
+    isKey: input?.isKey !== false,
+    reviewStatus: normalizeReviewStatus(input?.reviewStatus) ?? 'draft',
+  };
+}
+
+function buildScenarioItemRecord(input: Partial<ScenarioItem> | undefined) {
+  return {
+    name: String(input?.name ?? '').trim(),
+    category: String(input?.category ?? '').trim(),
+    publicDescription: String(input?.publicDescription ?? '').trim(),
+    kpNotes: String(input?.kpNotes ?? '').trim(),
+    defaultOwner: String(input?.defaultOwner ?? '').trim(),
+    defaultLocation: String(input?.defaultLocation ?? '').trim(),
+    visibilityCondition: String(input?.visibilityCondition ?? '').trim(),
+    usage: String(input?.usage ?? '').trim(),
+    isKey: input?.isKey !== false,
+    reviewStatus: normalizeReviewStatus(input?.reviewStatus) ?? 'draft',
+  };
+}
+
+function buildModuleRulePackRecord(input: Partial<ModuleRulePack> | Partial<ModuleRulePackDraft> | undefined, moduleId: string) {
+  return {
+    moduleId,
+    sanRules: String(input?.sanRules ?? '').trim(),
+    combatRules: String(input?.combatRules ?? '').trim(),
+    deathRules: String(input?.deathRules ?? '').trim(),
+    timeRules: String(input?.timeRules ?? '').trim(),
+    revelationRules: String(input?.revelationRules ?? '').trim(),
+    forbiddenAssumptions: String(input?.forbiddenAssumptions ?? '').trim(),
+    freeText: String(input?.freeText ?? '').trim(),
+    reviewStatus: normalizeReviewStatus((input as { reviewStatus?: string } | undefined)?.reviewStatus) ?? 'draft',
+  };
+}
+
+function normalizeNumberRecord(input: unknown): Record<string, number> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  return Object.fromEntries(
+    Object.entries(input as Record<string, unknown>)
+      .filter(([, value]) => typeof value === 'number' && Number.isFinite(value)),
+  ) as Record<string, number>;
+}
+
+function normalizeCombat(input: unknown) {
+  const record = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  const attacks = Array.isArray(record.attacks)
+    ? record.attacks.map((attack) => {
+        if (!attack || typeof attack !== 'object') return null;
+        const attackRecord = attack as Record<string, unknown>;
+        return {
+          name: String(attackRecord.name ?? '').trim(),
+          skill: typeof attackRecord.skill === 'number' && Number.isFinite(attackRecord.skill) ? attackRecord.skill : null,
+          damage: String(attackRecord.damage ?? '').trim(),
+          rof: typeof attackRecord.rof === 'number' && Number.isFinite(attackRecord.rof) ? attackRecord.rof : null,
+        };
+      }).filter(Boolean)
+    : [];
+  return {
+    hp: typeof record.hp === 'number' && Number.isFinite(record.hp) ? record.hp : null,
+    armor: typeof record.armor === 'number' && Number.isFinite(record.armor) ? record.armor : null,
+    mov: typeof record.mov === 'number' && Number.isFinite(record.mov) ? record.mov : null,
+    build: typeof record.build === 'number' && Number.isFinite(record.build) ? record.build : null,
+    attacks,
+  };
+}
+
+function normalizeRelationships(input: unknown) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      const targetId = String(record.targetId ?? '').trim();
+      return {
+        targetId,
+        relation: String(record.relation ?? 'unknown').trim() || 'unknown',
+        notes: String(record.notes ?? '').trim(),
+      };
+    })
+    .filter((item): item is { targetId: string; relation: string; notes: string } => Boolean(item));
 }

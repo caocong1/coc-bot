@@ -22,6 +22,7 @@ import { SessionState, buildPrivateVisibility, type PendingRoll, type SceneInfo,
 import { CharacterStore } from '../../commands/sheet/CharacterStore';
 import type { Character } from '@shared/types/Character';
 import { getSkillDisplayName, resolveSkillKey } from '@shared/coc7/skillNames';
+import type { SessionEntityOverlay, SessionItemOverlay } from '@shared/types/ScenarioAssets';
 
 // ─── 公开类型 ─────────────────────────────────────────────────────────────────
 
@@ -107,6 +108,27 @@ interface PendingRollDirective {
   skillName: string;
   difficulty: 'normal' | 'hard' | 'extreme';
   reason: string;
+}
+
+interface EntityDirective {
+  name: string;
+  type: 'npc' | 'creature';
+  identity: string;
+  dangerLevel: string;
+}
+
+interface ItemDirective {
+  name: string;
+  category: string;
+  description: string;
+  owner: string;
+}
+
+interface ItemChangeDirective {
+  itemName: string;
+  owner: string;
+  location: string;
+  stateNotes: string;
 }
 
 // ─── 实现 ─────────────────────────────────────────────────────────────────────
@@ -249,7 +271,10 @@ export class KPPipeline {
     const { cleanText: withoutPrivate, directives: privateDirectives } = extractPrivateDirectives(draftNoImg);
     const { cleanText: withoutScene, directives: sceneDirectives } = extractSceneDirectives(withoutPrivate);
     const { cleanText: withoutClue, directives: clueDirectives } = extractClueDirectives(withoutScene);
-    const { cleanText: draftClean, timeMarkers } = extractTimeMarkers(withoutClue);
+    const { cleanText: withoutEntity, directives: entityDirectives } = extractEntityDirectives(withoutClue);
+    const { cleanText: withoutItem, directives: itemDirectives } = extractItemDirectives(withoutEntity);
+    const { cleanText: withoutItemChange, directives: itemChangeDirectives } = extractItemChangeDirectives(withoutItem);
+    const { cleanText: draftClean, timeMarkers } = extractTimeMarkers(withoutItemChange);
 
     // 8. 守密人过滤（仅过滤文字部分）
     const t1 = Date.now();
@@ -313,6 +338,9 @@ export class KPPipeline {
 
     this.applySceneDirectives(sceneDirectives, channelId);
     this.applyClueDirectives(clueDirectives, input.userId, channelId);
+    this.applyEntityDirectives(entityDirectives, channelId, input.userId);
+    this.applyItemDirectives(itemDirectives, channelId, input.userId);
+    this.applyItemChangeDirectives(itemChangeDirectives, channelId, input.userId);
     this.applyPendingRollDirectives(finalText, input, characters, channelId);
     for (const privateMessage of privateMessages) {
       this.applyPendingRollDirectives(privateMessage.text, {
@@ -670,6 +698,80 @@ export class KPPipeline {
     }
   }
 
+  private applyEntityDirectives(directives: EntityDirective[], channelId: string, actorId: number): void {
+    const directive = directives[0];
+    if (!directive) return;
+    const entity: SessionEntityOverlay = {
+      id: `overlay-entity-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      moduleId: null,
+      source: 'session',
+      type: directive.type,
+      name: directive.name,
+      identity: directive.identity,
+      motivation: '',
+      publicImage: directive.identity,
+      hiddenTruth: '',
+      speakingStyle: '',
+      faction: '',
+      dangerLevel: directive.dangerLevel,
+      defaultLocation: this.state.currentScene?.name ?? '',
+      attributes: {},
+      skills: {},
+      combat: { hp: null, armor: null, mov: null, build: null, attacks: [] },
+      freeText: '',
+      relationships: [],
+      isKey: true,
+      reviewStatus: 'approved',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      channelId,
+      visibility: 'public',
+    };
+    this.state.registerEntity(entity, { channelId, actorId });
+  }
+
+  private applyItemDirectives(directives: ItemDirective[], channelId: string, actorId: number): void {
+    const directive = directives[0];
+    if (!directive) return;
+    const item: SessionItemOverlay = {
+      id: `overlay-item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      moduleId: null,
+      source: 'session',
+      name: directive.name,
+      category: directive.category,
+      publicDescription: directive.description,
+      kpNotes: '',
+      defaultOwner: directive.owner,
+      defaultLocation: this.state.currentScene?.name ?? '',
+      visibilityCondition: '',
+      usage: '',
+      isKey: true,
+      reviewStatus: 'approved',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      currentOwner: directive.owner,
+      currentLocation: this.state.currentScene?.name ?? '',
+      stateNotes: '',
+      channelId,
+      visibility: 'public',
+    };
+    this.state.registerItem(item, { channelId, actorId });
+  }
+
+  private applyItemChangeDirectives(directives: ItemChangeDirective[], channelId: string, actorId: number): void {
+    for (const directive of directives) {
+      this.state.applyItemChange(
+        {
+          itemName: directive.itemName,
+          owner: directive.owner,
+          location: directive.location,
+          stateNotes: directive.stateNotes,
+        },
+        { channelId, actorId },
+      );
+    }
+  }
+
   private applyPendingRollDirectives(
     text: string,
     input: Pick<KPInput, 'userId' | 'displayName'>,
@@ -892,6 +994,48 @@ function extractClueDirectives(text: string): { cleanText: string; directives: C
     directives.push({
       title: title.trim(),
       playerDescription: description.trim(),
+    });
+    return '';
+  }).trim();
+  return { cleanText, directives };
+}
+
+function extractEntityDirectives(text: string): { cleanText: string; directives: EntityDirective[] } {
+  const directives: EntityDirective[] = [];
+  const cleanText = text.replace(/\[REGISTER_ENTITY:([^|\]]+)\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]/g, (_, name: string, type: string, identity: string, dangerLevel: string) => {
+    directives.push({
+      name: name.trim(),
+      type: type.trim().toLowerCase() === 'creature' ? 'creature' : 'npc',
+      identity: identity.trim(),
+      dangerLevel: dangerLevel.trim(),
+    });
+    return '';
+  }).trim();
+  return { cleanText, directives: directives.slice(0, 1) };
+}
+
+function extractItemDirectives(text: string): { cleanText: string; directives: ItemDirective[] } {
+  const directives: ItemDirective[] = [];
+  const cleanText = text.replace(/\[REGISTER_ITEM:([^|\]]+)\|([^|\]]*)\|([^|\]]*)\|([^\]]*)\]/g, (_, name: string, category: string, description: string, owner: string) => {
+    directives.push({
+      name: name.trim(),
+      category: category.trim(),
+      description: description.trim(),
+      owner: owner.trim(),
+    });
+    return '';
+  }).trim();
+  return { cleanText, directives: directives.slice(0, 1) };
+}
+
+function extractItemChangeDirectives(text: string): { cleanText: string; directives: ItemChangeDirective[] } {
+  const directives: ItemChangeDirective[] = [];
+  const cleanText = text.replace(/\[ITEM_CHANGE:([^|\]]+)\|([^|\]]*)\|([^|\]]*)\|([^\]]*)\]/g, (_, itemName: string, owner: string, location: string, stateNotes: string) => {
+    directives.push({
+      itemName: itemName.trim(),
+      owner: owner.trim(),
+      location: location.trim(),
+      stateNotes: stateNotes.trim(),
     });
     return '';
   }).trim();

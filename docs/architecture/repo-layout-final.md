@@ -12,10 +12,14 @@ coc-bot/
 │   │   ├── PlayerRoutes.ts      # /api/player/* （玩家端 + token 认证）
 │   │   └── AdminRoutes.ts       # /api/admin/* （管理端 + secret 认证）
 │   │
+│   ├── storage/
+│   │   ├── Database.ts          # SQLite schema / 迁移
+│   │   └── ModuleAssetStore.ts  # 模组资产与规则包的行映射 / 查询辅助
+│   │
 │   ├── runtime/                 # 消息路由、模式切换、Campaign 管理
 │   │   ├── ModeResolver.ts
 │   │   ├── CampaignHandler.ts   # Campaign 模式处理（焦点频道 + per-channel 队列 + 成员过滤）
-│   │   ├── SessionState.ts      # 会话状态管理（kp_events 回放 + SceneChannel + 派生摘要）
+│   │   ├── SessionState.ts      # 会话状态管理（kp_events 回放 + SceneChannel + 模组资产 overlay）
 │   │   ├── MessageRouter.ts
 │   │   └── VisibilityPlanner.ts
 │   │
@@ -48,9 +52,9 @@ coc-bot/
 │   │   │   ├── DimensionDescriptors.ts  # 五维行为描述表（基调/灵活度/引导度/致命度/节奏 × 5 档位）
 │   │   │   └── PromptComposer.ts
 │   │   ├── context/
-│   │   │   └── ContextBuilder.ts        # 7 层上下文组装（按频道/视角过滤）
+│   │   │   └── ContextBuilder.ts        # 7 层上下文组装（含 Layer 1.5 模组规则包 / 结构化资产）
 │   │   └── pipeline/
-│   │       └── KPPipeline.ts            # AI KP 主流水线（生成 + 指令抽取 + guardrail）
+│   │       └── KPPipeline.ts            # AI KP 主流水线（生成 + 指令抽取 + guardrail + overlay）
 │   │
 │   ├── memory/                  # 事件日志、摘要
 │   │   ├── events/
@@ -199,6 +203,7 @@ AI 系统层，负责：
 - `kp_scenes` / `kp_clues` / `kp_messages` / `kp_summaries` / `kp_pending_rolls` — legacy compatibility + cache
 - `kp_templates` — 自定义 KP 人格模板
 - `scenario_modules` / `scenario_module_files` — 模组管理
+- `module_entities` / `module_items` / `module_rule_packs` — 模组资产层（关键 NPC/怪物、关键物品、模组规则包）
 - `campaign_rooms` / `campaign_room_members` — 跑团房间
 - `player_tokens` — 玩家 Web 登录
 - `user_settings` — 用户设置（默认骰/昵称）

@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-15
+
+### Added
+
+- **模组资产层**：新增 `module_entities`、`module_items`、`module_rule_packs` 三张表，支持关键 NPC/怪物、关键物品和模组规则包的结构化存储与审核状态
+- **模组自动提取扩展**：`AdminRoutes` 的模组导入流程拆成元数据、资产候选、规则包候选三类独立 AI 提取；失败互不阻塞，候选默认进入 `draft`
+- **上下文注入升级**：`ContextBuilder` 新增 Layer 1.5 模组规则包、Layer 2 场景实体摘要、Layer 5 关键实体/物品详情注入
+- **运行时 overlay**：`SessionState` / `KPPipeline` 新增 `register_entity`、`register_item`、`item_change` 事件，支持 session-local 的临时 NPC/物品和物品归属追踪
+- **Admin API 扩展**：新增模组实体、物品、规则包的列表/详情/更新/审核状态接口，`/admin/modules/:id` 详情返回结构化资产和 `extractionDraftStatus`
+
+### Verified
+
+- 通过 `bun x tsc -p c:\\Users\\sorawatcher\\workspace\\coc-bot\\tsconfig.json --noEmit`
+- 通过 `web` 包内 `bun run build`
+
 ## [0.6.0] - 2026-03-15
 
 ### Added

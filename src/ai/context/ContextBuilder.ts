@@ -117,24 +117,28 @@ export class ContextBuilder {
       : options.characters;
 
     const layer1 = this.buildKPPersonality(template, options.customPrompts);
+    const layer1_5 = this.buildModuleRulePack(snapshot);
     const layer2 = this.buildSceneState(snapshot, options.scenarioImages);
     const layer3 = this.buildCharacterSheets(channelCharacters);
     const layer4 = this.buildRuleContext(options.ruleChunks ?? []);
-    const layer5 = (options.sceneSegments && options.sceneSegments.length > 0 && options.currentSegmentId)
+    const baseLayer5 = (options.sceneSegments && options.sceneSegments.length > 0 && options.currentSegmentId)
       ? this.buildTieredScenario(options.sceneSegments, options.currentSegmentId, options.scenarioLabel)
       : options.scenarioFullText
         ? this.buildScenarioFullText(options.scenarioFullText, options.scenarioLabel)
         : this.buildScenarioContext(options.scenarioChunks ?? []);
+    const layer5Assets = this.buildScenarioAssetDetails(snapshot);
+    const layer5 = [baseLayer5, layer5Assets].filter(Boolean).join('\n\n');
     const layer6 = this.buildSummaries(snapshot.summaries);
 
     layerStats['1_personality'] = layer1.length;
+    layerStats['1_5_rule_pack'] = layer1_5.length;
     layerStats['2_scene'] = layer2.length;
     layerStats['3_characters'] = layer3.length;
     layerStats['4_rules_rag'] = layer4.length;
     layerStats['5_scenario_rag'] = layer5.length;
     layerStats['6_summaries'] = layer6.length;
 
-    const sections = [layer1, layer2, layer3, layer4, layer5, layer6].filter(Boolean);
+    const sections = [layer1, layer1_5, layer2, layer3, layer4, layer5, layer6].filter(Boolean);
     const systemPrompt = sections.join('\n\n---\n\n');
 
     // 层 7：近期原文对话
@@ -277,6 +281,9 @@ ${this.buildBehavioralProfile(template)}
 - 若需要更新当前场景，在回复末尾追加 \`[SET_SCENE:场景名|场景描述|NPC1,NPC2]\`
 - 若本轮形成了新的玩家已知线索，在回复末尾追加 \`[DISCOVER_CLUE:标题|玩家可见描述]\`
 - 若只有特定调查员应私下得知某条信息，在回复末尾追加 \`[PRIVATE_TO:调查员名1,调查员名2]私密内容[/PRIVATE_TO]\`
+- 若本轮引入了新的临时 NPC / 怪物，在回复末尾追加 \`[REGISTER_ENTITY:名称|npc或creature|身份|危险等级]\`
+- 若本轮引入了新的临时物品，在回复末尾追加 \`[REGISTER_ITEM:名称|类别|公开描述|归属]\`
+- 若物品的归属、位置或状态发生变化，在回复末尾追加 \`[ITEM_CHANGE:名称|归属|位置|状态说明]\`
 - 这些指令只用于系统抽取，不要在正文中解释它们
 - 少用连续省略号、感叹号和过长修辞句——QQ 群聊里节奏比文风更重要`;
   }
@@ -318,6 +325,24 @@ ${this.buildBehavioralProfile(template)}
       if (scene.description) parts.push(`**描述**：${scene.description}`);
       if (scene.activeNpcs.length > 0) {
         parts.push(`**在场 NPC**：${scene.activeNpcs.join('、')}`);
+      }
+      if (snapshot.activeEntities.length > 0) {
+        parts.push('**当前场景活跃实体**：');
+        for (const entity of snapshot.activeEntities) {
+          const summary = [entity.identity, entity.dangerLevel && `危险度：${entity.dangerLevel}`]
+            .filter(Boolean)
+            .join('；');
+          parts.push(`- ${entity.name}${summary ? `：${summary}` : ''}`);
+        }
+      }
+      if (snapshot.sceneItems.length > 0) {
+        parts.push('**当前场景可互动物品**：');
+        for (const item of snapshot.sceneItems) {
+          const summary = [item.category, item.currentOwner && `当前归属：${item.currentOwner}`]
+            .filter(Boolean)
+            .join('；');
+          parts.push(`- ${item.name}${summary ? `：${summary}` : ''}`);
+        }
       }
     } else {
       parts.push('（尚未设置当前场景）');
@@ -363,6 +388,21 @@ ${this.buildBehavioralProfile(template)}
     }
 
     return parts.join('\n');
+  }
+
+  private buildModuleRulePack(snapshot: SessionSnapshot): string {
+    const rulePack = snapshot.moduleRulePack;
+    if (!rulePack) return '';
+
+    const lines: string[] = ['# 模组专属规则包'];
+    if (rulePack.sanRules) lines.push(`**理智规则**：${rulePack.sanRules}`);
+    if (rulePack.combatRules) lines.push(`**战斗规则**：${rulePack.combatRules}`);
+    if (rulePack.deathRules) lines.push(`**死亡规则**：${rulePack.deathRules}`);
+    if (rulePack.timeRules) lines.push(`**时间规则**：${rulePack.timeRules}`);
+    if (rulePack.revelationRules) lines.push(`**信息揭示规则**：${rulePack.revelationRules}`);
+    if (rulePack.forbiddenAssumptions) lines.push(`**禁止默认假设**：${rulePack.forbiddenAssumptions}`);
+    if (rulePack.freeText) lines.push(`**补充设定**：${rulePack.freeText}`);
+    return lines.join('\n');
   }
 
   // ─── 层 3：角色卡 ───────────────────────────────────────────────────────────
@@ -508,6 +548,58 @@ ${this.buildBehavioralProfile(template)}
     }
 
     return lines.join('\n');
+  }
+
+  private buildScenarioAssetDetails(snapshot: SessionSnapshot): string {
+    const lines: string[] = [];
+
+    if (snapshot.entityDetails.length > 0) {
+      lines.push('# 当前场景关键实体详情');
+      for (const entity of snapshot.entityDetails) {
+        lines.push(`## ${entity.name}`);
+        if (entity.identity) lines.push(`身份：${entity.identity}`);
+        if (entity.motivation) lines.push(`动机：${entity.motivation}`);
+        if (entity.publicImage) lines.push(`公开形象：${entity.publicImage}`);
+        if (entity.hiddenTruth) lines.push(`隐藏真相：${entity.hiddenTruth}`);
+        if (entity.speakingStyle) lines.push(`说话风格：${entity.speakingStyle}`);
+        if (entity.faction) lines.push(`阵营：${entity.faction}`);
+        if (entity.dangerLevel) lines.push(`危险等级：${entity.dangerLevel}`);
+        if (entity.defaultLocation) lines.push(`默认地点：${entity.defaultLocation}`);
+        const skillEntries = Object.entries(entity.skills).slice(0, 8).map(([key, value]) => `${key}${value}`);
+        if (skillEntries.length > 0) lines.push(`关键技能：${skillEntries.join('、')}`);
+        const combatParts = [
+          entity.combat.hp !== null ? `HP ${entity.combat.hp}` : '',
+          entity.combat.armor !== null ? `护甲 ${entity.combat.armor}` : '',
+          entity.combat.mov !== null ? `MOV ${entity.combat.mov}` : '',
+          entity.combat.build !== null ? `Build ${entity.combat.build}` : '',
+        ].filter(Boolean);
+        if (combatParts.length > 0) lines.push(`战斗概要：${combatParts.join('；')}`);
+        if (entity.combat.attacks.length > 0) {
+          lines.push(`攻击：${entity.combat.attacks.map((attack) => `${attack.name}(${attack.skill ?? '?'} / ${attack.damage}${attack.rof !== null ? ` / ROF ${attack.rof}` : ''})`).join('、')}`);
+        }
+        if (entity.freeText) lines.push(`补充：${entity.freeText}`);
+        lines.push('');
+      }
+    }
+
+    if (snapshot.sceneItems.length > 0) {
+      lines.push('# 当前场景关键物品详情');
+      for (const item of snapshot.sceneItems) {
+        const summary = [
+          item.category && `类别：${item.category}`,
+          item.currentOwner && `当前归属：${item.currentOwner}`,
+          item.currentLocation && `当前位置：${item.currentLocation}`,
+          item.visibilityCondition && `可见条件：${item.visibilityCondition}`,
+        ].filter(Boolean);
+        lines.push(`- ${item.name}${summary.length > 0 ? `（${summary.join('；')}）` : ''}`);
+        if (item.publicDescription) lines.push(`  玩家可见：${item.publicDescription}`);
+        if (item.usage) lines.push(`  用途：${item.usage}`);
+        if (item.kpNotes) lines.push(`  KP 备注：${item.kpNotes}`);
+        if (item.stateNotes) lines.push(`  当前状态：${item.stateNotes}`);
+      }
+    }
+
+    return lines.join('\n').trim();
   }
 
   // ─── 层 6：摘要 ─────────────────────────────────────────────────────────────
