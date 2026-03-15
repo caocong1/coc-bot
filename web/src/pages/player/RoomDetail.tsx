@@ -4,8 +4,8 @@ import {
   type CharacterSummary,
   type RoomConstraints,
   type RoomDetail,
-  type RoomRelationType,
   type RoomRelationship,
+  type RoomRelationshipParticipant,
 } from '../../api';
 import {
   RoomHeaderHero,
@@ -38,9 +38,10 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
   const [err, setErr] = createSignal('');
   const [showDeleteConfirm, setShowDeleteConfirm] = createSignal(false);
   const [roomTotalPointsText, setRoomTotalPointsText] = createSignal('');
-  const [relationTarget, setRelationTarget] = createSignal('');
-  const [relationType, setRelationType] = createSignal<RoomRelationType>('acquainted');
+  const [relationParticipantIds, setRelationParticipantIds] = createSignal<string[]>([]);
+  const [relationLabel, setRelationLabel] = createSignal('');
   const [relationNotes, setRelationNotes] = createSignal('');
+  const [editingRelationId, setEditingRelationId] = createSignal<string | null>(null);
 
   createEffect(() => {
     const queryTab = new URLSearchParams(location.search).get('tab');
@@ -97,6 +98,19 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
   const selectedCharacterIssues = createMemo(() => {
     const character = selectedCharacter();
     return character ? getCharacterFitIssues(character, room()?.constraints) : [];
+  });
+  const boundParticipants = createMemo<RoomRelationshipParticipant[]>(() =>
+    (room()?.members ?? [])
+      .filter((member) => member.character)
+      .map((member) => ({
+        characterId: member.character!.id,
+        characterName: member.character!.name,
+        qqId: member.qqId,
+      })),
+  );
+  const canEditRelationships = createMemo(() => {
+    const status = room()?.status;
+    return status === 'waiting' || status === 'reviewing';
   });
 
   const join = async () => {
@@ -175,23 +189,33 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
     }
   };
 
+  const resetRelationshipForm = () => {
+    setEditingRelationId(null);
+    setRelationParticipantIds([]);
+    setRelationLabel('');
+    setRelationNotes('');
+  };
+
   const saveRelationship = async () => {
-    const targetQqId = Number(relationTarget().trim());
-    if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
-      setErr('请输入有效的目标 QQ 号');
-      return;
-    }
     setSavingRelation(true);
     setErr('');
     setMsg('');
     try {
-      await playerApi.setRoomRelationship(props.id, {
-        targetQqId,
-        relationType: relationType(),
-        notes: relationNotes().trim(),
-      });
-      setMsg('已更新人物关系');
-      setRelationNotes('');
+      if (editingRelationId()) {
+        await playerApi.updateRoomRelationship(props.id, editingRelationId()!, {
+          participantCharacterIds: relationParticipantIds(),
+          relationLabel: relationLabel().trim(),
+          notes: relationNotes().trim(),
+        });
+      } else {
+        await playerApi.createRoomRelationship(props.id, {
+          participantCharacterIds: relationParticipantIds(),
+          relationLabel: relationLabel().trim(),
+          notes: relationNotes().trim(),
+        });
+      }
+      setMsg(editingRelationId() ? '已更新人物关系' : '已新增人物关系');
+      resetRelationshipForm();
       await refetch();
     } catch (e) {
       setErr((e as Error).message);
@@ -200,15 +224,21 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
     }
   };
 
+  const startEditRelationship = (relation: RoomRelationship) => {
+    setEditingRelationId(relation.id);
+    setRelationParticipantIds(relation.participants.map((participant) => participant.characterId));
+    setRelationLabel(relation.relationLabel);
+    setRelationNotes(relation.notes);
+  };
+
   const clearRelationship = async (relation: RoomRelationship) => {
-    const myQqId = me()?.qqId;
-    const target = myQqId && relation.userA === myQqId ? relation.userB : relation.userA;
     setSavingRelation(true);
     setErr('');
     setMsg('');
     try {
-      await playerApi.deleteRoomRelationship(props.id, target);
+      await playerApi.deleteRoomRelationship(props.id, relation.id);
       setMsg('已清除人物关系');
+      if (editingRelationId() === relation.id) resetRelationshipForm();
       await refetch();
     } catch (e) {
       setErr((e as Error).message);
@@ -246,11 +276,6 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
     }
   };
 
-  const canClearRelationship = (relation: RoomRelationship) => {
-    const myQqId = me()?.qqId;
-    return Boolean(myQqId && (relation.userA === myQqId || relation.userB === myQqId));
-  };
-
   return (
     <Show when={!room.loading} fallback={<p class="text-text-dim">加载中...</p>}>
       <Show when={room()} fallback={<p class="text-danger text-[0.88rem] my-2">房间不存在或无权访问</p>}>
@@ -265,38 +290,8 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
               readyCount={readyCount()}
               groupId={r().groupId}
               identityLabel={r().isCreator ? '房主' : '成员'}
-              description="一个房间就是一场跑团。你可以在这里完成组队、绑卡、审卡、查看消息历史和设定人物关系，不需要再跳到别的对象里看跑团记录。"
-              footerNote="房间本身就是这次跑团的唯一入口。这里的选卡和关系只影响当前房间；角色卡本身仍然可以在别的房间复用。"
-              actions={
-                <>
-                  <Show when={r().status === 'reviewing'}>
-                    <button
-                      class="inline-block px-5 py-2 bg-accent text-white border border-transparent rounded-md text-[0.9rem] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-85 transition-all duration-200 active:scale-95"
-                      onClick={readyRoom}
-                      disabled={readying()}
-                    >
-                      {readying() ? '确认中...' : '✅ 确认准备'}
-                    </button>
-                    <button
-                      class="inline-block px-5 py-2 bg-white/[0.08] text-text border border-white/[0.08] rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:bg-white/[0.12] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
-                      onClick={cancelReviewRoom}
-                      disabled={cancelling()}
-                    >
-                      {cancelling() ? '取消中...' : '取消审卡'}
-                    </button>
-                  </Show>
-                  <Show when={r().isCreator && (r().status === 'waiting' || r().status === 'reviewing')}>
-                    <button class="px-3 py-1.5 bg-danger text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95" onClick={() => deleteRoom()} disabled={deleting()}>
-                      删除
-                    </button>
-                  </Show>
-                  <Show when={r().status === 'waiting' && !isMember()}>
-                    <button class="inline-block px-5 py-2 bg-white/[0.08] text-text border border-white/[0.08] rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:bg-white/[0.12] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" onClick={join} disabled={joining()}>
-                      {joining() ? '加入中...' : '加入房间'}
-                    </button>
-                  </Show>
-                </>
-              }
+              description=""
+              footerNote=""
             />
 
             <Show when={msg()}>
@@ -347,16 +342,21 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
               <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
                 <RoomRelationshipsPanel
                   relationships={r().relationships}
-                  relationTarget={relationTarget()}
-                  onRelationTargetChange={setRelationTarget}
-                  relationType={relationType()}
-                  onRelationTypeChange={setRelationType}
+                  availableParticipants={boundParticipants()}
+                  selectedParticipantIds={relationParticipantIds()}
+                  onSelectedParticipantIdsChange={setRelationParticipantIds}
+                  relationLabel={relationLabel()}
+                  onRelationLabelChange={setRelationLabel}
                   relationNotes={relationNotes()}
                   onRelationNotesChange={setRelationNotes}
+                  editingRelationId={editingRelationId()}
+                  onEdit={startEditRelationship}
+                  onCancelEdit={resetRelationshipForm}
                   onSave={saveRelationship}
-                  onClear={clearRelationship}
-                  canClear={canClearRelationship}
+                  onDelete={clearRelationship}
                   saving={savingRelation()}
+                  canEdit={canEditRelationships()}
+                  readOnlyReason="跑团开始后人物关系只读；如需调整，请在开团前完成。"
                   helperText="开场与中途推进会优先参考这里的已确认人物关系。玩家与房主都可以在房间内维护这些关系。"
                 />
                 <RoomConceptPanel room={r()} />

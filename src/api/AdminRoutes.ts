@@ -29,6 +29,7 @@ import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
 import { deliverCampaignOutput, normalizeCampaignTextParts } from '../runtime/CampaignOutputDelivery';
 import { addMinutesToTime } from '../runtime/SessionState';
 import { calculatePrimaryAttributeTotal, normalizeOptionalTotalPoints } from '@shared/coc7/attributeTotals';
+import { isRiskyModuleDescription, summarizeModuleDescriptionForPlayers } from '@shared/scenario/moduleDescription';
 import type {
   ModuleRulePack,
   ReviewStatus,
@@ -44,10 +45,10 @@ import {
   summarizeModuleDraftStatus,
 } from '../storage/ModuleAssetStore';
 import {
+  createRoomRelationship,
   deleteRoomRelationship,
-  isRoomRelationType,
   listRoomRelationships,
-  upsertRoomRelationship,
+  updateRoomRelationship,
 } from '../storage/RoomDirectorStore';
 
 type KnowledgeCategory = 'rules' | 'scenario' | 'keeper_secret';
@@ -225,9 +226,12 @@ export class AdminRoutes {
       if (method === 'POST' && segments[1] && segments[2] === 'cancel-review') return this.adminCancelReview(segments[1]);
       if (method === 'PATCH' && segments[1] && segments[2] === 'kp-settings') return this.updateRoomKpSettings(segments[1], req);
       if (method === 'GET' && segments[1] && segments[2] === 'relationships') return this.getAdminRoomRelationships(segments[1]);
-      if (method === 'PUT' && segments[1] && segments[2] === 'relationships') return this.upsertAdminRoomRelationship(segments[1], req);
+      if (method === 'POST' && segments[1] && segments[2] === 'relationships') return this.createAdminRoomRelationship(segments[1], req);
+      if (method === 'PUT' && segments[1] && segments[2] === 'relationships' && segments[3]) {
+        return this.updateAdminRoomRelationship(segments[1], segments[3], req);
+      }
       if (method === 'DELETE' && segments[1] && segments[2] === 'relationships' && segments[3]) {
-        return this.deleteAdminRoomRelationship(segments[1], segments[3], req);
+        return this.deleteAdminRoomRelationship(segments[1], segments[3]);
       }
     }
 
@@ -1119,9 +1123,11 @@ export class AdminRoutes {
     return Response.json(listRoomRelationships(this.db, roomId));
   }
 
-  private async upsertAdminRoomRelationship(roomId: string, req: Request): Promise<Response> {
+  private async createAdminRoomRelationship(roomId: string, req: Request): Promise<Response> {
     const room = this.db.query<{ id: string }, string>('SELECT id FROM campaign_rooms WHERE id = ?').get(roomId);
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    const editable = this.requireEditableRoomRelationships(roomId);
+    if (editable) return editable;
 
     let body: Record<string, unknown>;
     try {
@@ -1130,23 +1136,14 @@ export class AdminRoutes {
       return Response.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 
-    const sourceQqId = Number(body.sourceQqId);
-    const targetQqId = Number(body.targetQqId);
-    const relationType = String(body.relationType ?? '');
-    const notes = typeof body.notes === 'string' ? body.notes : '';
-    if (!Number.isFinite(sourceQqId) || sourceQqId <= 0 || !Number.isFinite(targetQqId) || targetQqId <= 0) {
-      return Response.json({ error: 'sourceQqId/targetQqId 无效' }, { status: 400 });
-    }
-    if (!isRoomRelationType(relationType)) {
-      return Response.json({ error: 'relationType 无效' }, { status: 400 });
-    }
-
-    return Response.json(upsertRoomRelationship(this.db, roomId, sourceQqId, targetQqId, relationType, notes));
+    return this.saveAdminRoomRelationship(roomId, body, null);
   }
 
-  private async deleteAdminRoomRelationship(roomId: string, targetRaw: string, req: Request): Promise<Response> {
+  private async updateAdminRoomRelationship(roomId: string, relationId: string, req: Request): Promise<Response> {
     const room = this.db.query<{ id: string }, string>('SELECT id FROM campaign_rooms WHERE id = ?').get(roomId);
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    const editable = this.requireEditableRoomRelationships(roomId);
+    if (editable) return editable;
 
     let body: Record<string, unknown>;
     try {
@@ -1155,14 +1152,65 @@ export class AdminRoutes {
       return Response.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 
-    const sourceQqId = Number(body.sourceQqId);
-    const targetQqId = Number(targetRaw);
-    if (!Number.isFinite(sourceQqId) || sourceQqId <= 0 || !Number.isFinite(targetQqId) || targetQqId <= 0) {
-      return Response.json({ error: 'sourceQqId/targetQqId 无效' }, { status: 400 });
+    return this.saveAdminRoomRelationship(roomId, body, relationId);
+  }
+
+  private deleteAdminRoomRelationship(roomId: string, relationId: string): Response {
+    const room = this.db.query<{ id: string }, string>('SELECT id FROM campaign_rooms WHERE id = ?').get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    const editable = this.requireEditableRoomRelationships(roomId);
+    if (editable) return editable;
+
+    const relation = listRoomRelationships(this.db, roomId).find((item) => item.id === relationId);
+    if (!relation) {
+      return Response.json({ error: '人物关系不存在' }, { status: 404 });
     }
 
-    deleteRoomRelationship(this.db, roomId, sourceQqId, targetQqId);
+    deleteRoomRelationship(this.db, roomId, relationId);
     return Response.json({ ok: true });
+  }
+
+  private requireEditableRoomRelationships(roomId: string): Response | null {
+    const room = this.db.query<{ status: string }, [string]>(
+      'SELECT status FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    if (room.status !== 'waiting' && room.status !== 'reviewing') {
+      return Response.json({ error: '跑团开始后人物关系只读' }, { status: 409 });
+    }
+    return null;
+  }
+
+  private saveAdminRoomRelationship(
+    roomId: string,
+    body: Record<string, unknown>,
+    relationId: string | null,
+  ): Response {
+    const participantCharacterIds = Array.isArray(body.participantCharacterIds)
+      ? body.participantCharacterIds.map((value) => String(value))
+      : [];
+    const relationLabel = typeof body.relationLabel === 'string' ? body.relationLabel : '';
+    const notes = typeof body.notes === 'string' ? body.notes : '';
+
+    try {
+      const relation = relationId
+        ? updateRoomRelationship(this.db, roomId, relationId, {
+          participantCharacterIds,
+          relationLabel,
+          notes,
+          createdByQqId: null,
+        })
+        : createRoomRelationship(this.db, roomId, {
+          participantCharacterIds,
+          relationLabel,
+          notes,
+          createdByQqId: null,
+        });
+      return Response.json(relation);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '人物关系保存失败';
+      return Response.json({ error: message }, { status: message.includes('不存在') ? 404 : 400 });
+    }
   }
 
   private getAdminRoomRuntime(sessionId: string | null) {
@@ -1270,6 +1318,12 @@ export class AdminRoutes {
     ).get(roomId);
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
 
+    this.db.run(
+      'DELETE FROM campaign_room_relation_participants WHERE relation_id IN (SELECT id FROM campaign_room_relation_groups WHERE room_id = ?)',
+      [roomId],
+    );
+    this.db.run('DELETE FROM campaign_room_relation_groups WHERE room_id = ?', [roomId]);
+    this.db.run('DELETE FROM campaign_room_relationships WHERE room_id = ?', [roomId]);
     this.db.run('DELETE FROM campaign_room_members WHERE room_id = ?', [roomId]);
     this.db.run('DELETE FROM campaign_rooms WHERE id = ?', [roomId]);
     return Response.json({ ok: true });
@@ -1734,7 +1788,7 @@ export class AdminRoutes {
         const text = await this.loadModuleImportText(docPath);
         if (text && text.length >= 50) {
           try {
-            const metadata = await this.extractModuleMetadataDraft(text.slice(0, 6000));
+            const metadata = await this.extractModuleMetadataDraft(this.buildModuleMetadataExcerpt(text));
             this.applyModuleMetadataDraft(moduleId, mod, metadata);
           } catch (err) {
             console.error('[AutoFill] 元数据提取失败:', err);
@@ -1963,22 +2017,75 @@ export class AdminRoutes {
   }
 
   private async extractModuleMetadataDraft(excerpt: string): Promise<ModuleMetadataDraft> {
-    return this.extractJsonWithAi<ModuleMetadataDraft>(`你是一个 CoC（克苏鲁的呼唤）跑团模组分析专家。阅读以下模组文本的开头部分，提取关键信息。
+    const draft = await this.extractJsonWithAi<ModuleMetadataDraft>(`你是一个 CoC（克苏鲁的呼唤）跑团模组分析专家。阅读以下模组文本的开头部分，提取关键信息。
 
 请以严格 JSON 格式输出（不要输出其他内容）：
 { 
   "name": "模组名称",
-  "description": "3-5句简明剧情简介，供玩家阅读，不要剧透关键情节和结局",
+  "description": "1句玩家可见开场钩子，只写最初邀请、委托、怪事或调查动机，不要剧透",
   "era": "1920s 或 现代 或 其他时代描述",
   "allowedOccupations": ["适合的职业1", "职业2"],
   "totalPoints": 460
 }
 
 规则：
-- description 必须玩家可见，不剧透
+- description 只能描述玩家在模组一开始就会知道的内容
+- description 只能写 1 句，尽量控制在 30-70 个中文字符
+- description 禁止提及：真正身份、幕后黑手、怪物/实体、神话存在、仪式、时间循环、结局、终局、调查中后段才会到达的地点、调查后才会发现的事实
+- 如果拿不准，宁可更模糊，只保留“为什么会卷入这件事”
 - allowedOccupations 没有限制时输出 []
 - totalPoints 没有明确要求时输出 null
 - 只输出 JSON`, excerpt);
+
+    draft.description = await this.ensurePlayerSafeModuleDescription(excerpt, draft.description);
+    return draft;
+  }
+
+  private buildModuleMetadataExcerpt(text: string): string {
+    return text.slice(0, 3200);
+  }
+
+  private async ensurePlayerSafeModuleDescription(
+    excerpt: string,
+    description: string | undefined,
+  ): Promise<string | undefined> {
+    const normalized = summarizeModuleDescriptionForPlayers(description);
+    if (description && !isRiskyModuleDescription(description) && normalized.length >= 24) {
+      return normalized;
+    }
+
+    try {
+      const rewritten = await this.rewriteSpoilerSafeModuleDescription(excerpt);
+      const safe = summarizeModuleDescriptionForPlayers(rewritten);
+      if (safe) return safe;
+    } catch (err) {
+      console.warn('[AutoFill] 玩家简介重写失败:', err);
+    }
+
+    return normalized || undefined;
+  }
+
+  private async rewriteSpoilerSafeModuleDescription(excerpt: string): Promise<string> {
+    const aiClient = this.aiClient;
+    if (!aiClient) return '';
+    const result = await aiClient.chat('qwen3.5-flash', [
+      {
+        role: 'system',
+        content: `你是 CoC 模组招募文案助手。请根据模组开头文本，写一个“玩家可见、不剧透”的开场钩子。
+
+要求：
+- 只写 1 句中文
+- 只允许描述：最初邀请/委托、最开始的异常、调查员为什么会被卷入
+- 禁止提及：真正身份、幕后黑手、怪物/实体、神话存在、仪式、时间循环、最终地点、调查结论、终局风险
+- 风格要像玩家招募简介，不像剧情回顾
+- 只输出简介正文，不要加引号、标题、编号或解释`,
+      },
+      { role: 'user', content: excerpt.slice(0, 2200) },
+    ]);
+    return result
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .replace(/```[\s\S]*?```/g, '')
+      .trim();
   }
 
   private async extractModuleAssetsDraft(excerpt: string): Promise<ModuleAssetsDraft> {

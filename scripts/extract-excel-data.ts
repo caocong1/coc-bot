@@ -5,6 +5,10 @@
 import * as XLSX from 'xlsx';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import {
+  sanitizeArmorReferenceEntries,
+  sanitizeVehicleReferenceEntries,
+} from '../src/shared/reference/referenceDataSanitizer';
 
 const EXCEL_PATH = join(__dirname, '../../[充实车卡版本]空白卡.xlsx');
 const OUT_DIR = join(__dirname, '../data/reference');
@@ -81,7 +85,7 @@ function extractArmorAndVehicles() {
       price: clean(r[9]),
     });
   }
-  writeJson('armor.json', armor);
+  writeJson('armor.json', sanitizeArmorReferenceEntries(armor));
 
   // Vehicles: cols 17-27 (R-AB)
   // row0 headers: 载具类型(17), 技能(18), 移动力MOV(19), 体格Build(20), 乘客护甲(21), 乘客(22), 可驾驶体格(23), 可乘坐体格(24), 常见时代(25), 类型(26), 注释(27)
@@ -105,7 +109,7 @@ function extractArmorAndVehicles() {
       notes: clean(r[27]) || undefined,
     });
   }
-  writeJson('vehicles.json', vehicles);
+  writeJson('vehicles.json', sanitizeVehicleReferenceEntries(vehicles));
 }
 
 // ─── 3. 疯狂附表（恐惧症 + 狂躁症 D100 表）───

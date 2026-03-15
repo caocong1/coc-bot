@@ -34,6 +34,35 @@
 | D4 | 检查开场事件类型 | `opening_plan` / `director_marker` / `director_seed_resolved` / `director_cue` 已加入 `kp_events` 类型集 | ✅ | 通过 `SessionState` 类型与回放逻辑检查 |
 | D5 | 检查开场生成链路 | `OpeningDirector` 采用 skeleton + beat 文本两步生成，beat 文本并行执行且单 beat 可独立 fallback | ✅ | 代码路径已接入 `CampaignHandler.startSession()` |
 
+### 补充验证：2026-03-15（模组简介防剧透）
+
+| # | 操作 | 期望 | 结果 | 备注 |
+|---|------|------|------|------|
+| M1 | `bun x tsc -p c:\\Users\\sorawatcher\\workspace\\coc-bot\\tsconfig.json --noEmit` | 后端与共享摘要工具通过编译 | ✅ | 覆盖 `AdminRoutes` / `PlayerRoutes` / `ModCommand` / `src/shared/scenario/moduleDescription.ts` |
+| M2 | 检查导入元数据 prompt | 自动简介只允许写单句开场钩子，只保留最初邀请、怪事或调查动机 | ✅ | 禁止提及真正身份、怪物/实体、仪式、时间循环、终局等 |
+| M3 | 检查玩家端展示链路 | `/player/modules` 与 `.mod` 对现有简介做单句防剧透收口 | ✅ | 当前已导入模组无需重导即可看到更克制的简介 |
+
+### 补充验证：2026-03-15（参考资料脏行过滤）
+
+| # | 操作 | 期望 | 结果 | 备注 |
+|---|------|------|------|------|
+| RF1 | `bun x tsc -p c:\\\\\\\\Users\\\\\\\\sorawatcher\\\\\\\\workspace\\\\\\\\coc-bot\\\\\\\\tsconfig.json --noEmit` | 玩家端参考资料接口与 Excel 抽取脚本新增清洗逻辑后仍可通过编译 | ✅ | 覆盖 `PlayerRoutes` / `scripts/extract-excel-data.ts` / `src/shared/reference/referenceDataSanitizer.ts` |
+| RF2 | 请求 `/player/reference/armor` | 防具表不再返回 Excel 底部“术语解释”说明行 | ✅ | 接口层会自动过滤旧 JSON 中的脏行，无需重导 |
+| RF3 | 请求 `/player/reference/vehicles` | 载具表不再返回 Excel 底部术语解释与追逐轮说明行 | ✅ | 抽取脚本也同步补上过滤，后续重建 JSON 不会再写入脏行 |
+
+### 补充验证：2026-03-15（玩家端操作手册）
+
+| # | 操作 | 期望 | 结果 | 备注 |
+|---|------|------|------|------|
+| MNL1 | 检查玩家端 `Manual.tsx` 的房间指令区 | `.room pc` 与“到房间详情页配置人物关系”的说明在 Web 操作手册中可见 | ✅ | 与当前房间关系/绑卡实际流程一致 |
+
+### 补充验证：2026-03-15（角色卡空白 Excel 下载）
+
+| # | 操作 | 期望 | 结果 | 备注 |
+|---|------|------|------|------|
+| XL1 | `bun x tsc -p c:\\\\\\\\Users\\\\\\\\sorawatcher\\\\\\\\workspace\\\\\\\\coc-bot\\\\\\\\tsconfig.json --noEmit` | 新增玩家端模板下载接口和角色卡页下载按钮后仍可通过编译 | ✅ | 覆盖 `PlayerRoutes` / `web/src/api.ts` / `web/src/pages/player/Characters.tsx` |
+| XL2 | 玩家端“我的角色卡”页点击“空白卡下载” | 通过带鉴权的玩家 API 直接下载 `[充实车卡版本]空白卡.xlsx` | ✅ | 后端从仓库根目录读取模板文件，浏览器端用 blob 触发下载 |
+
 ### 补充验证：2026-03-15（筛卡提示 UI）
 
 | # | 操作 | 期望 | 结果 | 备注 |

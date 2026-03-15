@@ -1,16 +1,15 @@
-export type RoomRelationType =
-  | 'heard_of'
-  | 'acquainted'
-  | 'close'
-  | 'bound'
-  | 'secret_tie';
+export interface RoomRelationshipParticipant {
+  characterId: string;
+  characterName: string;
+  qqId: number;
+}
 
 export interface RoomRelationship {
+  id: string;
   roomId: string;
-  userA: number;
-  userB: number;
-  relationType: RoomRelationType;
+  relationLabel: string;
   notes: string;
+  participants: RoomRelationshipParticipant[];
   createdAt: string;
   updatedAt: string;
 }
@@ -30,7 +29,7 @@ export interface RoomDirectorPrefs {
 
 export interface OpeningPlanLink {
   participants: string[];
-  relationType: RoomRelationType;
+  relationLabel: string;
   notes: string;
   source: 'room' | 'assumed';
   reason?: string;

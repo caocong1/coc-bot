@@ -187,7 +187,7 @@
 - [x] PC 名称解析：消息记录中显示角色名（`resolvePcName()`）
 - [x] `.scene list/focus/join/move/merge/clear`
 - [x] 非焦点频道紧急中断提示（建议切换焦点）
-- [x] 开团前关系/偏好输入：`.room pc`、`.room relation list/set/clear`
+- [x] 开团前关系输入：`.room pc` 绑定角色卡，人物关系改在 Web 房间详情页里按当前 PC 卡配置
 
 #### 服务入口（`server/index.ts`）
 

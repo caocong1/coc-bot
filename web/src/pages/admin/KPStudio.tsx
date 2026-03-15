@@ -17,7 +17,6 @@ const KPStudio: Component = () => {
   const [err, setErr] = createSignal('');
   const [msg, setMsg] = createSignal('');
 
-  // 编辑表单状态
   const [editName, setEditName] = createSignal('');
   const [editDesc, setEditDesc] = createSignal('');
   const [editTone, setEditTone] = createSignal(5);
@@ -85,10 +84,12 @@ const KPStudio: Component = () => {
         setMsg(`已创建 (${res.id})`);
       }
       await refetch();
-      // 重新选中
       const list = templates() ?? [];
       const updated = list.find((t) => t.name === editName());
-      if (updated) { setSelected(updated); setEditing(false); }
+      if (updated) {
+        setSelected(updated);
+        setEditing(false);
+      }
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -113,135 +114,235 @@ const KPStudio: Component = () => {
   };
 
   return (
-    <div class="grid grid-cols-[320px_1fr] gap-6">
-      {/* 左侧：模板列表 */}
+    <div class="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
       <div class="bg-surface border border-border rounded-lg overflow-hidden flex flex-col shadow-sm shadow-black/10">
         <div class="flex justify-between items-center px-4 py-3 border-b border-border bg-white/[0.02]">
           <h3>KP 人格模板</h3>
-          <button class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" style={{ 'font-size': '0.8rem' }} onClick={startNew}>+ 新建</button>
+          <button
+            class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
+            style={{ 'font-size': '0.8rem' }}
+            onClick={startNew}
+          >
+            + 新建
+          </button>
         </div>
-        <Show when={!templates.loading} fallback={<p class="text-text-dim text-[0.9rem]">加载中...</p>}>
-          <For each={templates()}>
-            {(t) => (
-              <div
-                class={`p-4 border border-border rounded-lg cursor-pointer mb-3 transition-colors hover:border-accent-dim shadow-sm shadow-black/10 ${selected()?.id === t.id ? 'border-accent bg-accent/[0.05]' : ''}`}
-                onClick={() => selectTemplate(t)}
-              >
-                <div style={{ display: 'flex', 'justify-content': 'space-between', 'align-items': 'center' }}>
-                  <div class="font-semibold mb-1">{t.name}</div>
-                  <Show when={!t.builtin}>
-                    <span style={{ 'font-size': '0.7rem', color: 'var(--accent)', background: 'rgba(124,106,247,0.1)', padding: '0.1rem 0.4rem', 'border-radius': '4px' }}>自定义</span>
-                  </Show>
+        <div class="flex-1 p-4">
+          <Show when={!templates.loading} fallback={<p class="text-text-dim text-[0.9rem]">加载中...</p>}>
+            <For each={templates()}>
+              {(t) => (
+                <div
+                  class={`mb-3 cursor-pointer rounded-lg border border-border p-4 transition-colors hover:border-accent-dim shadow-sm shadow-black/10 ${
+                    selected()?.id === t.id ? 'border-accent bg-accent/[0.05]' : ''
+                  }`}
+                  onClick={() => selectTemplate(t)}
+                >
+                  <div class="mb-1 flex items-center justify-between gap-3">
+                    <div class="font-semibold">{t.name}</div>
+                    <Show when={!t.builtin}>
+                      <span class="rounded bg-accent/[0.1] px-2 py-0.5 text-[0.7rem] text-accent">自定义</span>
+                    </Show>
+                  </div>
+                  <div class="mb-3 text-[0.82rem] leading-6 text-text-dim">{t.description}</div>
+                  <div class="flex flex-col gap-1.5">
+                    <For each={DIMS}>{(d) => <Bar label={d.label} value={t[d.key]} />}</For>
+                  </div>
                 </div>
-                <div class="text-[0.82rem] text-text-dim mb-3">{t.description}</div>
-                <div class="flex flex-col gap-1.5">
-                  <For each={DIMS}>
-                    {(d) => <Bar label={d.label} value={t[d.key]} />}
-                  </For>
-                </div>
-              </div>
-            )}
-          </For>
-        </Show>
+              )}
+            </For>
+          </Show>
+        </div>
       </div>
 
-      {/* 右侧：详情/编辑面板 */}
-      <div class="bg-surface border border-border rounded-lg overflow-hidden flex flex-col shadow-sm shadow-black/10">
-        <Show when={selected() || editing()} fallback={<p class="text-text-dim text-[0.9rem]">从左侧选择一个模板查看或编辑</p>}>
-          <Show when={msg()}>
-            <div class="bg-success/[0.12] border border-success rounded-md px-3.5 py-2.5 text-success text-sm mb-3">{msg()}</div>
-          </Show>
-          <Show when={err()}>
-            <div class="bg-danger/[0.12] border border-danger rounded-md px-3.5 py-2.5 text-danger text-sm mb-3">{err()}</div>
-          </Show>
-
-          {/* 顶部操作栏 */}
-          <div style={{ display: 'flex', gap: '0.5rem', 'margin-bottom': '1rem', 'align-items': 'center' }}>
-            <Show when={selected()?.builtin}>
-              <span class="text-text-dim text-[0.9rem]" style={{ 'font-size': '0.8rem' }}>内置模板（只读）</span>
-              <button class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" style={{ 'margin-left': 'auto' }} onClick={startNew}>基于此新建</button>
-            </Show>
-            <Show when={selected() && !selected()!.builtin}>
-              <button class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" onClick={() => { setEditing(true); loadToForm(selected()!); }} disabled={editing()}>编辑</button>
-              <button class="px-2.5 py-1 bg-danger text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95" onClick={del}>删除</button>
-            </Show>
-            <Show when={!selected() && editing()}>
-              <span style={{ 'font-weight': 600 }}>新建模板</span>
-            </Show>
-          </div>
-
-          {/* 编辑模式 */}
-          <Show when={editing() && (!selected()?.builtin)}>
-            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '0.75rem' }}>
-              <label>
-                <span class="text-text-dim text-[0.9rem]" style={{ 'font-size': '0.8rem' }}>名称</span>
-                <input
-                  class="flex-1 p-2 bg-bg border border-border rounded-md text-text text-[0.88rem]"
-                  value={editName()}
-                  onInput={(e) => setEditName(e.currentTarget.value)}
-                  style={{ width: '100%', 'margin-top': '0.25rem' }}
-                />
-              </label>
-              <label>
-                <span class="text-text-dim text-[0.9rem]" style={{ 'font-size': '0.8rem' }}>描述</span>
-                <input
-                  class="flex-1 p-2 bg-bg border border-border rounded-md text-text text-[0.88rem]"
-                  value={editDesc()}
-                  onInput={(e) => setEditDesc(e.currentTarget.value)}
-                  style={{ width: '100%', 'margin-top': '0.25rem' }}
-                />
-              </label>
-
-              <div style={{ 'margin-top': '0.5rem' }}>
-                <span class="text-text-dim text-[0.9rem]" style={{ 'font-size': '0.8rem', 'margin-bottom': '0.5rem', display: 'block' }}>五维参数</span>
-                <Slider label="基调" low="轻松" high="恐怖" value={editTone()} onChange={setEditTone} />
-                <Slider label="灵活度" low="规则" high="叙事" value={editFlex()} onChange={setEditFlex} />
-                <Slider label="引导度" low="摸索" high="手把手" value={editGuide()} onChange={setEditGuide} />
-                <Slider label="致命度" low="温和" high="残酷" value={editLethal()} onChange={setEditLethal} />
-                <Slider label="节奏" low="慢热" high="快节奏" value={editPace()} onChange={setEditPace} />
-              </div>
-
-              <label>
-                <span class="text-text-dim text-[0.9rem]" style={{ 'font-size': '0.8rem' }}>自定义设定语</span>
-                <textarea
-                  class="flex-1 p-2 bg-bg border border-border rounded-md text-text text-[0.88rem] resize-y min-h-[60px]"
-                  rows={3}
-                  value={editPrompts()}
-                  onInput={(e) => setEditPrompts(e.currentTarget.value)}
-                  placeholder="追加到 AI 系统提示中的额外指令，如 NPC 口音、特定风格要求等"
-                  style={{ width: '100%', 'margin-top': '0.25rem' }}
-                />
-              </label>
-
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" onClick={save} disabled={saving()}>
-                  {saving() ? '保存中...' : '保存'}
-                </button>
-                <button class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" onClick={() => { setEditing(false); if (!selected()) setSelected(null); }}>取消</button>
+      <div class="min-h-[680px] overflow-hidden rounded-lg border border-border bg-surface shadow-sm shadow-black/10">
+        <Show
+          when={selected() || editing()}
+          fallback={
+            <div class="flex h-full min-h-[680px] items-center justify-center p-8 lg:p-10">
+              <div class="max-w-md rounded-2xl border border-dashed border-border bg-white/[0.02] px-8 py-10 text-center">
+                <div class="mb-3 text-sm font-semibold uppercase tracking-[0.24em] text-accent/80">KP Studio</div>
+                <h3 class="text-2xl font-semibold text-text">从左侧选择一个模板开始</h3>
+                <p class="mt-3 text-sm leading-7 text-text-dim">
+                  查看五维倾向、阅读设定语，或者基于现有模板创建新的 Keeper 叙事风格。
+                </p>
               </div>
             </div>
-          </Show>
-
-          {/* 只读模式（内置模板） */}
-          <Show when={!editing() && selected()}>
-            {(sel) => (
-              <div>
-                <h3 style={{ margin: '0 0 0.25rem' }}>{sel().name}</h3>
-                <p class="text-text-dim text-[0.9rem]" style={{ margin: '0 0 1rem' }}>{sel().description}</p>
-                <div class="flex flex-col gap-1.5">
-                  <For each={DIMS}>
-                    {(d) => <Bar label={`${d.label}`} value={sel()[d.key]} suffix={` (${d.low} ↔ ${d.high})`} />}
-                  </For>
-                </div>
-                <Show when={sel().customPrompts}>
-                  <div style={{ 'margin-top': '1rem' }}>
-                    <span class="text-text-dim text-[0.9rem]" style={{ 'font-size': '0.8rem' }}>自定义设定语：</span>
-                    <pre style={{ 'font-size': '0.82rem', 'white-space': 'pre-wrap', 'margin-top': '0.25rem', color: 'var(--text-dim)' }}>{sel().customPrompts}</pre>
-                  </div>
-                </Show>
+          }
+        >
+          <div class="flex h-full flex-col gap-5 p-6 lg:p-8">
+            <Show when={msg()}>
+              <div class="rounded-md border border-success bg-success/[0.12] px-3.5 py-2.5 text-sm text-success">
+                {msg()}
               </div>
-            )}
-          </Show>
+            </Show>
+            <Show when={err()}>
+              <div class="rounded-md border border-danger bg-danger/[0.12] px-3.5 py-2.5 text-sm text-danger">
+                {err()}
+              </div>
+            </Show>
+
+            <div class="rounded-2xl border border-border bg-white/[0.02] px-5 py-4 shadow-sm shadow-black/10">
+              <div class="flex flex-wrap items-start justify-between gap-4">
+                <div class="space-y-1">
+                  <Show when={selected()}>
+                    {(sel) => (
+                      <>
+                        <div class="text-xs font-semibold uppercase tracking-[0.24em] text-accent/80">
+                          {sel().builtin ? '内置模板' : '自定义模板'}
+                        </div>
+                        <h3 class="text-2xl font-semibold text-text">{sel().name}</h3>
+                      </>
+                    )}
+                  </Show>
+                  <Show when={!selected() && editing()}>
+                    <>
+                      <div class="text-xs font-semibold uppercase tracking-[0.24em] text-accent/80">新建模板</div>
+                      <h3 class="text-2xl font-semibold text-text">创建新的 KP 模板</h3>
+                    </>
+                  </Show>
+                  <p class="max-w-2xl text-sm leading-7 text-text-dim">
+                    调整基调、灵活度和自定义设定语，整理出适合当前团风与模组气质的 Keeper 人格模板。
+                  </p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <Show when={selected()?.builtin}>
+                    <button
+                      class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
+                      onClick={startNew}
+                    >
+                      基于此新建
+                    </button>
+                  </Show>
+                  <Show when={selected() && !selected()!.builtin}>
+                    <button
+                      class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
+                      onClick={() => {
+                        setEditing(true);
+                        loadToForm(selected()!);
+                      }}
+                      disabled={editing()}
+                    >
+                      编辑
+                    </button>
+                    <button
+                      class="px-2.5 py-1 rounded-md border-none bg-danger text-sm text-white cursor-pointer transition-all duration-200 active:scale-95"
+                      onClick={del}
+                    >
+                      删除
+                    </button>
+                  </Show>
+                </div>
+              </div>
+            </div>
+
+            <Show when={editing() && (!selected()?.builtin)}>
+              <div class="grid gap-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(320px,0.92fr)]">
+                <div class="rounded-2xl border border-border bg-white/[0.02] p-5 shadow-sm shadow-black/10">
+                  <div class="mb-4 space-y-1">
+                    <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent/80">基础信息</div>
+                    <p class="text-sm leading-7 text-text-dim">
+                      先定义模板定位和用途，让房间里的人一眼就知道该模板适合怎样的跑团节奏。
+                    </p>
+                  </div>
+                  <div class="flex flex-col gap-4">
+                    <label>
+                      <span class="text-[0.8rem] text-text-dim">名称</span>
+                      <input
+                        class="mt-2 w-full rounded-md border border-border bg-bg px-3 py-2 text-[0.88rem] text-text"
+                        value={editName()}
+                        onInput={(e) => setEditName(e.currentTarget.value)}
+                      />
+                    </label>
+                    <label>
+                      <span class="text-[0.8rem] text-text-dim">描述</span>
+                      <input
+                        class="mt-2 w-full rounded-md border border-border bg-bg px-3 py-2 text-[0.88rem] text-text"
+                        value={editDesc()}
+                        onInput={(e) => setEditDesc(e.currentTarget.value)}
+                      />
+                    </label>
+                    <label>
+                      <span class="text-[0.8rem] text-text-dim">自定义设定语</span>
+                      <textarea
+                        class="mt-2 min-h-[220px] w-full resize-y rounded-md border border-border bg-bg px-3 py-2 text-[0.88rem] text-text"
+                        rows={9}
+                        value={editPrompts()}
+                        onInput={(e) => setEditPrompts(e.currentTarget.value)}
+                        placeholder="追加到 AI 系统提示中的额外指令，如 NPC 口音、叙事风格、危险感控制等"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div class="rounded-2xl border border-border bg-white/[0.02] p-5 shadow-sm shadow-black/10">
+                  <div class="mb-4 space-y-1">
+                    <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent/80">五维参数</div>
+                    <p class="text-sm leading-7 text-text-dim">
+                      数值越高越偏向右侧描述，适合快速塑造“规则严谨”或“电影化叙事”这类明显风格差。
+                    </p>
+                  </div>
+                  <div class="space-y-3">
+                    <Slider label="基调" low="轻松" high="恐怖" value={editTone()} onChange={setEditTone} />
+                    <Slider label="灵活度" low="规则" high="叙事" value={editFlex()} onChange={setEditFlex} />
+                    <Slider label="引导度" low="摸索" high="手把手" value={editGuide()} onChange={setEditGuide} />
+                    <Slider label="致命度" low="温和" high="残酷" value={editLethal()} onChange={setEditLethal} />
+                    <Slider label="节奏" low="慢热" high="快节奏" value={editPace()} onChange={setEditPace} />
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap gap-3 lg:col-span-2">
+                  <button
+                    class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
+                    onClick={save}
+                    disabled={saving()}
+                  >
+                    {saving() ? '保存中...' : '保存'}
+                  </button>
+                  <button
+                    class="px-3 py-1.5 bg-accent text-white border-none rounded-md text-sm cursor-pointer hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
+                    onClick={() => {
+                      setEditing(false);
+                      if (!selected()) setSelected(null);
+                    }}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            </Show>
+
+            <Show when={!editing() && selected()}>
+              {(sel) => (
+                <div class="flex flex-col gap-5">
+                  <div class="rounded-2xl border border-border bg-white/[0.02] p-5 shadow-sm shadow-black/10">
+                    <div class="space-y-3">
+                      <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent/80">模板简介</div>
+                      <p class="text-sm leading-7 text-text-dim">{sel().description}</p>
+                      <Show when={sel().customPrompts}>
+                        <div class="rounded-xl border border-border/80 bg-bg/60 p-4">
+                          <div class="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-accent/80">自定义设定语</div>
+                          <pre class="whitespace-pre-wrap text-[0.82rem] leading-7 text-text-dim">{sel().customPrompts}</pre>
+                        </div>
+                      </Show>
+                    </div>
+                  </div>
+
+                  <div class="rounded-2xl border border-border bg-white/[0.02] p-5 shadow-sm shadow-black/10">
+                    <div class="mb-4 space-y-1">
+                      <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent/80">五维倾向</div>
+                      <p class="text-sm leading-7 text-text-dim">
+                        查看模板在氛围、规则与节奏上的默认重心，方便判断它更适合哪类模组和玩家桌风。
+                      </p>
+                    </div>
+                    <div class="space-y-3">
+                      <For each={DIMS}>
+                        {(d) => <Bar label={d.label} value={sel()[d.key]} suffix={` (${d.low} ↔ ${d.high})`} />}
+                      </For>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Show>
+          </div>
         </Show>
       </div>
     </div>
@@ -250,31 +351,36 @@ const KPStudio: Component = () => {
 
 const Bar: Component<{ label: string; value: number; suffix?: string }> = (props) => (
   <div class="flex items-center gap-2">
-    <span class="text-xs text-text-dim w-10">{props.label}</span>
-    <div class="flex-1 h-1 bg-border rounded-sm overflow-hidden">
-      <div class="h-full bg-accent rounded-sm transition-[width] duration-200" style={{ width: `${props.value * 10}%` }} />
+    <span class="w-10 text-xs text-text-dim">{props.label}</span>
+    <div class="h-1 flex-1 overflow-hidden rounded-sm bg-border">
+      <div class="h-full rounded-sm bg-accent transition-[width] duration-200" style={{ width: `${props.value * 10}%` }} />
     </div>
-    <span class="text-[0.72rem] text-text-dim w-12 text-right">{props.value}/10{props.suffix ?? ''}</span>
+    <span class={`${props.suffix ? 'min-w-[11rem] whitespace-nowrap' : 'w-10'} text-right text-[0.72rem] text-text-dim`}>
+      {props.value}/10{props.suffix ?? ''}
+    </span>
   </div>
 );
 
 const Slider: Component<{
-  label: string; low: string; high: string;
-  value: number; onChange: (v: number) => void;
+  label: string;
+  low: string;
+  high: string;
+  value: number;
+  onChange: (v: number) => void;
 }> = (props) => (
-  <div style={{ display: 'flex', 'align-items': 'center', gap: '0.5rem', 'margin-bottom': '0.5rem' }}>
-    <span style={{ width: '3.5rem', 'font-size': '0.82rem', 'text-align': 'right' }}>{props.label}</span>
-    <span style={{ 'font-size': '0.7rem', color: 'var(--text-dim)', width: '3rem', 'text-align': 'right' }}>{props.low}</span>
+  <div class="grid gap-2 sm:grid-cols-[3.75rem_3.2rem_minmax(0,1fr)_3.2rem_2rem] sm:items-center">
+    <span class="text-[0.82rem] sm:text-right">{props.label}</span>
+    <span class="text-[0.7rem] text-text-dim sm:text-right">{props.low}</span>
     <input
       type="range"
       min={1}
       max={10}
       value={props.value}
       onInput={(e) => props.onChange(parseInt(e.currentTarget.value))}
-      style={{ flex: 1 }}
+      class="w-full"
     />
-    <span style={{ 'font-size': '0.7rem', color: 'var(--text-dim)', width: '3rem' }}>{props.high}</span>
-    <span style={{ width: '2rem', 'font-size': '0.82rem', 'font-weight': 600, 'text-align': 'center' }}>{props.value}</span>
+    <span class="text-[0.7rem] text-text-dim">{props.high}</span>
+    <span class="text-center text-[0.82rem] font-semibold">{props.value}</span>
   </div>
 );
 

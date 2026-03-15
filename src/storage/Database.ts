@@ -216,6 +216,26 @@ export function migrateCoreSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_campaign_room_relationships_user_a ON campaign_room_relationships(user_a);
     CREATE INDEX IF NOT EXISTS idx_campaign_room_relationships_user_b ON campaign_room_relationships(user_b);
 
+    CREATE TABLE IF NOT EXISTS campaign_room_relation_groups (
+      id TEXT PRIMARY KEY,
+      room_id TEXT NOT NULL REFERENCES campaign_rooms(id),
+      relation_label TEXT NOT NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      created_by_qq_id INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_room_relation_groups_room ON campaign_room_relation_groups(room_id, updated_at);
+
+    CREATE TABLE IF NOT EXISTS campaign_room_relation_participants (
+      relation_id TEXT NOT NULL REFERENCES campaign_room_relation_groups(id),
+      character_id TEXT NOT NULL REFERENCES characters(id),
+      PRIMARY KEY (relation_id, character_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_room_relation_participants_character ON campaign_room_relation_participants(character_id);
+
     -- ── 模组管理 ────────────────────────────────────────────────────────────────
 
     CREATE TABLE IF NOT EXISTS scenario_modules (

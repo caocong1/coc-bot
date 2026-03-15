@@ -5,7 +5,6 @@
  * .room create <名称> [模组序号] — 创建房间（返回房间ID）
  * .room join <roomId>     — 加入房间，私发 Web 链接
  * .room pc [房间ID] <角色卡名或ID>  — 为当前房间绑定自己的 PC
- * .room relation ...      — 管理房间内人物关系
  * .room start <roomId>    — 审卡（查看 PC 信息 + 约束检查，任何成员可触发）
  * .room ready             — 确认准备就绪（当前群正在审卡的房间）
  * .room status            — 查看审卡进度（谁 ready 了）
@@ -24,11 +23,6 @@ import { ModCommand } from '../module/ModCommand';
 import { calculatePrimaryAttributeTotal, normalizeOptionalTotalPoints } from '../../shared/coc7/attributeTotals';
 import {
   countRoomRelationships,
-  deleteRoomRelationship,
-  listRoomRelationships,
-  normalizeRoomRelationPair,
-  upsertRoomRelationship,
-  isRoomRelationType,
 } from '../../storage/RoomDirectorStore';
 
 const WEB_BASE_URL = process.env.WEB_BASE_URL ?? 'http://localhost:5173';
@@ -87,7 +81,6 @@ export class RoomCommand {
       case 'create':  return this.create(ctx, cmd);
       case 'join':    return this.join(ctx, cmd);
       case 'pc':      return this.bindRoomCharacter(ctx, cmd);
-      case 'relation':return this.relation(ctx, cmd);
       case 'start':   return this.start(ctx, cmd);
       case 'ready':   return this.ready(ctx);
       case 'status':  return this.status(ctx);
@@ -203,9 +196,7 @@ export class RoomCommand {
     if (members.length >= 2 && relationCount === 0) {
       lines.push(
         '',
-        '💡 还没有配置人物关系。为了让开场更自然，建议先补一轮：',
-        '  .room relation list',
-        '  .room relation set <对方QQ号> <heard_of|acquainted|close|bound|secret_tie> [备注]',
+        '💡 还没有配置人物关系。为了让开场更自然，建议先到 Web 房间详情页绑定角色卡并补充人物关系。',
       );
     }
 
@@ -421,70 +412,6 @@ export class RoomCommand {
     return { text: `已为房间【${room.name}】绑定角色卡：${target.name}` };
   }
 
-  private relation(ctx: CommandContext, cmd: ParsedCommand): CommandResult {
-    if (ctx.messageType !== 'group' || !ctx.groupId) {
-      return { text: '请在跑团群内使用 .room relation ...' };
-    }
-
-    const room = this.findActiveRoomForMember(ctx.groupId, ctx.userId);
-    if (!room) {
-      return { text: '当前群没有你参与的待开团/审卡房间。' };
-    }
-
-    const sub = (cmd.args[1] ?? 'list').toLowerCase();
-    if (sub === 'list') {
-      const relations = listRoomRelationships(this.db, room.id);
-      if (relations.length === 0) {
-        return { text: `房间【${room.name}】当前还没有配置人物关系。` };
-      }
-      const lines = relations.map((item) => {
-        const notes = item.notes ? `｜${item.notes}` : '';
-        return `- ${item.userA} ↔ ${item.userB}：${item.relationType}${notes}`;
-      });
-      return { text: `房间【${room.name}】人物关系：\n${lines.join('\n')}` };
-    }
-
-    if (sub === 'set') {
-      const targetQqId = Number(cmd.args[2]);
-      const relationType = String(cmd.args[3] ?? '');
-      const notes = cmd.args.slice(4).join(' ').trim();
-      if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
-        return { text: '用法：.room relation set <对方QQ号> <heard_of|acquainted|close|bound|secret_tie> [备注]' };
-      }
-      if (!isRoomRelationType(relationType)) {
-        return { text: '关系类型无效，可用：heard_of、acquainted、close、bound、secret_tie' };
-      }
-      if (!this.isRoomMember(room.id, targetQqId)) {
-        return { text: `QQ ${targetQqId} 不在房间【${room.name}】中。` };
-      }
-      try {
-        const relation = upsertRoomRelationship(this.db, room.id, ctx.userId, targetQqId, relationType, notes);
-        const [left, right] = normalizeRoomRelationPair(relation.userA, relation.userB);
-        return { text: `已设置房间关系：${left} ↔ ${right} = ${relation.relationType}${relation.notes ? `（${relation.notes}）` : ''}` };
-      } catch (err) {
-        return { text: String(err) };
-      }
-    }
-
-    if (sub === 'clear') {
-      const targetQqId = Number(cmd.args[2]);
-      if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
-        return { text: '用法：.room relation clear <对方QQ号>' };
-      }
-      if (!this.isRoomMember(room.id, targetQqId)) {
-        return { text: `QQ ${targetQqId} 不在房间【${room.name}】中。` };
-      }
-      try {
-        deleteRoomRelationship(this.db, room.id, ctx.userId, targetQqId);
-        return { text: `已清除你与 QQ ${targetQqId} 在房间【${room.name}】中的人物关系。` };
-      } catch (err) {
-        return { text: String(err) };
-      }
-    }
-
-    return { text: '用法：.room relation <list|set|clear> ...' };
-  }
-
   private start(ctx: CommandContext, cmd: ParsedCommand): CommandResult {
     if (ctx.messageType !== 'group' || !ctx.groupId) {
       return { text: '请在目标 QQ 群内发送 .room start <房间ID>，开团消息将发送到该群' };
@@ -681,9 +608,6 @@ export class RoomCommand {
         '  .room create <名称> [模组序号] — 创建房间\n' +
         '  .room join <房间ID>     — 加入房间（私发链接）\n' +
         '  .room pc <角色卡名或ID>  — 为当前房间绑定角色卡\n' +
-        '  .room relation list     — 查看当前房间人物关系\n' +
-        '  .room relation set <QQ号> <关系类型> [备注] — 设置人物关系\n' +
-        '  .room relation clear <QQ号> — 清除人物关系\n' +
         '  .room start <房间ID>    — 审卡（查看 PC 信息）\n' +
         '  .room ready             — 确认准备就绪\n' +
         '  .room status            — 查看审卡进度\n' +

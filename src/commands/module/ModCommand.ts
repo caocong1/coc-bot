@@ -8,6 +8,7 @@
 import type { Database } from 'bun:sqlite';
 import type { CommandContext, CommandResult } from '../CommandRegistry';
 import type { ParsedCommand } from '../CommandParser';
+import { summarizeModuleDescriptionForPlayers } from '@shared/scenario/moduleDescription';
 
 const PAGE_SIZE = 5;
 
@@ -76,7 +77,8 @@ export class ModCommand {
     const lines = rows.map((m, i) => {
       const idx = offset + i + 1;
       const meta = [m.era].filter(Boolean).join(' · ');
-      return `${idx}. ${m.name}${meta ? `（${meta}）` : ''}\n   ${m.description?.slice(0, 60) ?? '（无简介）'}`;
+      const summary = summarizeModuleDescriptionForPlayers(m.description ?? '');
+      return `${idx}. ${m.name}${meta ? `（${meta}）` : ''}\n   ${summary.slice(0, 60) || '（无简介）'}`;
     });
 
     return {
@@ -107,7 +109,7 @@ export class ModCommand {
         (m.era ? `时代：${m.era}\n` : '') +
         (occs ? `职业限制：${occs}\n` : '') +
         (totalPoints != null ? `总点要求：${totalPoints}\n` : '') +
-        `\n${m.description ?? '（无简介）'}\n\n` +
+        `\n${summarizeModuleDescriptionForPlayers(m.description) || '（无简介）'}\n\n` +
         `创建房间：.room create <名称> ${index}`,
     };
   }

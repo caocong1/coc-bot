@@ -209,7 +209,7 @@ AI 系统层，负责：
 - `kp_templates` — 自定义 KP 人格模板
 - `scenario_modules` / `scenario_module_files` — 模组管理
 - `module_entities` / `module_items` / `module_rule_packs` — 模组资产层（关键 NPC/怪物、关键物品、模组规则包）
-- `campaign_rooms` / `campaign_room_members` / `campaign_room_relationships` — 房间（用户侧 canonical aggregate）、成员、人物关系；`director_prefs_json` 仅兼容保留
+- `campaign_rooms` / `campaign_room_members` / `campaign_room_relation_groups` / `campaign_room_relation_participants` — 房间（用户侧 canonical aggregate）、成员、按当前房间 PC 卡建立的人物关系组；`director_prefs_json` 仅兼容保留
 - `player_tokens` — 玩家 Web 登录
 - `user_settings` — 用户设置（默认骰/昵称）
 

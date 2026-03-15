@@ -31,14 +31,17 @@ import type { CampaignHandler } from '../runtime/CampaignHandler';
 import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
 import { deliverCampaignOutput } from '../runtime/CampaignOutputDelivery';
 import { calculatePrimaryAttributeTotal, normalizeOptionalTotalPoints } from '@shared/coc7/attributeTotals';
+import { summarizeModuleDescriptionForPlayers } from '@shared/scenario/moduleDescription';
+import { sanitizePlayerReferenceData } from '@shared/reference/referenceDataSanitizer';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { parseExcelCharacter } from '../import/ExcelCharacterParser';
 import {
+  createRoomRelationship,
   deleteRoomRelationship,
+  deleteRoomRelationshipsByCharacter,
   listRoomRelationships,
-  upsertRoomRelationship,
-  isRoomRelationType,
+  updateRoomRelationship,
 } from '../storage/RoomDirectorStore';
 
 export class PlayerRoutes {
@@ -76,6 +79,7 @@ export class PlayerRoutes {
     // /characters
     if (resource === 'characters') {
       if (method === 'POST' && resourceId === 'import-excel') return this.importExcelCharacter(req);
+      if (method === 'GET' && resourceId === 'template-excel') return this.downloadBlankCharacterExcel();
       if (method === 'GET' && !resourceId) return this.listCharacters(qqId);
       if (method === 'GET' && resourceId) return this.getCharacter(qqId, resourceId);
       if (method === 'POST') return this.createCharacter(qqId, req);
@@ -112,7 +116,10 @@ export class PlayerRoutes {
       if (method === 'POST' && resourceId && sub2 === 'cancel-review') return this.cancelReview(qqId, resourceId);
       if (method === 'PATCH' && resourceId && sub2 === 'constraints') return this.updateConstraints(qqId, resourceId, req);
       if (method === 'GET' && resourceId && sub2 === 'relationships') return this.listRoomRelationships(qqId, resourceId);
-      if (method === 'PUT' && resourceId && sub2 === 'relationships') return this.upsertRoomRelationship(qqId, resourceId, req);
+      if (method === 'POST' && resourceId && sub2 === 'relationships') return this.createRoomRelationship(qqId, resourceId, req);
+      if (method === 'PUT' && resourceId && sub2 === 'relationships' && segments[3]) {
+        return this.updateRoomRelationship(qqId, resourceId, segments[3], req);
+      }
       if (method === 'DELETE' && resourceId && sub2 === 'relationships' && segments[3]) {
         return this.deleteRoomRelationship(qqId, resourceId, segments[3]);
       }
@@ -148,6 +155,21 @@ export class PlayerRoutes {
       const msg = err instanceof Error ? err.message : '解析失败';
       return Response.json({ error: msg }, { status: 400 });
     }
+  }
+
+  private downloadBlankCharacterExcel(): Response {
+    const filename = '[充实车卡版本]空白卡.xlsx';
+    const filePath = join(process.cwd(), filename);
+    if (!existsSync(filePath)) {
+      return Response.json({ error: '空白角色卡模板不存在' }, { status: 404 });
+    }
+
+    return new Response(Bun.file(filePath), {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      },
+    });
   }
 
   // ─── Characters ────────────────────────────────────────────────────────────
@@ -415,7 +437,7 @@ export class PlayerRoutes {
     return Response.json(modules.map((m) => ({
       id: m.id,
       name: m.name,
-      description: m.description ?? '',
+      description: summarizeModuleDescriptionForPlayers(m.description),
       era: m.era,
       allowedOccupations: JSON.parse(m.allowed_occupations) as string[],
       totalPoints: normalizeOptionalTotalPoints(m.total_points),
@@ -568,7 +590,7 @@ export class PlayerRoutes {
       }, { status: 409 });
     }
 
-    this.db.run('DELETE FROM campaign_room_relationships WHERE room_id = ?', [roomId]);
+    this.deleteRoomRelationshipData(roomId);
     this.db.run('DELETE FROM campaign_room_members WHERE room_id = ?', [roomId]);
     this.db.run('DELETE FROM campaign_rooms WHERE id = ?', [roomId]);
     return Response.json({ ok: true });
@@ -586,7 +608,7 @@ export class PlayerRoutes {
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
     if (room.creator_qq_id !== qqId) return Response.json({ error: '只有创建者可以删除房间' }, { status: 403 });
 
-    this.db.run('DELETE FROM campaign_room_relationships WHERE room_id = ?', [roomId]);
+    this.deleteRoomRelationshipData(roomId);
     this.db.run('DELETE FROM campaign_room_members WHERE room_id = ?', [roomId]);
     this.db.run('DELETE FROM campaign_rooms WHERE id = ?', [roomId]);
     return Response.json({ ok: true });
@@ -626,15 +648,22 @@ export class PlayerRoutes {
       if (char.player_id !== qqId) return Response.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const member = this.db.query<{ qq_id: number }, [string, number]>(
-      'SELECT qq_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
+    const member = this.db.query<{ qq_id: number; character_id: string | null }, [string, number]>(
+      'SELECT qq_id, character_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
     ).get(roomId, qqId);
     if (!member) return Response.json({ error: '你不在该房间中，请先加入' }, { status: 403 });
 
-    this.db.run(
-      'UPDATE campaign_room_members SET character_id = ? WHERE room_id = ? AND qq_id = ?',
-      [characterId ?? null, roomId, qqId],
-    );
+    const previousCharacterId = member.character_id;
+    const tx = this.db.transaction(() => {
+      this.db.run(
+        'UPDATE campaign_room_members SET character_id = ? WHERE room_id = ? AND qq_id = ?',
+        [characterId ?? null, roomId, qqId],
+      );
+      if (previousCharacterId && previousCharacterId !== characterId) {
+        deleteRoomRelationshipsByCharacter(this.db, roomId, previousCharacterId);
+      }
+    });
+    tx();
     return Response.json({ ok: true });
   }
 
@@ -751,10 +780,12 @@ export class PlayerRoutes {
     return Response.json(listRoomRelationships(this.db, roomId));
   }
 
-  private async upsertRoomRelationship(qqId: number, roomId: string, req: Request): Promise<Response> {
+  private async createRoomRelationship(qqId: number, roomId: string, req: Request): Promise<Response> {
     if (!this.isRoomMember(roomId, qqId)) {
       return Response.json({ error: '不是该房间成员' }, { status: 403 });
     }
+    const editable = this.requireEditableRoomRelationships(roomId);
+    if (editable) return editable;
 
     let body: Record<string, unknown>;
     try {
@@ -763,37 +794,39 @@ export class PlayerRoutes {
       return Response.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 
-    const targetQqId = Number(body.targetQqId);
-    const relationType = String(body.relationType ?? '');
-    const notes = typeof body.notes === 'string' ? body.notes : '';
-    if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
-      return Response.json({ error: 'targetQqId 无效' }, { status: 400 });
-    }
-    if (!isRoomRelationType(relationType)) {
-      return Response.json({ error: 'relationType 无效' }, { status: 400 });
-    }
-    if (!this.isRoomMember(roomId, targetQqId)) {
-      return Response.json({ error: '目标玩家不在该房间中' }, { status: 404 });
-    }
-
-    const relation = upsertRoomRelationship(this.db, roomId, qqId, targetQqId, relationType, notes);
-    return Response.json(relation);
+    return this.saveRoomRelationship(roomId, qqId, body, null);
   }
 
-  private deleteRoomRelationship(qqId: number, roomId: string, targetRaw: string): Response {
+  private async updateRoomRelationship(qqId: number, roomId: string, relationId: string, req: Request): Promise<Response> {
     if (!this.isRoomMember(roomId, qqId)) {
       return Response.json({ error: '不是该房间成员' }, { status: 403 });
     }
+    const editable = this.requireEditableRoomRelationships(roomId);
+    if (editable) return editable;
 
-    const targetQqId = Number(targetRaw);
-    if (!Number.isFinite(targetQqId) || targetQqId <= 0) {
-      return Response.json({ error: 'targetQqId 无效' }, { status: 400 });
-    }
-    if (!this.isRoomMember(roomId, targetQqId)) {
-      return Response.json({ error: '目标玩家不在该房间中' }, { status: 404 });
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json() as Record<string, unknown>;
+    } catch {
+      return Response.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 
-    deleteRoomRelationship(this.db, roomId, qqId, targetQqId);
+    return this.saveRoomRelationship(roomId, qqId, body, relationId);
+  }
+
+  private deleteRoomRelationship(qqId: number, roomId: string, relationId: string): Response {
+    if (!this.isRoomMember(roomId, qqId)) {
+      return Response.json({ error: '不是该房间成员' }, { status: 403 });
+    }
+    const editable = this.requireEditableRoomRelationships(roomId);
+    if (editable) return editable;
+
+    const relation = listRoomRelationships(this.db, roomId).find((item) => item.id === relationId);
+    if (!relation) {
+      return Response.json({ error: '人物关系不存在' }, { status: 404 });
+    }
+
+    deleteRoomRelationship(this.db, roomId, relationId);
     return Response.json({ ok: true });
   }
 
@@ -929,6 +962,59 @@ export class PlayerRoutes {
     return row?.cnt ?? 0;
   }
 
+  private deleteRoomRelationshipData(roomId: string): void {
+    this.db.run(
+      'DELETE FROM campaign_room_relation_participants WHERE relation_id IN (SELECT id FROM campaign_room_relation_groups WHERE room_id = ?)',
+      [roomId],
+    );
+    this.db.run('DELETE FROM campaign_room_relation_groups WHERE room_id = ?', [roomId]);
+    this.db.run('DELETE FROM campaign_room_relationships WHERE room_id = ?', [roomId]);
+  }
+
+  private requireEditableRoomRelationships(roomId: string): Response | null {
+    const room = this.db.query<{ status: string }, [string]>(
+      'SELECT status FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    if (room.status !== 'waiting' && room.status !== 'reviewing') {
+      return Response.json({ error: '跑团开始后人物关系只读' }, { status: 409 });
+    }
+    return null;
+  }
+
+  private saveRoomRelationship(
+    roomId: string,
+    qqId: number,
+    body: Record<string, unknown>,
+    relationId: string | null,
+  ): Response {
+    const participantCharacterIds = Array.isArray(body.participantCharacterIds)
+      ? body.participantCharacterIds.map((value) => String(value))
+      : [];
+    const relationLabel = typeof body.relationLabel === 'string' ? body.relationLabel : '';
+    const notes = typeof body.notes === 'string' ? body.notes : '';
+
+    try {
+      const relation = relationId
+        ? updateRoomRelationship(this.db, roomId, relationId, {
+          participantCharacterIds,
+          relationLabel,
+          notes,
+          createdByQqId: qqId,
+        })
+        : createRoomRelationship(this.db, roomId, {
+          participantCharacterIds,
+          relationLabel,
+          notes,
+          createdByQqId: qqId,
+        });
+      return Response.json(relation);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '人物关系保存失败';
+      return Response.json({ error: message }, { status: message.includes('不存在') ? 404 : 400 });
+    }
+  }
+
   private isRoomMember(roomId: string, qqId: number): boolean {
     const row = this.db.query<{ qq_id: number }, [string, number]>(
       'SELECT qq_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
@@ -1003,7 +1089,7 @@ export class PlayerRoutes {
     const filePath = join(process.cwd(), 'data', 'reference', filename);
     if (!existsSync(filePath)) return Response.json({ error: 'Reference data not available' }, { status: 404 });
     const data = JSON.parse(readFileSync(filePath, 'utf-8'));
-    return Response.json(data);
+    return Response.json(sanitizePlayerReferenceData(key, data));
   }
 }
 

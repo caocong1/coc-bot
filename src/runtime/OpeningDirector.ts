@@ -1,4 +1,4 @@
-import { DashScopeClient } from '../ai/client/DashScopeClient';
+﻿import { DashScopeClient } from '../ai/client/DashScopeClient';
 import type { Character } from '@shared/types/Character';
 import type { ModuleRulePack, ScenarioEntity, ScenarioItem } from '@shared/types/ScenarioAssets';
 import {
@@ -144,7 +144,7 @@ export class OpeningDirector {
       `{
   "startTime": "YYYY-MM-DDTHH:MM",
   "randomSeed": "短字符串",
-  "assumedLinks": [{ "participants": ["角色名A","角色名B"], "relationType": "heard_of|acquainted|close|bound|secret_tie", "notes": "简短备注", "source": "assumed", "reason": "为什么这样推断" }],
+  "assumedLinks": [{ "participants": ["角色名A","角色名B"], "relationLabel": "旧识", "notes": "简短备注", "source": "assumed", "reason": "为什么这样推断" }],
   "initialAssignments": [{ "target": "角色名", "channelId": "频道名" }],
   "beats": [{
     "id": "beat-1",
@@ -376,7 +376,7 @@ export class OpeningDirector {
   private buildRoomRelationshipSummary(relationships: RoomRelationship[], characters: Character[]): string {
     const links = roomRelationshipsToLinks(relationships, characters);
     if (links.length === 0) return '（暂无显式房间关系）';
-    return links.map((link) => `- ${link.participants.join(' / ')}：${link.relationType}${link.notes ? `，${link.notes}` : ''}`).join('\n');
+    return links.map((link) => `- ${link.participants.join(' / ')}：${link.relationLabel}${link.notes ? `，${link.notes}` : ''}`).join('\n');
   }
 
   private buildCombinedLinksSummary(
@@ -389,7 +389,7 @@ export class OpeningDirector {
     if (all.length === 0) return '（暂无角色关系）';
     return all.map((link) => {
       const meta = [link.source === 'room' ? '显式' : '推断', link.reason].filter(Boolean).join('；');
-      return `- ${link.participants.join(' / ')}：${link.relationType}${link.notes ? `，${link.notes}` : ''}${meta ? `（${meta}）` : ''}`;
+      return `- ${link.participants.join(' / ')}：${link.relationLabel}${link.notes ? `，${link.notes}` : ''}${meta ? `（${meta}）` : ''}`;
     }).join('\n');
   }
 
@@ -438,16 +438,17 @@ export class OpeningDirector {
 }
 
 function roomRelationshipsToLinks(relationships: RoomRelationship[], characters: Character[]): OpeningPlanLink[] {
-  const byUserId = new Map(characters.map((character) => [character.playerId, character.name]));
-  return relationships.map((relationship) => ({
-    participants: [
-      byUserId.get(relationship.userA) ?? `QQ${relationship.userA}`,
-      byUserId.get(relationship.userB) ?? `QQ${relationship.userB}`,
-    ],
-    relationType: relationship.relationType,
-    notes: relationship.notes,
-    source: 'room',
-  }));
+  const knownNames = new Set(characters.map((character) => normalizeName(character.name)));
+  return relationships
+    .map((relationship) => ({
+      participants: relationship.participants
+        .map((participant) => participant.characterName.trim())
+        .filter((name) => name && knownNames.has(normalizeName(name))),
+      relationLabel: relationship.relationLabel.trim() || '旧识',
+      notes: relationship.notes,
+      source: 'room' as const,
+    }))
+    .filter((relationship) => relationship.participants.length >= 2);
 }
 
 function parseJsonResponse(raw: string): Record<string, unknown> | null {
@@ -590,7 +591,7 @@ function normalizeAssumedLinks(raw: unknown, castSet: Set<string>): OpeningPlanL
       participants: Array.isArray(link.participants)
         ? link.participants.map((participant) => String(participant).trim()).filter(Boolean)
         : [],
-      relationType: isRelationType(String(link.relationType ?? 'acquainted')) ? String(link.relationType) as OpeningPlanLink['relationType'] : 'acquainted',
+      relationLabel: String(link.relationLabel ?? '').trim() || '旧识',
       notes: String(link.notes ?? '').trim(),
       source: 'assumed' as const,
       reason: String(link.reason ?? '').trim(),
@@ -674,10 +675,6 @@ function normalizeName(value: string): string {
 
 function getPlayPrivacyMode(rulePack: ModuleRulePack | null | undefined): 'public' | 'secret' {
   return rulePack?.playPrivacyMode === 'secret' ? 'secret' : 'public';
-}
-
-function isRelationType(value: string): boolean {
-  return ['heard_of', 'acquainted', 'close', 'bound', 'secret_tie'].includes(value);
 }
 
 function clampNumber(value: number, min: number, max: number): number {

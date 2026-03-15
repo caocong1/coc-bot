@@ -94,6 +94,31 @@ export const playerApi = {
     return res.json();
   },
 
+  downloadCharacterTemplate: async () => {
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${BASE}/player/characters/template-excel`, { headers });
+    if (res.status === 401) {
+      handlePlayerAuthExpired();
+      throw new Error('登录已过期');
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText })) as { error: string };
+      throw new Error(err.error ?? res.statusText);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '[充实车卡版本]空白卡.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
+
   listCampaigns: () => request<CampaignSummary[]>('/player/campaigns'),
 
   getCampaign: (id: string) => request<CampaignDetail>(`/player/campaigns/${id}`),
@@ -137,11 +162,14 @@ export const playerApi = {
   listRoomRelationships: (id: string) =>
     request<RoomRelationship[]>(`/player/rooms/${id}/relationships`),
 
-  setRoomRelationship: (id: string, data: { targetQqId: number; relationType: RoomRelationType; notes?: string }) =>
-    request<RoomRelationship>(`/player/rooms/${id}/relationships`, { method: 'PUT', body: JSON.stringify(data) }),
+  createRoomRelationship: (id: string, data: RoomRelationshipInput) =>
+    request<RoomRelationship>(`/player/rooms/${id}/relationships`, { method: 'POST', body: JSON.stringify(data) }),
 
-  deleteRoomRelationship: (id: string, targetQqId: number) =>
-    request<{ ok: boolean }>(`/player/rooms/${id}/relationships/${targetQqId}`, { method: 'DELETE' }),
+  updateRoomRelationship: (id: string, relationId: string, data: RoomRelationshipInput) =>
+    request<RoomRelationship>(`/player/rooms/${id}/relationships/${relationId}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  deleteRoomRelationship: (id: string, relationId: string) =>
+    request<{ ok: boolean }>(`/player/rooms/${id}/relationships/${relationId}`, { method: 'DELETE' }),
 
   // ── 参考数据（公开） ──
   getReference: <T = unknown>(key: string) => request<T>(`/player/reference/${key}`, {}, 'none'),
@@ -234,10 +262,12 @@ export const adminApi = {
     request<{ ok: boolean }>(`/admin/rooms/${id}/kp-settings`, { method: 'PATCH', body: JSON.stringify(data) }, 'admin'),
   listRoomRelationships: (id: string) =>
     request<RoomRelationship[]>(`/admin/rooms/${id}/relationships`, {}, 'admin'),
-  setRoomRelationship: (id: string, data: { sourceQqId: number; targetQqId: number; relationType: RoomRelationType; notes?: string }) =>
-    request<RoomRelationship>(`/admin/rooms/${id}/relationships`, { method: 'PUT', body: JSON.stringify(data) }, 'admin'),
-  deleteRoomRelationship: (id: string, sourceQqId: number, targetQqId: number) =>
-    request<{ ok: boolean }>(`/admin/rooms/${id}/relationships/${targetQqId}`, { method: 'DELETE', body: JSON.stringify({ sourceQqId }) }, 'admin'),
+  createRoomRelationship: (id: string, data: RoomRelationshipInput) =>
+    request<RoomRelationship>(`/admin/rooms/${id}/relationships`, { method: 'POST', body: JSON.stringify(data) }, 'admin'),
+  updateRoomRelationship: (id: string, relationId: string, data: RoomRelationshipInput) =>
+    request<RoomRelationship>(`/admin/rooms/${id}/relationships/${relationId}`, { method: 'PUT', body: JSON.stringify(data) }, 'admin'),
+  deleteRoomRelationship: (id: string, relationId: string) =>
+    request<{ ok: boolean }>(`/admin/rooms/${id}/relationships/${relationId}`, { method: 'DELETE' }, 'admin'),
 
   // ── 模组管理 ──────────────────────────────────────────────────────────────
   listModules: () => request<ScenarioModule[]>('/admin/modules', {}, 'admin'),
@@ -585,14 +615,24 @@ export interface CreateRoomPayload {
   constraints?: RoomConstraints;
 }
 
-export type RoomRelationType = 'heard_of' | 'acquainted' | 'close' | 'bound' | 'secret_tie';
+export interface RoomRelationshipParticipant {
+  characterId: string;
+  characterName: string;
+  qqId: number;
+}
+
+export interface RoomRelationshipInput {
+  participantCharacterIds: string[];
+  relationLabel: string;
+  notes?: string;
+}
 
 export interface RoomRelationship {
+  id: string;
   roomId: string;
-  userA: number;
-  userB: number;
-  relationType: RoomRelationType;
+  relationLabel: string;
   notes: string;
+  participants: RoomRelationshipParticipant[];
   createdAt: string;
   updatedAt: string;
 }

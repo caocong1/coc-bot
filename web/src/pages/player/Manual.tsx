@@ -55,10 +55,16 @@ const Manual: Component = () => (
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room stop</td><td class="px-3 py-1.5 border-b border-white/[0.04]">彻底结束当前群的跑团</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room stop</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room list</td><td class="px-3 py-1.5 border-b border-white/[0.04]">查看我参与的活跃房间</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room list</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room info &lt;房间ID&gt;</td><td class="px-3 py-1.5 border-b border-white/[0.04]">查看房间成员/状态</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room info f3a9c1b2</td></tr>
+          <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room pc &lt;角色卡名或ID&gt;</td><td class="px-3 py-1.5 border-b border-white/[0.04]">在当前群为房间绑定自己的角色卡；若你只参与了一个待开团房间，会自动识别并绑定</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room pc 爱丽丝</td></tr>
+          <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room pc &lt;房间ID&gt; &lt;角色卡名或ID&gt;</td><td class="px-3 py-1.5 border-b border-white/[0.04]">同时参与多个房间时，显式给指定房间绑定角色卡</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room pc f3a9c1b2 爱丽丝</td></tr>
+          <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">房间详情 → 人物关系</td><td class="px-3 py-1.5 border-b border-white/[0.04]">在 Web 房间详情页里多选当前已绑定的 PC 卡，填写中文关系名和备注</td><td class="px-3 py-1.5 border-b border-white/[0.04]">爱丽丝 / 鲍勃 / 陈 → 同学</td></tr>
         </tbody>
       </table>
       <p class="text-text-dim" style={{ 'font-size': '0.82rem', 'margin-top': '0.5rem' }}>
         流程：<code>.room create</code> → 群友 <code>.room join</code>（点链接车卡）→ <code>.room start</code>
+      </p>
+      <p class="text-text-dim" style={{ 'font-size': '0.82rem', 'margin-top': '0.35rem' }}>
+        开团前如果想让 AI 更自然地安排开场，可以先用 <code>.room pc</code> 绑定角色卡，再到 Web 房间详情页里为当前房间的 PC 卡补充“同学 / 同事 / 亲戚 / 战友”等人物关系。
       </p>
     </section>
 

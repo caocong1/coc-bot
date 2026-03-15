@@ -1,5 +1,5 @@
 import { createEffect, createResource, For, Show, type Component, type JSX } from 'solid-js';
-import { type Message, type RoomConstraints, type RoomMemberView, type RoomRelationType, type RoomRelationship } from '../../api';
+import { type Message, type RoomConstraints, type RoomMemberView, type RoomRelationship, type RoomRelationshipParticipant } from '../../api';
 
 export type RoomTab = 'overview' | 'messages' | 'manage';
 
@@ -73,17 +73,14 @@ function formatMessageDay(timestamp: string): string {
 type MessageHighlight = {
   icon: string;
   label: string;
-  tone: 'warn' | 'success' | 'accent';
+  tone: 'warn' | 'accent';
 };
 
-function detectMessageHighlight(message: Message, isKp: boolean, isSystem: boolean): MessageHighlight | null {
+function detectMessageHighlight(message: Message, isSystem: boolean): MessageHighlight | null {
   const content = message.content.trim();
   if (!content) return null;
   if (/(检定|d100|奖励骰|惩罚骰|大成功|大失败|san|理智)/i.test(content)) {
     return { icon: '🎲', label: '检定结果', tone: 'warn' };
-  }
-  if (isKp && /(线索|证物|笔记|日记|信件|地图|照片|发现了|察觉到)/.test(content)) {
-    return { icon: '🧩', label: '线索推进', tone: 'success' };
   }
   if ((isKp || isSystem) && /(分钟后|小时后|次日|翌日|午夜|黎明|黄昏|时间推进|天色|钟声)/.test(content)) {
     return { icon: '⏰', label: '时间推进', tone: 'accent' };
@@ -99,12 +96,6 @@ function getHighlightClasses(highlight: MessageHighlight | null): { badge: strin
         badge: 'border-warn/25 bg-warn/12 text-warn',
         bubble: 'border-warn/25 bg-warn/[0.08]',
         panel: 'bg-warn/[0.08] border-b border-warn/20 text-warn',
-      };
-    case 'success':
-      return {
-        badge: 'border-success/25 bg-success/12 text-success',
-        bubble: 'border-success/25 bg-success/[0.08]',
-        panel: 'bg-success/[0.08] border-b border-success/20 text-success',
       };
     default:
       return {
@@ -172,14 +163,16 @@ export const RoomHeaderHero: Component<{
   readyCount: number;
   groupId: number | null;
   identityLabel: string;
-  description: string;
-  footerNote: string;
+  description?: string;
+  footerNote?: string;
   actions?: JSX.Element;
-}> = (props) => (
+}> = (props) => {
+  const hasActions = () => props.actions != null;
+  return (
   <div class="relative overflow-hidden rounded-[1.75rem] border border-border bg-surface px-5 py-5 mb-5 shadow-lg shadow-black/15">
     <div class="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top_left,rgba(124,106,247,0.24),transparent_58%)]" />
     <div class="relative flex justify-between items-start flex-wrap gap-5">
-      <div class="flex-1 min-w-[280px]">
+      <div class={`min-w-[280px] ${hasActions() ? 'flex-1' : 'w-full'}`}>
         <div class="flex items-center gap-2 flex-wrap mb-3">
           <span class={`inline-flex items-center rounded-full border px-3 py-1 text-[0.78rem] font-semibold ${STATUS_BADGE_CLASS[props.status] ?? STATUS_BADGE_CLASS.waiting}`}>
             {STATUS_LABEL[props.status] ?? props.status}
@@ -196,7 +189,9 @@ export const RoomHeaderHero: Component<{
           </Show>
         </div>
         <h2 class="m-0 text-[1.75rem] leading-tight tracking-tight">{props.name}</h2>
-        <div class="mt-2 text-[0.86rem] text-text-dim max-w-3xl leading-6">{props.description}</div>
+        <Show when={props.description?.trim().length}>
+          <div class="mt-2 text-[0.86rem] text-text-dim max-w-3xl leading-6">{props.description}</div>
+        </Show>
         <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 mt-4 max-w-3xl">
           <HeroStat label="成员" value={String(props.memberCount)} />
           <HeroStat label="已准备" value={String(props.readyCount)} />
@@ -204,14 +199,18 @@ export const RoomHeaderHero: Component<{
           <HeroStat label="身份" value={props.identityLabel} />
         </div>
       </div>
-      <div class="w-full max-w-[320px] rounded-3xl border border-white/[0.08] bg-black/10 backdrop-blur-sm px-4 py-4 shadow-sm shadow-black/10">
-        <div class="text-[0.78rem] uppercase tracking-[0.16em] text-text-dim mb-3">快捷操作</div>
-        <div class="flex gap-2 items-center flex-wrap">{props.actions}</div>
-        <div class="mt-3 text-[0.76rem] leading-6 text-text-dim">{props.footerNote}</div>
-      </div>
+      <Show when={hasActions()}>
+        <div class="w-full max-w-[320px] rounded-3xl border border-white/[0.08] bg-black/10 backdrop-blur-sm px-4 py-4 shadow-sm shadow-black/10">
+          <div class="flex gap-2 items-center flex-wrap">{props.actions}</div>
+          <Show when={props.footerNote?.trim().length}>
+            <div class="mt-3 text-[0.76rem] leading-6 text-text-dim">{props.footerNote}</div>
+          </Show>
+        </div>
+      </Show>
     </div>
   </div>
-);
+  );
+};
 
 const HeroStat: Component<{ label: string; value: string }> = (props) => (
   <div class="rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3 py-3">
@@ -344,21 +343,34 @@ const MemberRow: Component<{ member: RoomMemberView; constraints?: RoomConstrain
 
 export const RoomRelationshipsPanel: Component<{
   relationships: RoomRelationship[];
-  relationSource?: string;
-  onRelationSourceChange?: (value: string) => void;
-  relationTarget: string;
-  onRelationTargetChange: (value: string) => void;
-  relationType: RoomRelationType;
-  onRelationTypeChange: (value: RoomRelationType) => void;
+  availableParticipants: RoomRelationshipParticipant[];
+  selectedParticipantIds: string[];
+  onSelectedParticipantIdsChange: (value: string[]) => void;
+  relationLabel: string;
+  onRelationLabelChange: (value: string) => void;
   relationNotes: string;
   onRelationNotesChange: (value: string) => void;
+  editingRelationId: string | null;
+  onEdit: (relation: RoomRelationship) => void;
+  onCancelEdit: () => void;
   onSave: () => void;
-  onClear: (relation: RoomRelationship) => void;
-  canClear: (relation: RoomRelationship) => boolean;
+  onDelete: (relation: RoomRelationship) => void;
   saving: boolean;
   helperText: string;
+  canEdit: boolean;
+  readOnlyReason?: string;
 }> = (props) => {
   const relationships = () => props.relationships ?? [];
+  const availableParticipants = () => props.availableParticipants ?? [];
+  const selectedIds = () => new Set(props.selectedParticipantIds ?? []);
+  const canCreateRelationship = () => props.canEdit && availableParticipants().length >= 2;
+
+  const toggleParticipant = (characterId: string) => {
+    const current = new Set(props.selectedParticipantIds ?? []);
+    if (current.has(characterId)) current.delete(characterId);
+    else current.add(characterId);
+    props.onSelectedParticipantIdsChange([...current]);
+  };
 
   return (
     <div class="rounded-[1.5rem] border border-border bg-surface px-5 py-5 shadow-sm shadow-black/10">
@@ -372,21 +384,31 @@ export const RoomRelationshipsPanel: Component<{
         </span>
       </div>
       <div class="bg-white/[0.03] border border-white/[0.08] rounded-2xl px-4 py-4 flex flex-col gap-3">
-        <Show when={relationships().length > 0} fallback={<p class="text-text-dim text-sm">还没有显式关系。也可以直接在群里用 <code>.room relation</code> 配。</p>}>
+        <Show when={relationships().length > 0} fallback={<p class="text-text-dim text-sm">还没有配置人物关系。你可以在这里直接选择当前房间里已绑定的 PC 卡并建立关系。</p>}>
           <div class="flex flex-col gap-2">
             <For each={relationships()}>
               {(relation) => (
                 <div class="border border-border rounded-xl px-3 py-3 text-sm bg-surface/80">
-                  <div style={{ 'font-weight': 600 }}>QQ {relation.userA} ↔ QQ {relation.userB}</div>
-                  <div class="text-text-dim">{relation.relationType}{relation.notes ? ` · ${relation.notes}` : ''}</div>
-                  <Show when={props.canClear(relation)}>
-                    <div style={{ 'margin-top': '0.5rem' }}>
+                  <div style={{ 'font-weight': 600 }}>{relation.participants.map((participant) => participant.characterName).join(' / ')}</div>
+                  <div class="text-text-dim">关系：{relation.relationLabel}{relation.notes ? ` · ${relation.notes}` : ''}</div>
+                  <div class="text-[0.78rem] text-text-dim mt-1">
+                    参与者：{relation.participants.map((participant) => `${participant.characterName}（QQ ${participant.qqId}）`).join('、')}
+                  </div>
+                  <Show when={props.canEdit}>
+                    <div class="mt-3 flex flex-wrap gap-2">
                       <button
-                        class="px-3 py-1.5 bg-danger text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95"
-                        onClick={() => props.onClear(relation)}
+                        class="px-3 py-1.5 bg-white/[0.08] text-text border border-white/[0.08] rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95"
+                        onClick={() => props.onEdit(relation)}
                         disabled={props.saving}
                       >
-                        清除
+                        编辑
+                      </button>
+                      <button
+                        class="px-3 py-1.5 bg-danger text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95"
+                        onClick={() => props.onDelete(relation)}
+                        disabled={props.saving}
+                      >
+                        删除
                       </button>
                     </div>
                   </Show>
@@ -397,45 +419,65 @@ export const RoomRelationshipsPanel: Component<{
         </Show>
 
         <div class="border-t border-border pt-3 flex flex-col gap-2">
-          <div class="text-sm" style={{ 'font-weight': 600 }}>新增或覆盖关系</div>
-          <Show when={props.onRelationSourceChange}>
-            <input
-              value={props.relationSource ?? ''}
-              onInput={(e) => props.onRelationSourceChange?.(e.currentTarget.value)}
-              placeholder="来源 QQ 号"
-              class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
-            />
+          <div class="text-sm" style={{ 'font-weight': 600 }}>
+            {props.editingRelationId ? '编辑人物关系' : '新增人物关系'}
+          </div>
+          <Show when={props.canEdit} fallback={<p class="text-text-dim text-sm">{props.readOnlyReason ?? '跑团开始后人物关系只读。'}</p>}>
+            <Show when={availableParticipants().length >= 2} fallback={<p class="text-text-dim text-sm">至少需要两张已绑定的 PC 卡，才能建立人物关系。</p>}>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <For each={availableParticipants()}>
+                  {(participant) => (
+                    <label class={`flex items-center gap-3 rounded-xl border px-3 py-2 cursor-pointer transition-all ${
+                      selectedIds().has(participant.characterId)
+                        ? 'border-accent bg-accent/[0.08]'
+                        : 'border-white/[0.08] bg-white/[0.03] hover:border-white/[0.16]'
+                    }`}>
+                      <input
+                        type="checkbox"
+                        class="accent-[var(--accent)]"
+                        checked={selectedIds().has(participant.characterId)}
+                        onChange={() => toggleParticipant(participant.characterId)}
+                      />
+                      <div class="min-w-0">
+                        <div class="text-sm font-semibold text-text">{participant.characterName}</div>
+                        <div class="text-[0.72rem] text-text-dim">QQ {participant.qqId}</div>
+                      </div>
+                    </label>
+                  )}
+                </For>
+              </div>
+              <input
+                value={props.relationLabel}
+                onInput={(e) => props.onRelationLabelChange(e.currentTarget.value)}
+                placeholder="关系名，例如：同事 / 同学 / 亲戚 / 战友"
+                class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
+              />
+            </Show>
           </Show>
-          <input
-            value={props.relationTarget}
-            onInput={(e) => props.onRelationTargetChange(e.currentTarget.value)}
-            placeholder={props.onRelationSourceChange ? '目标 QQ 号' : '目标 QQ 号'}
-            class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
-          />
-          <select
-            value={props.relationType}
-            onChange={(e) => props.onRelationTypeChange(e.currentTarget.value as RoomRelationType)}
-            class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
-          >
-            <option value="heard_of">heard_of</option>
-            <option value="acquainted">acquainted</option>
-            <option value="close">close</option>
-            <option value="bound">bound</option>
-            <option value="secret_tie">secret_tie</option>
-          </select>
           <textarea
             value={props.relationNotes}
             onInput={(e) => props.onRelationNotesChange(e.currentTarget.value)}
-            placeholder="备注，可写旧识来源、共同经历等"
+            placeholder="备注，可写旧识来源、共同经历、秘密前史等"
             class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text min-h-[84px]"
           />
-          <button
-            class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
-            onClick={props.onSave}
-            disabled={props.saving}
-          >
-            {props.saving ? '保存中...' : '保存关系'}
-          </button>
+          <div class="flex flex-wrap gap-2">
+            <button
+              class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
+              onClick={props.onSave}
+              disabled={props.saving || !canCreateRelationship()}
+            >
+              {props.saving ? '保存中...' : props.editingRelationId ? '保存修改' : '保存关系'}
+            </button>
+            <Show when={props.editingRelationId}>
+              <button
+                class="inline-block px-5 py-2 bg-white/[0.08] text-text border border-white/[0.08] rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:bg-white/[0.12] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95"
+                onClick={props.onCancelEdit}
+                disabled={props.saving}
+              >
+                取消编辑
+              </button>
+            </Show>
+          </div>
         </div>
       </div>
     </div>
@@ -500,7 +542,7 @@ export const RoomMessagesPanel: Component<{
                 const isSystem = !isKp && (m.role === 'system' || m.role === 'director');
                 const speaker = isKp ? 'KP' : m.displayName ?? m.role;
                 const avatarText = isKp ? 'KP' : speaker.slice(0, 1).toUpperCase();
-                const highlight = detectMessageHighlight(m, isKp, isSystem);
+                const highlight = detectMessageHighlight(m, isSystem);
                 const highlightClasses = getHighlightClasses(highlight);
                 const structuredMessage = parseHighlightedMessage(m.content, highlight);
                 const systemLabel = m.role === 'director' ? '导演提示' : '系统';
@@ -574,9 +616,6 @@ export const RoomMessagesPanel: Component<{
                                   <span class="inline-flex items-center gap-2">
                                     <span class="text-[0.95rem] leading-none">{highlight?.icon}</span>
                                     <span>{highlight?.label}</span>
-                                  </span>
-                                  <span class={`inline-flex items-center rounded-full border px-2 py-0.5 text-[0.68rem] ${highlightClasses.badge}`}>
-                                    重点记录
                                   </span>
                                 </div>
                               </Show>
