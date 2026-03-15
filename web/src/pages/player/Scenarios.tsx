@@ -31,13 +31,13 @@ const ModuleCard: Component<{ module: ScenarioSummary }> = (props) => {
         <span class="bg-accent-dim text-white text-[0.72rem] py-[0.15em] px-2 rounded-[10px] inline-block mb-2">{m.era}</span>
       </Show>
       <div class="text-text-dim" style={{ 'font-size': '0.85rem' }}>{m.description || '暂无简介'}</div>
-      <Show when={m.allowedOccupations.length > 0 || Object.keys(m.minStats).length > 0}>
+      <Show when={m.allowedOccupations.length > 0 || m.totalPoints != null}>
         <div style={{ 'margin-top': '0.5rem', 'font-size': '0.78rem', color: 'var(--text-dim)' }}>
           <Show when={m.allowedOccupations.length > 0}>
             <div>职业限制：{m.allowedOccupations.join('、')}</div>
           </Show>
-          <Show when={Object.keys(m.minStats).length > 0}>
-            <div>属性要求：{Object.entries(m.minStats).map(([k, v]) => `${k}≥${v}`).join(' ')}</div>
+          <Show when={m.totalPoints != null}>
+            <div>总点要求：{m.totalPoints}</div>
           </Show>
         </div>
       </Show>

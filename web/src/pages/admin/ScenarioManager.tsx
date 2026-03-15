@@ -7,9 +7,17 @@
  */
 
 import {
-  createEffect, createResource, createSignal, For, onCleanup, Show, type Component,
+  createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, type Component,
 } from 'solid-js';
-import { adminApi, type ScenarioModule, type ModuleDetail, type ModuleFile, type CreateModulePayload } from '../../api';
+import {
+  adminApi,
+  type ScenarioModule,
+  type ModuleDetail,
+  type ModuleFile,
+  type ModuleSceneImage,
+  type CreateModulePayload,
+} from '../../api';
+import { OCCUPATIONS } from '../player/data/occupations';
 
 const ERA_LABELS: Record<string, string> = { '1920s': '1920s', '现代': '现代', '其他': '其他' };
 
@@ -18,10 +26,6 @@ const ERA_LABELS: Record<string, string> = { '1920s': '1920s', '现代': '现代
 const ScenarioManager: Component = () => {
   const [modules, { refetch }] = createResource(() => adminApi.listModules().catch(() => []));
   const [showCreate, setShowCreate] = createSignal(false);
-  const [expandedId, setExpandedId] = createSignal<string | null>(null);
-
-  const toggleExpand = (id: string) =>
-    setExpandedId((prev) => (prev === id ? null : id));
 
   return (
     <div>
@@ -39,7 +43,7 @@ const ScenarioManager: Component = () => {
             const { id } = await adminApi.createModule(payload);
             setShowCreate(false);
             await refetch();
-            setExpandedId(id);
+            openModuleDetail(id);
           }}
           onQuickCreate={async (file) => {
             // 1. 用文件名创建临时模组
@@ -49,7 +53,7 @@ const ScenarioManager: Component = () => {
             await adminApi.uploadModuleFile(id, file);
             setShowCreate(false);
             await refetch();
-            setExpandedId(id);
+            openModuleDetail(id);
           }}
           onCancel={() => setShowCreate(false)}
         />
@@ -67,8 +71,6 @@ const ScenarioManager: Component = () => {
               {(m) => (
                 <ModuleCard
                   module={m}
-                  expanded={expandedId() === m.id}
-                  onToggle={() => toggleExpand(m.id)}
                   onDeleted={refetch}
                 />
               )}
@@ -84,15 +86,8 @@ const ScenarioManager: Component = () => {
 
 const ModuleCard: Component<{
   module: ScenarioModule;
-  expanded: boolean;
-  onToggle: () => void;
   onDeleted: () => void;
 }> = (props) => {
-  const [detail, { refetch: refetchDetail }] = createResource(
-    () => props.expanded ? props.module.id : null,
-    (id) => adminApi.getModule(id).catch(() => null),
-  );
-  const [editing, setEditing] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
 
   const handleDelete = async () => {
@@ -111,10 +106,7 @@ const ModuleCard: Component<{
   return (
     <div class="bg-surface border border-border rounded-lg overflow-hidden flex flex-col shadow-sm shadow-black/10">
       {/* 卡片头部 */}
-      <div
-        class="flex justify-between items-center px-4 py-3 border-b border-border bg-white/[0.02] cursor-pointer"
-        onClick={props.onToggle}
-      >
+      <div class="flex justify-between items-center px-4 py-3 border-b border-border bg-white/[0.02]">
         <div class="flex items-center gap-3">
           <span class="text-[1.05rem] font-bold">📖 {props.module.name}</span>
           <Show when={props.module.era}>
@@ -124,73 +116,41 @@ const ModuleCard: Component<{
             {props.module.fileCount} 个文档 · {props.module.imageCount} 张图片
           </span>
         </div>
-        <div class="flex gap-2 items-center" onClick={(e) => e.stopPropagation()}>
-          <button class="px-2.5 py-1 bg-white/[0.07] text-text border border-border rounded-md text-sm cursor-pointer no-underline inline-block hover:bg-white/[0.12] transition-all duration-200" onClick={() => { props.onToggle(); setEditing(false); }}>
-            {props.expanded ? '收起 ▲' : '展开 ▼'}
-          </button>
-          <button class="px-2.5 py-1 bg-white/[0.07] text-text border border-border rounded-md text-sm cursor-pointer no-underline inline-block hover:bg-white/[0.12] transition-all duration-200" onClick={() => { setEditing(!editing()); if (!props.expanded) props.onToggle(); }}>编辑</button>
+        <div class="flex gap-2 items-center">
+          <button class="px-2.5 py-1 bg-white/[0.07] text-text border border-border rounded-md text-sm cursor-pointer no-underline inline-block hover:bg-white/[0.12] transition-all duration-200" onClick={() => openModuleDetail(props.module.id)}>详情页</button>
           <button class="px-2.5 py-1 bg-danger text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95" style={{ padding: '0.25rem 0.6rem', 'font-size': '0.78rem' }} onClick={handleDelete} disabled={deleting()}>删除</button>
         </div>
       </div>
 
-      {/* 简介（未展开时显示） */}
-      <Show when={!props.expanded && props.module.description}>
-        <div class="px-4 py-2 pb-3 text-text-dim text-[0.85rem]">
-          {props.module.description}
-        </div>
-      </Show>
-
-      {/* 展开详情 */}
-      <Show when={props.expanded}>
-        <div class="px-4 pb-4">
-          {/* 编辑表单 */}
-          <Show when={editing()}>
-            <ModuleForm
-              initial={props.module}
-              onSave={async (payload) => {
-                await adminApi.updateModule(props.module.id, payload);
-                setEditing(false);
-                props.onDeleted(); // refetch list
-                refetchDetail();
-              }}
-              onCancel={() => setEditing(false)}
-            />
-          </Show>
-
-          {/* 只读信息 */}
-          <Show when={!editing()}>
-            <Show when={props.module.description}>
-              <p class="text-[0.88rem] mb-3 text-text-dim">
-                {props.module.description}
-              </p>
+      <div class="px-4 py-3 flex flex-col gap-3">
+        <Show when={props.module.description}>
+          <p class="text-[0.88rem] text-text-dim leading-6">
+            {props.module.description}
+          </p>
+        </Show>
+        <Show when={props.module.allowedOccupations.length > 0 || props.module.totalPoints != null}>
+          <div class="flex gap-2 flex-wrap">
+            <Show when={props.module.allowedOccupations.length > 0}>
+              <span class="bg-accent/10 border border-accent/20 rounded-[20px] px-2.5 py-0.5 text-[0.78rem] text-accent">职业：{props.module.allowedOccupations.join('、')}</span>
             </Show>
-            <Show when={props.module.allowedOccupations.length > 0 || Object.keys(props.module.minStats).length > 0}>
-              <div class="flex gap-2 flex-wrap mb-3">
-                <Show when={props.module.allowedOccupations.length > 0}>
-                  <span class="bg-accent/10 border border-accent/20 rounded-[20px] px-2.5 py-0.5 text-[0.78rem] text-accent">职业：{props.module.allowedOccupations.join('、')}</span>
-                </Show>
-                <Show when={Object.keys(props.module.minStats).length > 0}>
-                  <span class="bg-accent/10 border border-accent/20 rounded-[20px] px-2.5 py-0.5 text-[0.78rem] text-accent">
-                    最低属性：{Object.entries(props.module.minStats).map(([k, v]) => `${k}≥${v}`).join(' ')}
-                  </span>
-                </Show>
-              </div>
+            <Show when={props.module.totalPoints != null}>
+              <span class="bg-accent/10 border border-accent/20 rounded-[20px] px-2.5 py-0.5 text-[0.78rem] text-accent">
+                总点要求：{props.module.totalPoints}
+              </span>
             </Show>
-          </Show>
-
-          {/* 文件 & 图片 */}
-          <Show when={!detail.loading && detail()} fallback={<p class="text-text-dim text-[0.9rem] mt-4">加载详情...</p>}>
-            {(d) => <ModuleFiles moduleId={props.module.id} detail={d()} onRefetch={refetchDetail} />}
-          </Show>
+          </div>
+        </Show>
+        <div class="text-[0.78rem] text-text-dim">
+          详情、编辑、文件、场景图片与结构化资产都集中在独立详情页中查看。
         </div>
-      </Show>
+      </div>
     </div>
   );
 };
 
 // ─── 文件管理区 ───────────────────────────────────────────────────────────────
 
-const ModuleFiles: Component<{
+export const ModuleFiles: Component<{
   moduleId: string;
   detail: ModuleDetail | null;
   onRefetch: () => void;
@@ -200,6 +160,8 @@ const ModuleFiles: Component<{
   const [genDesc, setGenDesc] = createSignal('');
   const [genLabel, setGenLabel] = createSignal('');
   const [generating, setGenerating] = createSignal(false);
+  const [regeneratingImageId, setRegeneratingImageId] = createSignal<string | null>(null);
+  const [previewImage, setPreviewImage] = createSignal<ModuleSceneImage | null>(null);
   const [showGenForm, setShowGenForm] = createSignal(false);
   const [err, setErr] = createSignal('');
 
@@ -213,8 +175,19 @@ const ModuleFiles: Component<{
     onCleanup(() => clearInterval(timer));
   });
 
+  createEffect(() => {
+    if (!previewImage()) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewImage(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    onCleanup(() => window.removeEventListener('keydown', onKeyDown));
+  });
+
   const docs = () => props.detail?.files.filter((f) => f.fileType === 'document') ?? [];
-  const images = () => props.detail?.files.filter((f) => f.fileType === 'image') ?? [];
+  const images = () => props.detail?.images ?? [];
+  const imageSrc = (image: ModuleSceneImage) =>
+    adminApi.adminAssetUrl(`${image.url}${image.url.includes('?') ? '&' : '?'}v=${encodeURIComponent(image.createdAt)}`);
 
   const handleUpload = async (e: Event, isImage = false) => {
     const input = e.currentTarget as HTMLInputElement;
@@ -261,6 +234,20 @@ const ModuleFiles: Component<{
       props.onRefetch();
     } catch (ex) {
       setErr(String(ex));
+    }
+  };
+
+  const handleRegenerateImage = async (image: ModuleSceneImage) => {
+    if (!image.canRegenerate) return;
+    setRegeneratingImageId(image.id);
+    setErr('');
+    try {
+      await adminApi.regenerateModuleImage(props.moduleId, image.id);
+      props.onRefetch();
+    } catch (ex) {
+      setErr(String(ex));
+    } finally {
+      setRegeneratingImageId(null);
     }
   };
 
@@ -321,29 +308,126 @@ const ModuleFiles: Component<{
         </Show>
 
         <Show when={images().length > 0} fallback={<p class="text-text-dim text-[0.82rem]">暂无图片，建议每个场景至少一张</p>}>
-          <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 mt-2">
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 mt-2">
             <For each={images()}>
               {(f) => (
                 <div class="bg-surface border border-border rounded-lg overflow-hidden flex flex-col shadow-sm shadow-black/10">
                   <img
-                    src={adminApi.moduleImageUrl(props.moduleId, f.id)}
-                    alt={f.label ?? f.originalName}
-                    class="w-full aspect-[4/3] object-cover bg-bg"
+                    src={imageSrc(f)}
+                    alt={f.label}
+                    class="w-full aspect-[4/3] object-cover bg-bg cursor-zoom-in transition-transform duration-200 hover:scale-[1.02]"
                     loading="lazy"
+                    onClick={() => setPreviewImage(f)}
                   />
-                  <div class="text-sm font-semibold px-2 pt-1.5 pb-0.5 whitespace-nowrap overflow-hidden text-ellipsis">{f.label || f.originalName}</div>
-                  <Show when={f.description}>
-                    <div class="text-[0.72rem] text-text-dim px-2 pb-1.5 overflow-hidden line-clamp-2">{f.description}</div>
+                  <div class="px-3 pt-2 pb-1 flex items-start justify-between gap-2">
+                    <div class="text-sm font-semibold leading-5 whitespace-normal break-words line-clamp-2" title={f.label}>
+                      {f.label}
+                    </div>
+                    <span class={`shrink-0 rounded-full border px-2 py-0.5 text-[0.68rem] ${
+                      imageSourceTone(f).badgeClass
+                    }`}>{imageSourceTone(f).label}</span>
+                  </div>
+                  <Show when={f.description || f.sourceFileName}>
+                    <div class="px-3 pb-2 flex flex-col gap-1.5 text-[0.74rem] text-text-dim leading-5">
+                      <Show when={f.sourceFileName}>
+                        <div class="rounded-md bg-white/[0.03] px-2 py-1 line-clamp-2 break-words" title={f.sourceFileName ?? undefined}>
+                          <span class="mr-1 text-[0.68rem] uppercase tracking-[0.08em] text-text-dim/80">来源</span>
+                          {f.sourceFileName}
+                        </div>
+                      </Show>
+                      <Show when={f.description}>
+                        <div class="line-clamp-4 break-words whitespace-pre-wrap" title={f.description ?? undefined}>
+                          {f.description}
+                        </div>
+                      </Show>
+                    </div>
                   </Show>
-                  <button class="px-2.5 py-1 bg-danger text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95 w-full text-[0.75rem]"
-                    style={{ padding: '0.2rem 0' }}
-                    onClick={() => handleDeleteFile(f.id, f.label ?? f.originalName)}>删除</button>
+                  <div class="border-t border-border/60 px-3 py-2">
+                    <Show when={f.canDelete}>
+                      <button class="px-2.5 py-1 bg-danger text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95 w-full text-[0.75rem]"
+                        style={{ padding: '0.2rem 0' }}
+                        onClick={() => handleDeleteFile(f.id, f.label)}>删除</button>
+                    </Show>
+                    <Show when={!f.canDelete && f.canRegenerate}>
+                      <div class="flex flex-col gap-2">
+                        <button
+                          class="px-2.5 py-1 bg-accent text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 active:scale-95 w-full text-[0.75rem] disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ padding: '0.2rem 0' }}
+                          disabled={regeneratingImageId() === f.id}
+                          onClick={() => void handleRegenerateImage(f)}
+                        >
+                          {regeneratingImageId() === f.id ? '重新生成中...' : '重新生成'}
+                        </button>
+                        <div class="text-[0.72rem] text-text-dim">
+                          这张图来自文档补图，可直接按当前提示词手动重新生成。
+                        </div>
+                      </div>
+                    </Show>
+                    <Show when={!f.canDelete && !f.canRegenerate}>
+                      <div class="text-[0.72rem] text-text-dim">文档提取图如需更新，请重新导入原文档。</div>
+                    </Show>
+                  </div>
                 </div>
               )}
             </For>
           </div>
         </Show>
       </div>
+
+      <Show when={previewImage()}>
+        {(image) => (
+          <div
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+            onClick={() => setPreviewImage(null)}
+          >
+            <div
+              class="relative flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-surface shadow-2xl shadow-black/40"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                class="absolute right-4 top-4 z-10 rounded-full border border-white/15 bg-black/45 px-3 py-1 text-sm text-white transition hover:bg-black/65"
+                onClick={() => setPreviewImage(null)}
+              >
+                关闭
+              </button>
+              <div class="flex max-h-[85vh] min-h-0 flex-col lg:flex-row">
+                <div class="flex min-h-[320px] flex-1 items-center justify-center bg-black/35 p-4">
+                  <img
+                    src={imageSrc(image())}
+                    alt={image().label}
+                    class="max-h-[76vh] max-w-full rounded-xl object-contain"
+                  />
+                </div>
+                <div class="w-full border-t border-border/70 p-5 lg:w-[320px] lg:border-l lg:border-t-0">
+                  <div class="space-y-3">
+                    <div>
+                      <div class="text-lg font-semibold text-text">{image().label}</div>
+                      <div class={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[0.72rem] ${imageSourceTone(image()).badgeClass}`}>
+                        {imageSourceTone(image()).label}
+                      </div>
+                    </div>
+                    <Show when={image().sourceFileName}>
+                      <div class="text-sm text-text-dim">
+                        <div class="mb-1 text-[0.72rem] uppercase tracking-[0.12em] text-text-dim/80">来源文档</div>
+                        <div>{image().sourceFileName}</div>
+                      </div>
+                    </Show>
+                    <Show when={image().description}>
+                      <div class="text-sm text-text-dim leading-6">
+                        <div class="mb-1 text-[0.72rem] uppercase tracking-[0.12em] text-text-dim/80">说明</div>
+                        <div>{image().description}</div>
+                      </div>
+                    </Show>
+                    <div class="text-xs text-text-dim">
+                      点击遮罩或按 <kbd class="rounded border border-border bg-bg px-1.5 py-0.5 text-[0.68rem] text-text">Esc</kbd> 可关闭预览。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </Show>
     </div>
   );
 };
@@ -384,9 +468,24 @@ const FileRow: Component<{ file: ModuleFile; onDelete: () => void }> = (props) =
   );
 };
 
+function openModuleDetail(id: string): void {
+  location.href = `/admin/scenarios/${id}`;
+}
+
+function imageSourceTone(image: ModuleSceneImage): { label: string; badgeClass: string } {
+  switch (image.source) {
+    case 'document_extract':
+      return { label: '文档提取', badgeClass: 'border-sky-400/30 bg-sky-400/10 text-sky-300' };
+    case 'document_generated':
+      return { label: '文档补图', badgeClass: 'border-violet-400/30 bg-violet-400/10 text-violet-300' };
+    default:
+      return { label: '上传/生成', badgeClass: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' };
+  }
+}
+
 // ─── 模组创建/编辑表单 ────────────────────────────────────────────────────────
 
-const ModuleForm: Component<{
+export const ModuleForm: Component<{
   initial?: ScenarioModule;
   onSave: (payload: CreateModulePayload) => Promise<void>;
   onCancel: () => void;
@@ -397,32 +496,58 @@ const ModuleForm: Component<{
   const [name, setName] = createSignal(props.initial?.name ?? '');
   const [desc, setDesc] = createSignal(props.initial?.description ?? '');
   const [era, setEra] = createSignal(props.initial?.era ?? '');
-  const [occs, setOccs] = createSignal((props.initial?.allowedOccupations ?? []).join('、'));
-  const [statsText, setStatsText] = createSignal(
-    Object.entries(props.initial?.minStats ?? {}).map(([k, v]) => `${k}:${v}`).join(' '),
+  const [selectedOccupations, setSelectedOccupations] = createSignal<string[]>(props.initial?.allowedOccupations ?? []);
+  const [occupationQuery, setOccupationQuery] = createSignal('');
+  const [totalPointsText, setTotalPointsText] = createSignal(
+    props.initial ? (props.initial.totalPoints != null ? String(props.initial.totalPoints) : '') : '460',
   );
   const [saving, setSaving] = createSignal(false);
   const [err, setErr] = createSignal('');
 
-  const parseStats = (text: string): Record<string, number> => {
-    const result: Record<string, number> = {};
-    for (const part of text.split(/[\s,，]+/)) {
-      const m = part.match(/^(.+):(\d+)$/);
-      if (m) result[m[1]] = parseInt(m[2]);
-    }
-    return result;
+  const filteredOccupations = createMemo(() => {
+    const currentEra = era();
+    const query = occupationQuery().trim().toLowerCase();
+    return OCCUPATIONS.filter((occupation) => {
+      if (currentEra === '1920s' && occupation.era === 'modern') return false;
+      if (currentEra === '现代' && occupation.era === 'classic') return false;
+      if (!query) return true;
+      return occupation.name.toLowerCase().includes(query)
+        || occupation.description.toLowerCase().includes(query);
+    });
+  });
+  const selectedOccupationCount = createMemo(() => selectedOccupations().length);
+  const eraOccupationHint = createMemo(() => {
+    const currentEra = era();
+    if (currentEra === '1920s') return '当前已按 1920s 过滤职业池，现代职业不会显示。';
+    if (currentEra === '现代') return '当前已按现代过滤职业池，经典职业不会显示。';
+    if (currentEra === '其他') return '“其他”时代不会自动裁剪职业，请只勾选真正需要限制的职业。';
+    return '未指定时代时会显示全部标准职业，可按名字或描述搜索。';
+  });
+
+  const toggleOccupation = (name: string) => {
+    setSelectedOccupations((current) => (
+      current.includes(name)
+        ? current.filter((item) => item !== name)
+        : [...current, name].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+    ));
   };
 
   const handleSave = async () => {
     if (!name().trim()) { setErr('模组名称不能为空'); return; }
+    const totalPointsRaw = totalPointsText().trim();
+    const totalPoints = totalPointsRaw ? Number(totalPointsRaw) : null;
+    if (totalPointsRaw && (!Number.isFinite(totalPoints) || totalPoints <= 0 || !Number.isInteger(totalPoints))) {
+      setErr('总点要求必须是正整数，或留空');
+      return;
+    }
     setSaving(true); setErr('');
     try {
       await props.onSave({
         name: name().trim(),
         description: desc().trim() || undefined,
         era: era() || undefined,
-        allowedOccupations: occs().trim() ? occs().split(/[,，、\s]+/).map((s) => s.trim()).filter(Boolean) : [],
-        minStats: statsText().trim() ? parseStats(statsText()) : {},
+        allowedOccupations: selectedOccupations(),
+        totalPoints,
       });
     } catch (e) {
       setErr(String(e));
@@ -492,14 +617,97 @@ const ModuleForm: Component<{
             placeholder="一段简短的剧情介绍，玩家可见" />
         </div>
         <div>
-          <label class="text-[0.82rem] text-text-dim block mb-1">职业限制（逗号分隔，留空不限）</label>
-          <input class="flex-1 p-2 bg-bg border border-border rounded-md text-text text-[0.88rem] w-full" value={occs()} onInput={(e) => setOccs(e.currentTarget.value)}
-            placeholder="例：侦探、记者、医生" />
+          <label class="text-[0.82rem] text-text-dim block mb-1">职业限制（从标准职业列表多选，留空不限）</label>
+          <div class="bg-bg border border-border rounded-xl p-3 flex flex-col gap-3 shadow-sm shadow-black/10">
+            <div class="rounded-lg border border-accent/20 bg-accent/8 px-3 py-2.5 text-[0.78rem] text-text-dim flex flex-col gap-1">
+              <div class="flex items-center justify-between gap-3">
+                <span class="font-semibold text-text">筛卡提示</span>
+                <span class="rounded-full border border-accent/20 bg-white/5 px-2.5 py-0.5 text-[0.72rem] text-accent">
+                  已选 {selectedOccupationCount()} 项
+                </span>
+              </div>
+              <div>只勾选模组确实需要限制的职业。留空表示任何职业都可参加，开房间后仍可继续审卡筛选。</div>
+              <div class="text-accent">{eraOccupationHint()}</div>
+            </div>
+            <input
+              class="flex-1 p-2 bg-surface border border-border rounded-md text-text text-[0.88rem] w-full"
+              value={occupationQuery()}
+              onInput={(e) => setOccupationQuery(e.currentTarget.value)}
+              placeholder="搜索职业名称或描述"
+            />
+            <Show when={selectedOccupations().length > 0}>
+              <div class="flex gap-2 flex-wrap">
+                <For each={selectedOccupations()}>
+                  {(occupation) => (
+                    <button
+                      type="button"
+                      class="bg-accent/10 border border-accent/20 rounded-[20px] px-2.5 py-0.5 text-[0.78rem] text-accent cursor-pointer"
+                      onClick={() => toggleOccupation(occupation)}
+                    >
+                      {occupation} ×
+                    </button>
+                  )}
+                </For>
+                <button
+                  type="button"
+                  class="px-2.5 py-0.5 bg-transparent text-text-dim border border-border rounded-[20px] text-[0.78rem] cursor-pointer hover:text-text hover:border-text-dim transition-all duration-200"
+                  onClick={() => setSelectedOccupations([])}
+                >
+                  清空
+                </button>
+              </div>
+            </Show>
+            <div class="max-h-[220px] overflow-y-auto border border-border rounded-md">
+              <Show
+                when={filteredOccupations().length > 0}
+                fallback={
+                  <div class="px-3 py-6 text-center text-[0.78rem] text-text-dim">
+                    没找到匹配职业。试试更短的关键词，或先切换模组时代。
+                  </div>
+                }
+              >
+                <For each={filteredOccupations()}>
+                  {(occupation) => {
+                    const checked = () => selectedOccupations().includes(occupation.name);
+                    return (
+                      <label class="flex items-start gap-3 px-3 py-2 border-b border-border/50 last:border-b-0 cursor-pointer hover:bg-white/[0.03]">
+                        <input
+                          type="checkbox"
+                          checked={checked()}
+                          onChange={() => toggleOccupation(occupation.name)}
+                        />
+                        <div class="flex-1 min-w-0">
+                          <div class="text-[0.88rem] text-text">{occupation.name}</div>
+                          <div class="text-[0.75rem] text-text-dim">
+                            {occupation.description}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  }}
+                </For>
+              </Show>
+            </div>
+          </div>
         </div>
         <div>
-          <label class="text-[0.82rem] text-text-dim block mb-1">最低属性要求（格式：力量:60 智力:70）</label>
-          <input class="flex-1 p-2 bg-bg border border-border rounded-md text-text text-[0.88rem] w-full" value={statsText()} onInput={(e) => setStatsText(e.currentTarget.value)}
-            placeholder="例：智力:65 教育:70" />
+          <label class="text-[0.82rem] text-text-dim block mb-1">总点要求（默认 460，可留空）</label>
+          <div class="bg-bg border border-border rounded-xl p-3 flex flex-col gap-3 shadow-sm shadow-black/10">
+            <div class="rounded-lg border border-emerald-400/20 bg-emerald-400/8 px-3 py-2.5 text-[0.78rem] text-text-dim flex flex-col gap-1">
+              <span class="font-semibold text-text">审卡规则</span>
+              <span>主属性总点 = STR + CON + SIZ + DEX + APP + INT + POW + EDU。</span>
+              <span>默认 460；创建房间时会自动继承，房主之后仍可改成别的值，或留空关闭总点校验。</span>
+            </div>
+            <input
+              class="flex-1 p-2 bg-surface border border-border rounded-md text-text text-[0.88rem] w-full"
+              value={totalPointsText()}
+              onInput={(e) => setTotalPointsText(e.currentTarget.value)}
+              placeholder="例：460"
+            />
+            <div class="text-[0.75rem] text-text-dim">
+              建议只在模组确实依赖统一点数强度时填写；偏叙事或兼容型模组可以留空。
+            </div>
+          </div>
         </div>
       </div>
       <div class="flex gap-2 mt-4">

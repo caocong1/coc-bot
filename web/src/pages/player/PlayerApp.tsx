@@ -1,9 +1,7 @@
-import { createResource, Show, type Component } from 'solid-js';
+import { createEffect, createResource, Show, type Component } from 'solid-js';
 import Layout from '../../components/Layout';
 import Characters from './Characters';
 import CharacterForm from './CharacterForm';
-import Campaigns from './Campaigns';
-import CampaignDetail from './CampaignDetail';
 import Scenarios from './Scenarios';
 import Manual from './Manual';
 import Reference from './Reference';
@@ -13,8 +11,7 @@ import { playerApi } from '../../api';
 
 const NAV = [
   { label: '我的角色卡', href: '/player', icon: '🧑' },
-  { label: '跑团房间', href: '/player/rooms', icon: '🎭' },
-  { label: '我的团', href: '/player/campaigns', icon: '📜' },
+  { label: '房间', href: '/player/rooms', icon: '🎭' },
   { label: '模组列表', href: '/player/scenarios', icon: '📖' },
   { label: '参考资料', href: '/player/reference', icon: '📚' },
   { label: '操作手册', href: '/player/manual', icon: '📋' },
@@ -53,16 +50,13 @@ const PlayerApp: Component = () => {
   if (path === '/player/rooms' && params.has('id')) {
     const roomId = params.get('id')!;
     page = () => <RoomDetailPage id={roomId} />;
-    title = '跑团房间';
+    title = '房间';
   } else if (path === '/player/rooms') {
     page = Rooms;
-    title = '跑团房间';
-  } else if (path === '/player/campaigns' && params.has('id')) {
-    page = () => <CampaignDetail id={params.get('id')!} />;
-    title = '团详情';
+    title = '房间';
   } else if (path === '/player/campaigns') {
-    page = Campaigns;
-    title = '我的团';
+    page = () => <LegacyCampaignRedirect sessionId={params.get('id')} />;
+    title = '房间';
   } else if (path === '/player/scenarios') {
     page = Scenarios;
     title = '模组列表';
@@ -89,6 +83,38 @@ const PlayerApp: Component = () => {
         {(() => { const P = page; return <P />; })()}
       </Show>
     </Layout>
+  );
+};
+
+const LegacyCampaignRedirect: Component<{ sessionId: string | null }> = (props) => {
+  const [redirect] = createResource(
+    () => props.sessionId,
+    async (sessionId) => {
+      if (!sessionId) return { roomId: null, archived: false };
+      return playerApi.getCampaignRedirect(sessionId).catch(() => ({ roomId: null, archived: true }));
+    },
+  );
+
+  createEffect(() => {
+    if (props.sessionId === null) {
+      location.replace('/player/rooms');
+      return;
+    }
+    const result = redirect();
+    if (!result) return;
+    if (result.roomId) {
+      location.replace(`/player/rooms?id=${result.roomId}&tab=messages`);
+      return;
+    }
+    if (result.archived) {
+      location.replace('/player/rooms?archived=1');
+    }
+  });
+
+  return (
+    <div class="rounded-xl border border-border bg-surface px-5 py-6 text-sm text-text-dim">
+      旧的“我的团”入口已并入房间，正在为你跳转到对应房间的消息历史…
+    </div>
   );
 };
 

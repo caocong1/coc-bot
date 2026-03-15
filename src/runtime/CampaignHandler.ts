@@ -26,11 +26,11 @@ import { ModeResolver } from './ModeResolver';
 import { CharacterStore } from '../commands/sheet/CharacterStore';
 import { ImageLibrary } from '../knowledge/images/ImageLibrary';
 import type { Character } from '@shared/types/Character';
-import { getRoomDirectorPrefs, listRoomRelationships } from '../storage/RoomDirectorStore';
+import { listRoomRelationships } from '../storage/RoomDirectorStore';
 import { getModuleRulePack, listModuleEntities, listModuleItems } from '../storage/ModuleAssetStore';
 import { OpeningDirector } from './OpeningDirector';
 import { SessionDirector } from './SessionDirector';
-import { createDefaultRoomDirectorPrefs, type OpeningDirectorPlan, type RoomDirectorPrefs, type RoomRelationship } from '@shared/types/StoryDirector';
+import { createDefaultRoomDirectorPrefs, type OpeningDirectorPlan, type RoomRelationship } from '@shared/types/StoryDirector';
 
 const MANIFEST_PATH = 'data/knowledge/manifest.json';
 const KP_MODEL = 'qwen3.5-plus';
@@ -682,7 +682,7 @@ export class CampaignHandler {
         return { text: '用法：.scene focus <频道名>', images: [] };
       }
       session.state.setFocusChannel(channelId, userId);
-      const focusText = `镜头已切换到频道【${channelId}】。`;
+      const focusText = `已切换到频道【${channelId}】。`;
       const queuedResult = await this.processQueuedChannelNow(groupId, session, channelId, onThinking);
       if (queuedResult.text) {
         return {
@@ -912,14 +912,19 @@ export class CampaignHandler {
 
   private buildSceneStatusText(session: GroupSession): string {
     const focusChannelId = session.state.getFocusChannel();
-    const channels = session.state.getActiveChannels();
+    const channels = session.state.getActiveChannels().filter((channelId) => {
+      if (channelId === 'main') return true;
+      const state = session.state.getChannelState(channelId);
+      return state.playerIds.length > 0 || state.pendingRolls.length > 0 || state.interruptPending;
+    });
+    const visibleChannels = channels.length > 0 ? channels : ['main'];
     const lines = [
-      `当前镜头焦点：${focusChannelId}`,
-      `活跃频道：${channels.join('、')}`,
+      `当前处理频道：${focusChannelId}`,
+      `活跃频道：${visibleChannels.join('、')}`,
       '',
     ];
 
-    for (const channelId of channels) {
+    for (const channelId of visibleChannels) {
       const state = session.state.getChannelState(channelId);
       const players = state.playerIds.map((playerId) =>
         this.resolvePcName(session.sessionId, playerId, String(playerId)),
@@ -966,7 +971,7 @@ export class CampaignHandler {
     characters: Character[],
     roomId: string | null,
   ): Promise<CampaignOutput> {
-    const directorPrefs = roomId ? getRoomDirectorPrefs(this.db, roomId) : createDefaultRoomDirectorPrefs();
+    const directorPrefs = createDefaultRoomDirectorPrefs();
     const roomRelationships = roomId ? listRoomRelationships(this.db, roomId) : [];
     const moduleId = state.getModuleId();
     const approvedEntities = moduleId ? listModuleEntities(this.db, moduleId, ['approved']) : [];
@@ -999,95 +1004,108 @@ export class CampaignHandler {
       });
     }
 
-    return this.applyOpeningPlan(state, plan, characters);
+    return this.applyOpeningPlan(state, plan, characters, moduleRulePack?.playPrivacyMode ?? 'public');
   }
 
   private applyOpeningPlan(
     state: SessionState,
     plan: OpeningDirectorPlan,
     characters: Character[],
+    playPrivacyMode: 'public' | 'secret',
   ): CampaignOutput {
     const textParts: string[] = [];
     const privateMessages: Array<{ userId: number; text: string }> = [];
     const deliveredPrivate = new Set<string>();
+    const secretMode = playPrivacyMode === 'secret';
+    const openingChannelId = secretMode ? (plan.beats[0]?.channelId ?? 'main') : 'main';
 
-    state.recordOpeningPlan(plan, { channelId: plan.beats[0]?.channelId ?? 'main' });
-    state.setIngameTime(plan.startTime, '开场导演设定时间', 'ai', undefined, { channelId: plan.beats[0]?.channelId ?? 'main' });
+    state.recordOpeningPlan(plan, { channelId: openingChannelId });
+    state.setIngameTime(plan.startTime, '开场导演设定时间', 'ai', undefined, { channelId: openingChannelId });
 
     const targetToUserId = new Map<string, number>();
     for (const character of characters) {
       targetToUserId.set(normalizeOpeningTarget(character.name), character.playerId);
       targetToUserId.set(normalizeOpeningTarget(String(character.playerId)), character.playerId);
       state.trackPlayer(character.playerId, { channelId: 'main', actorId: character.playerId });
-    }
-
-    for (const assignment of plan.initialAssignments) {
-      const userId = targetToUserId.get(normalizeOpeningTarget(assignment.target));
-      if (userId !== undefined) {
-        state.assignPlayerToChannel(userId, assignment.channelId);
+      if (!secretMode) {
+        state.assignPlayerToChannel(character.playerId, 'main', character.playerId);
       }
     }
 
-    if (plan.beats[0]?.channelId) {
-      state.setFocusChannel(plan.beats[0].channelId);
+    if (secretMode) {
+      for (const assignment of plan.initialAssignments) {
+        const userId = targetToUserId.get(normalizeOpeningTarget(assignment.target));
+        if (userId !== undefined) {
+          state.assignPlayerToChannel(userId, assignment.channelId);
+        }
+      }
+      if (plan.beats[0]?.channelId) {
+        state.setFocusChannel(plan.beats[0].channelId);
+      }
+    } else {
+      state.setFocusChannel('main');
     }
 
     for (const beat of plan.beats) {
-      const label = `【镜头：${beat.sceneName}｜涉及：${beat.participants.join('、')}】`;
-      state.addDirectorMarker(label, {
-        channelId: beat.channelId,
+      const eventChannelId = secretMode ? beat.channelId : 'main';
+      state.addDirectorMarker(`开场段落：${beat.sceneName}`, {
+        channelId: eventChannelId,
         beatId: beat.id,
         participants: beat.participants,
       });
-      textParts.push(label);
 
       if (beat.sceneName || beat.sceneState.description || beat.sceneState.activeNpcs.length > 0) {
         state.setScene({
-          name: beat.sceneName || '开场镜头',
+          name: beat.sceneName || '开场段落',
           description: beat.sceneState.description,
           activeNpcs: beat.sceneState.activeNpcs,
-        }, { channelId: beat.channelId });
+        }, { channelId: eventChannelId });
       }
 
       const beatText = plan.beatTexts[beat.id];
       if (!beatText) continue;
 
-      if (beatText.publicText.trim()) {
-        textParts.push(beatText.publicText.trim());
+      const publicExtras = !secretMode
+        ? beatText.privateTexts
+            .map((privateText) => privateText.text.trim() ? `只有${privateText.target}注意到：${privateText.text.trim()}` : '')
+            .filter(Boolean)
+        : [];
+      const publicText = [beatText.publicText.trim(), ...publicExtras].filter(Boolean).join('\n\n');
+
+      if (publicText) {
+        textParts.push(publicText);
         state.addMessage({
           id: `opening-${beat.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           role: 'kp',
-          content: beatText.publicText.trim(),
+          content: publicText,
           timestamp: new Date(),
-          channelId: beat.channelId,
+          channelId: eventChannelId,
         });
       }
 
-      for (const privateText of beatText.privateTexts) {
-        const userId = targetToUserId.get(normalizeOpeningTarget(privateText.target));
-        const text = privateText.text.trim();
-        if (userId === undefined || !text) continue;
-        const dedupeKey = `${userId}:${text}`;
-        if (deliveredPrivate.has(dedupeKey)) continue;
-        deliveredPrivate.add(dedupeKey);
-        privateMessages.push({ userId, text });
-        state.addMessage({
-          id: `opening-${beat.id}-priv-${userId}-${Math.random().toString(36).slice(2, 6)}`,
-          role: 'kp',
-          content: text,
-          timestamp: new Date(),
-          channelId: beat.channelId,
-          visibility: `private:${userId}`,
-        });
+      if (secretMode) {
+        for (const privateText of beatText.privateTexts) {
+          const userId = targetToUserId.get(normalizeOpeningTarget(privateText.target));
+          const text = privateText.text.trim();
+          if (userId === undefined || !text) continue;
+          const dedupeKey = `${userId}:${text}`;
+          if (deliveredPrivate.has(dedupeKey)) continue;
+          deliveredPrivate.add(dedupeKey);
+          privateMessages.push({ userId, text });
+          state.addMessage({
+            id: `opening-${beat.id}-priv-${userId}-${Math.random().toString(36).slice(2, 6)}`,
+            role: 'kp',
+            content: text,
+            timestamp: new Date(),
+            channelId: eventChannelId,
+            visibility: `private:${userId}`,
+          });
+        }
       }
 
       if (beat.advanceMinutes > 0) {
-        state.advanceIngameTime(beat.advanceMinutes, `开场镜头 ${beat.sceneName} 推进`, 'ai', undefined, { channelId: beat.channelId });
+        state.advanceIngameTime(beat.advanceMinutes, `开场 ${beat.sceneName} 推进`, 'ai', undefined, { channelId: eventChannelId });
       }
-    }
-
-    if (plan.beats.length > 1 || new Set(plan.initialAssignments.map((assignment) => assignment.channelId)).size > 1) {
-      textParts.push(`当前开场频道分配已建立，可使用 .scene list 查看镜头分布。`);
     }
 
     return {

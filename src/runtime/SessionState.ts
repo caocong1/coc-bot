@@ -639,13 +639,13 @@ export class SessionState {
     this.appendEvent(
       'opening_plan',
       { plan },
-      {
-        channelId: options.channelId ?? this._focusChannelId,
-        actorId: options.actorId,
-        visibility: DEFAULT_VISIBILITY,
-        ingameTime: plan.startTime,
-      },
-    );
+        {
+          channelId: options.channelId ?? this._focusChannelId,
+          actorId: options.actorId,
+          visibility: 'kp_only',
+          ingameTime: plan.startTime,
+        },
+      );
   }
 
   addDirectorMarker(
@@ -660,12 +660,12 @@ export class SessionState {
         beatId: options.beatId?.trim(),
         participants: options.participants?.map((item) => item.trim()).filter(Boolean),
       },
-      {
-        channelId: options.channelId ?? this._focusChannelId,
-        actorId: options.actorId,
-        visibility: DEFAULT_VISIBILITY,
-      },
-    );
+        {
+          channelId: options.channelId ?? this._focusChannelId,
+          actorId: options.actorId,
+          visibility: 'kp_only',
+        },
+      );
   }
 
   resolveDirectorSeeds(
@@ -678,12 +678,12 @@ export class SessionState {
     this.appendEvent(
       'director_seed_resolved',
       { seedIds: normalizedSeedIds, reason: reason.trim() || 'resolved' },
-      {
-        channelId: options.channelId ?? this._focusChannelId,
-        actorId: options.actorId,
-        visibility: DEFAULT_VISIBILITY,
-      },
-    );
+        {
+          channelId: options.channelId ?? this._focusChannelId,
+          actorId: options.actorId,
+          visibility: 'kp_only',
+        },
+      );
   }
 
   addDirectorCue(
@@ -693,12 +693,12 @@ export class SessionState {
     this.appendEvent(
       'director_cue',
       { cue },
-      {
-        channelId: options.channelId ?? cue.channelId ?? this._focusChannelId,
-        actorId: options.actorId,
-        visibility: DEFAULT_VISIBILITY,
-      },
-    );
+        {
+          channelId: options.channelId ?? cue.channelId ?? this._focusChannelId,
+          actorId: options.actorId,
+          visibility: 'kp_only',
+        },
+      );
   }
 
   hasBlockingInterrupt(exceptChannelId?: string): boolean {
@@ -2314,7 +2314,7 @@ function summarizeEventForContext(event: SessionEvent<KnownEventPayload>): strin
     }
     case 'channel_focus': {
       const payload = event.payload as ChannelFocusEventPayload;
-      return `镜头切换到频道 ${payload.channelId}`;
+      return `切换到频道 ${payload.channelId}`;
     }
     case 'channel_assignment': {
       const payload = event.payload as ChannelAssignmentEventPayload;
@@ -2344,11 +2344,11 @@ function summarizeEventForContext(event: SessionEvent<KnownEventPayload>): strin
     }
     case 'opening_plan': {
       const payload = event.payload as OpeningPlanEventPayload;
-      return `开场计划已设定：${payload.plan.beats.length} 个镜头，汇合目标为 ${compact(payload.plan.mergeGoal, 48)}`;
+      return `开场计划已设定：${payload.plan.beats.length} 个段落，汇合目标为 ${compact(payload.plan.mergeGoal, 48)}`;
     }
     case 'director_marker': {
       const payload = event.payload as DirectorMarkerEventPayload;
-      return `导演镜头：${payload.label}`;
+      return `导演标记：${payload.label}`;
     }
     case 'director_seed_resolved': {
       const payload = event.payload as DirectorSeedResolvedEventPayload;

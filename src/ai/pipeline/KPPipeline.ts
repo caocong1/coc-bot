@@ -220,6 +220,7 @@ export class KPPipeline {
 
     // 4. 获取玩家角色卡
     const snapshot = this.state.snapshot(channelId, viewerScope);
+    const playPrivacyMode = snapshot.moduleRulePack?.playPrivacyMode ?? 'public';
     const channelState = this.state.getChannelState(channelId, viewerScope);
     const characters = this.getSessionCharacters(snapshot.groupId);
 
@@ -279,13 +280,17 @@ export class KPPipeline {
     const { cleanText: withoutItem, directives: itemDirectives } = extractItemDirectives(withoutEntity);
     const { cleanText: withoutItemChange, directives: itemChangeDirectives } = extractItemChangeDirectives(withoutItem);
     const { cleanText: draftClean, timeMarkers } = extractTimeMarkers(withoutItemChange);
+    const downgradedPrivateTexts = playPrivacyMode === 'public'
+      ? this.downgradePrivateDirectivesToPublic(privateDirectives, characters, input)
+      : [];
+    const guardrailInput = [draftClean, ...downgradedPrivateTexts].filter(Boolean).join('\n\n');
 
     // 8. 守密人过滤（仅过滤文字部分）
     const t1 = Date.now();
     if (this.enableGuardrail) console.log(`[KPPipeline] 调用守密人过滤 (model=${GUARDRAIL_MODEL})...`);
     const filteredText = this.enableGuardrail
-      ? await this.applyGuardrail(draftClean, snapshot.discoveredClues.map((c) => c.title))
-      : draftClean;
+      ? await this.applyGuardrail(guardrailInput, snapshot.discoveredClues.map((c) => c.title))
+      : guardrailInput;
     if (this.enableGuardrail) console.log(`[KPPipeline] 过滤完成: ${filteredText.length}字, 耗时${Date.now() - t1}ms`);
 
     // 9. 解析图片 ID → 实际路径（仅 playerVisible=true 的图片）
@@ -297,12 +302,17 @@ export class KPPipeline {
       }
     }
 
+    if (playPrivacyMode === 'public' && privateDirectives.length > 0) {
+      console.warn(`[KPPipeline] PRIVATE_TO downgraded to public text for public module mode (${privateDirectives.length})`);
+    }
     const compliance = this.applyComplianceCheck(this.enhanceCheckRequests(filteredText, characters));
     if (compliance.warnings.length > 0) {
       console.warn(`[KPPipeline] compliance warnings: ${compliance.warnings.join(', ')}`);
     }
     const finalText = compliance.text;
-    const privateMessages = this.resolvePrivateMessages(privateDirectives, characters, input);
+    const privateMessages = playPrivacyMode === 'secret'
+      ? this.resolvePrivateMessages(privateDirectives, characters, input)
+      : [];
 
     // 10. 写入 KP 回复到历史
     const kpMsgId = `kp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -639,6 +649,30 @@ export class KPPipeline {
     return deliveries.filter((item) => item.text.trim().length > 0).map((item) => ({ ...item, text: item.text.trim() }));
   }
 
+  private downgradePrivateDirectivesToPublic(
+    directives: PrivateDirective[],
+    characters: Character[],
+    input: KPInput,
+  ): string[] {
+    const outputs: string[] = [];
+    const seen = new Set<string>();
+
+    for (const directive of directives) {
+      const text = directive.content.trim();
+      if (!text) continue;
+      const labels = this.resolveDirectiveTargetLabels(directive.targets, characters, input);
+      const prefix = labels.length > 0
+        ? `只有${labels.join('、')}注意到：`
+        : '只有相关调查员注意到：';
+      const merged = `${prefix}${text}`.trim();
+      if (!merged || seen.has(merged)) continue;
+      seen.add(merged);
+      outputs.push(merged);
+    }
+
+    return outputs;
+  }
+
   private resolveDirectiveTargets(targets: string[], characters: Character[], input: KPInput): number[] {
     const resolved = new Set<number>();
     const normalizedTargets = targets.map((item) => normalizeTargetToken(item)).filter(Boolean);
@@ -664,6 +698,35 @@ export class KPPipeline {
     }
 
     return Array.from(resolved);
+  }
+
+  private resolveDirectiveTargetLabels(targets: string[], characters: Character[], input: KPInput): string[] {
+    const labels = new Set<string>();
+    const normalizedTargets = targets.map((item) => normalizeTargetToken(item)).filter(Boolean);
+
+    for (const token of normalizedTargets) {
+      if (/^\d+$/.test(token)) {
+        const userId = Number(token);
+        labels.add(this.getCharacterDisplayName(userId, characters, String(userId)));
+        continue;
+      }
+
+      for (const character of characters) {
+        if (normalizeTargetToken(character.name) === token) {
+          labels.add(character.name);
+        }
+      }
+
+      if (normalizeTargetToken(input.displayName) === token) {
+        labels.add(input.displayName);
+      }
+    }
+
+    if (labels.size === 0) {
+      labels.add(this.getCharacterDisplayName(input.userId, characters, input.displayName));
+    }
+
+    return Array.from(labels);
   }
 
   private getCharacterDisplayName(userId: number, characters: Character[], fallback: string): string {

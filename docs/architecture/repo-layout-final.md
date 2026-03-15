@@ -15,7 +15,7 @@ coc-bot/
 │   ├── storage/
 │   │   ├── Database.ts          # SQLite schema / 迁移
 │   │   ├── ModuleAssetStore.ts  # 模组资产与规则包的行映射 / 查询辅助
-│   │   └── RoomDirectorStore.ts # 房间关系与导演偏好存取
+│   │   └── RoomDirectorStore.ts # 房间关系存取（兼容旧 director_prefs_json 解析）
 │   │
 │   ├── runtime/                 # 消息路由、模式切换、Campaign 管理
 │   │   ├── ModeResolver.ts
@@ -95,7 +95,7 @@ coc-bot/
 │       └── types/
 │           ├── Campaign.ts
 │           ├── Character.ts
-│           ├── StoryDirector.ts # 房间关系 / 导演偏好 / OpeningPlan / DirectorCue 类型
+│           ├── StoryDirector.ts # 房间关系 / 系统导演策略 / OpeningPlan / DirectorCue 类型
 │           └── Session.ts
 │
 ├── web/                         # SolidJS Web 控制台（独立子项目）
@@ -197,8 +197,8 @@ Bun HTTP 服务层，负责：
 AI 系统层，负责：
 - DashScope 客户端封装（chat / 图像生成 / 60s 超时保护）
 - KP 人格模板注册（5 个内置 + 自定义 CRUD，五维行为描述表：基调/灵活度/引导度/致命度/节奏）
-- 7 层上下文组装（ContextBuilder）— 含 PC 自主性边界、维度优先级、多人镜头分配、守密一致性等硬约束
-- KP Pipeline：介入判断 → RAG 检索 → 草稿生成（含重试）→ 守密过滤 → 检定增强（自动附 PC 技能值）→ 图片解析
+- 7 层上下文组装（ContextBuilder）— 含 PC 自主性边界、公开团/秘密团隐私模式、守密一致性等硬约束
+- KP Pipeline：介入判断 → RAG 检索 → 草稿生成（含重试）→ 守密过滤 → 公开/秘密模式下的 PRIVATE_TO 分流 → 检定增强（自动附 PC 技能值）→ 图片解析
 
 ### src/storage / Database.ts
 
@@ -209,14 +209,14 @@ AI 系统层，负责：
 - `kp_templates` — 自定义 KP 人格模板
 - `scenario_modules` / `scenario_module_files` — 模组管理
 - `module_entities` / `module_items` / `module_rule_packs` — 模组资产层（关键 NPC/怪物、关键物品、模组规则包）
-- `campaign_rooms` / `campaign_room_members` / `campaign_room_relationships` — 跑团房间、成员、人物关系与导演偏好
+- `campaign_rooms` / `campaign_room_members` / `campaign_room_relationships` — 房间（用户侧 canonical aggregate）、成员、人物关系；`director_prefs_json` 仅兼容保留
 - `player_tokens` — 玩家 Web 登录
 - `user_settings` — 用户设置（默认骰/昵称）
 
 ### web/
 
 SolidJS + Tailwind CSS v4 Web 控制台（独立子项目），负责：
-- 玩家端：7-Tab 车卡（含武器库选择器）、模组浏览、跑团房间、参考资料（武器/防具/载具/疯狂/属性）
+- 玩家端：7-Tab 车卡（含武器库选择器）、模组浏览、房间详情（消息历史与运行态统一挂在房间下）、参考资料（武器/防具/载具/疯狂/属性）
 - 管理端：会话监控、模组管理、知识库
 - 样式：Tailwind CSS v4 内联类，自定义暗色主题（`app.css`），无 CSS Modules
 

@@ -83,6 +83,8 @@ export interface ScenarioItem {
 export interface ModuleRulePack {
   id: string;
   moduleId: string;
+  playPrivacyMode: 'public' | 'secret';
+  privacyNotes: string;
   sanRules: string;
   combatRules: string;
   deathRules: string;

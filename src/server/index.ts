@@ -252,7 +252,7 @@ async function handleMessage(ctx: MessageContext, senderName?: string): Promise<
     const gid = ctx.groupId;
     let thinkingMsgId = 0;
     const onThinking = () => {
-      actionClient.sendGroupMessage(gid, '💭 KP 正在切换镜头...').then((id) => { thinkingMsgId = id; }).catch(() => {});
+      actionClient.sendGroupMessage(gid, '💭 KP 正在处理分线频道...').then((id) => { thinkingMsgId = id; }).catch(() => {});
     };
     const output = await campaignHandler.handleSceneCommand(
       gid,

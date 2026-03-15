@@ -4,7 +4,7 @@
  * .room list              — 我参与的活跃房间
  * .room create <名称> [模组序号] — 创建房间（返回房间ID）
  * .room join <roomId>     — 加入房间，私发 Web 链接
- * .room pc <角色卡名或ID>  — 为当前房间绑定自己的 PC
+ * .room pc [房间ID] <角色卡名或ID>  — 为当前房间绑定自己的 PC
  * .room relation ...      — 管理房间内人物关系
  * .room start <roomId>    — 审卡（查看 PC 信息 + 约束检查，任何成员可触发）
  * .room ready             — 确认准备就绪（当前群正在审卡的房间）
@@ -21,6 +21,7 @@ import type { CampaignHandler } from '../../runtime/CampaignHandler';
 import type { NapCatActionClient } from '../../adapters/napcat/NapCatActionClient';
 import { deliverCampaignOutput } from '../../runtime/CampaignOutputDelivery';
 import { ModCommand } from '../module/ModCommand';
+import { calculatePrimaryAttributeTotal, normalizeOptionalTotalPoints } from '../../shared/coc7/attributeTotals';
 import {
   countRoomRelationships,
   deleteRoomRelationship,
@@ -40,6 +41,26 @@ function generateShortId(): string {
     id += SHORT_ID_CHARS[Math.floor(Math.random() * SHORT_ID_CHARS.length)];
   }
   return id;
+}
+
+function parseRoomConstraints(raw: string | null): {
+  era?: string;
+  allowedOccupations?: string[];
+  totalPoints?: number | null;
+} {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      era: typeof parsed.era === 'string' && parsed.era.trim() ? parsed.era : undefined,
+      allowedOccupations: Array.isArray(parsed.allowedOccupations)
+        ? parsed.allowedOccupations.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : undefined,
+      totalPoints: normalizeOptionalTotalPoints(parsed.totalPoints),
+    };
+  } catch {
+    return {};
+  }
 }
 
 export class RoomCommand {
@@ -109,9 +130,7 @@ export class RoomCommand {
     const roomRow = this.db.query<{ constraints_json: string }, string>(
       'SELECT constraints_json FROM campaign_rooms WHERE id = ?',
     ).get(roomId);
-    const constraints = roomRow ? JSON.parse(roomRow.constraints_json) as {
-      era?: string; allowedOccupations?: string[]; minStats?: Record<string, number>;
-    } : {};
+    const constraints = parseRoomConstraints(roomRow?.constraints_json ?? null);
 
     // 查询成员 + 角色卡 + ready 状态
     const members = this.db.query<{ qq_id: number; character_id: string | null; ready_at: string | null }, string>(
@@ -157,11 +176,12 @@ export class RoomCommand {
       const statParts = ['STR', 'CON', 'SIZ', 'DEX', 'APP', 'INT', 'POW', 'EDU']
         .filter((k) => attrs[k] !== undefined)
         .map((k) => `${k}:${attrs[k]}`);
+      const totalPoints = calculatePrimaryAttributeTotal(attrs);
       const hp = derived.HP !== undefined ? ` HP:${derived.HP}` : '';
       const san = derived.SAN !== undefined ? ` SAN:${derived.SAN}` : '';
 
       lines.push(`  ${readyMark} QQ ${m.qq_id}: ${charInfo.name}（${charInfo.occupation ?? '未知职业'}）`);
-      lines.push(`     ${statParts.join(' ')}${hp}${san}`);
+      lines.push(`     ${statParts.join(' ')} 总点:${totalPoints}${hp}${san}`);
 
       // 约束检查
       if (constraints.allowedOccupations?.length && charInfo.occupation) {
@@ -169,13 +189,8 @@ export class RoomCommand {
           warnings.push(`QQ ${m.qq_id} 的职业「${charInfo.occupation}」不在模组允许范围内`);
         }
       }
-      if (constraints.minStats) {
-        for (const [stat, minVal] of Object.entries(constraints.minStats)) {
-          const actual = attrs[stat] ?? 0;
-          if (actual < minVal) {
-            warnings.push(`QQ ${m.qq_id} 的 ${stat}(${actual}) 低于最低要求(${minVal})`);
-          }
-        }
+      if (constraints.totalPoints != null && totalPoints !== constraints.totalPoints) {
+        warnings.push(`QQ ${m.qq_id} 的主属性总点为 ${totalPoints}，不等于房间要求 ${constraints.totalPoints}`);
       }
     }
 
@@ -295,14 +310,14 @@ export class RoomCommand {
     let constraintsJson = '{}';
     if (moduleId) {
       const modDetail = this.db.query<{
-        name: string; allowed_occupations: string; min_stats: string; era: string | null;
-      }, string>('SELECT name, allowed_occupations, min_stats, era FROM scenario_modules WHERE id = ?').get(moduleId);
+        name: string; allowed_occupations: string; total_points: number | null; era: string | null;
+      }, string>('SELECT name, allowed_occupations, total_points, era FROM scenario_modules WHERE id = ?').get(moduleId);
       if (modDetail) {
         scenarioName = modDetail.name;
         constraintsJson = JSON.stringify({
           era: modDetail.era ?? undefined,
           allowedOccupations: JSON.parse(modDetail.allowed_occupations),
-          minStats: JSON.parse(modDetail.min_stats),
+          totalPoints: normalizeOptionalTotalPoints(modDetail.total_points),
         });
       }
     }
@@ -357,15 +372,35 @@ export class RoomCommand {
   }
 
   private bindRoomCharacter(ctx: CommandContext, cmd: ParsedCommand): CommandResult {
-    const raw = cmd.args.slice(1).join(' ').trim();
-    if (!raw) return { text: '用法：.room pc <角色卡名或ID>' };
+    let raw = cmd.args.slice(1).join(' ').trim();
+    if (!raw) return { text: '用法：.room pc [房间ID] <角色卡名或ID>' };
     if (ctx.messageType !== 'group' || !ctx.groupId) {
-      return { text: '请在跑团群内发送 .room pc <角色卡名或ID>' };
+      return { text: '请在跑团群内发送 .room pc [房间ID] <角色卡名或ID>' };
     }
 
-    const room = this.findActiveRoomForMember(ctx.groupId, ctx.userId);
+    let room = this.findActiveRoomForMember(ctx.groupId, ctx.userId);
+    const explicitRoomId = cmd.args[1]?.trim();
+    const explicitCharacter = cmd.args.slice(2).join(' ').trim();
+    if (!room && explicitRoomId && explicitCharacter) {
+      const explicitRoom = this.findRoomForMember(explicitRoomId, ctx.userId);
+      if (explicitRoom) {
+        room = explicitRoom;
+        raw = explicitCharacter;
+      }
+    }
     if (!room) {
-      return { text: '当前群没有你参与的待开团/审卡房间，或房间未绑定到本群。' };
+      return {
+        text:
+          '当前群没有可用的待开团/审卡房间。\\n' +
+          '如果你刚 join 了房间，可以直接用：.room pc <房间ID> <角色卡名或ID>\\n' +
+          '示例：.room pc PKM4 尹全',
+      };
+    }
+    if (room.group_id && room.group_id !== ctx.groupId) {
+      return { text: `房间【${room.name}】已绑定到其他群，请在对应群内绑定角色卡。` };
+    }
+    if (!room.group_id) {
+      this.bindRoomToGroup(room.id, ctx.groupId);
     }
 
     const candidates = this.db.query<{ id: string; name: string }, [number]>(
@@ -661,15 +696,42 @@ export class RoomCommand {
     };
   }
 
-  private findActiveRoomForMember(groupId: number, userId: number): { id: string; name: string; status: string } | null {
-    return this.db.query<{ id: string; name: string; status: string }, [number, number]>(
-      `SELECT r.id, r.name, r.status
+  private findActiveRoomForMember(groupId: number, userId: number): { id: string; name: string; status: string; group_id: number | null } | null {
+    const bound = this.db.query<{ id: string; name: string; status: string; group_id: number | null }, [number, number]>(
+      `SELECT r.id, r.name, r.status, r.group_id
          FROM campaign_rooms r
          JOIN campaign_room_members m ON m.room_id = r.id
         WHERE r.group_id = ? AND m.qq_id = ? AND r.status IN ('waiting', 'reviewing', 'running')
         ORDER BY r.updated_at DESC
         LIMIT 1`,
     ).get(groupId, userId) ?? null;
+    if (bound) return bound;
+
+    const unbound = this.db.query<{ id: string; name: string; status: string; group_id: number | null }, [number]>(
+      `SELECT r.id, r.name, r.status, r.group_id
+         FROM campaign_rooms r
+         JOIN campaign_room_members m ON m.room_id = r.id
+        WHERE r.group_id IS NULL AND m.qq_id = ? AND r.status = 'waiting'
+        ORDER BY r.updated_at DESC`,
+    ).all(userId);
+    return unbound.length === 1 ? unbound[0] : null;
+  }
+
+  private findRoomForMember(roomId: string, userId: number): { id: string; name: string; status: string; group_id: number | null } | null {
+    return this.db.query<{ id: string; name: string; status: string; group_id: number | null }, [string, number]>(
+      `SELECT r.id, r.name, r.status, r.group_id
+         FROM campaign_rooms r
+         JOIN campaign_room_members m ON m.room_id = r.id
+        WHERE r.id = ? AND m.qq_id = ? AND r.status IN ('waiting', 'reviewing', 'running')
+        LIMIT 1`,
+    ).get(roomId, userId) ?? null;
+  }
+
+  private bindRoomToGroup(roomId: string, groupId: number): void {
+    this.db.run(
+      'UPDATE campaign_rooms SET group_id = COALESCE(group_id, ?), updated_at = ? WHERE id = ?',
+      [groupId, new Date().toISOString(), roomId],
+    );
   }
 
   private isRoomMember(roomId: string, userId: number): boolean {

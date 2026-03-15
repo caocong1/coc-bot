@@ -115,14 +115,15 @@ export class ContextBuilder {
   build(template: KPTemplate, snapshot: SessionSnapshot, options: BuildOptions): BuiltContext {
     const maxRecent = options.maxRecentMessages ?? 30;
     const layerStats: Record<string, number> = {};
+    const playPrivacyMode = snapshot.moduleRulePack?.playPrivacyMode ?? 'public';
     const channelCharacters = options.channelPlayerIds?.length
       ? options.characters.filter((character) => options.channelPlayerIds?.includes(character.playerId))
       : options.characters;
 
-    const layer1 = this.buildKPPersonality(template, options.customPrompts);
+    const layer1 = this.buildKPPersonality(template, playPrivacyMode, options.customPrompts);
     const layer1_5 = this.buildModuleRulePack(snapshot);
-    const layerDirector = this.buildDirectorState(snapshot, options.directorCue ?? null);
-    const layer2 = this.buildSceneState(snapshot, options.scenarioImages);
+    const layerDirector = this.buildDirectorState(snapshot, options.directorCue ?? null, playPrivacyMode);
+    const layer2 = this.buildSceneState(snapshot, playPrivacyMode, options.scenarioImages);
     const layer3 = this.buildCharacterSheets(channelCharacters);
     const layer4 = this.buildRuleContext(options.ruleChunks ?? []);
     const baseLayer5 = (options.sceneSegments && options.sceneSegments.length > 0 && options.currentSegmentId)
@@ -165,7 +166,11 @@ export class ContextBuilder {
 
   // ─── 层 1：KP 人格 ──────────────────────────────────────────────────────────
 
-  private buildKPPersonality(template: KPTemplate, customPrompts?: string): string {
+  private buildKPPersonality(
+    template: KPTemplate,
+    playPrivacyMode: 'public' | 'secret',
+    customPrompts?: string,
+  ): string {
     const customBlock = customPrompts?.trim()
       ? `\n\n【房间自定义设定】\n${customPrompts.trim()}`
       : '';
@@ -234,14 +239,15 @@ ${template.defaultPromptBlock}${customBlock}
 - 玩家意图模糊（"X那边可能有线索"、"也许去看看"）→ 先以疑问句确认
 - 未得到明确确认前，不叙述任何场景转换
 
-【多人场景与镜头分配】
+【多人行动与公开叙事】
 - 优先回应当前主动发言者，但 2-3 轮内要让沉默玩家也获得可响应的信息
 - 多人同时行动时，按危险度、时序先后和互相影响拆分结算，并明确当前先处理谁
 - 不默认沉默玩家跟随、同意或采取任何行动，需要时点名确认
 
 【分队与单人行动】
-- 队伍分开后采用短镜头切换：每次只推进一个小结果，再切回另一边
-- 单人镜头连续超过 2 轮且不处于即时高危时，切回其他玩家询问同步行动
+- 默认把跑团视为公开桌面游戏：KP 的叙述都在群内公开进行，即使某位调查员暂时单独行动，其他玩家也默认作为桌边旁观者听见叙述
+- 允许自然切到另一位调查员，但请用正常 KP 话术衔接，例如“与此同时”“而在另一边”，不要提及镜头、频道或导演调度
+- 单人感知、幻觉、直觉或只对个别调查员成立的信息，在公开叙事中直接写成“只有你注意到……”“在你的视角里……”之类措辞
 - 单个 PC 获得的私密信息，不自动视为全队知晓
 
 【NPC 管理原则】
@@ -285,7 +291,9 @@ ${this.buildBehavioralProfile(template)}
 - NPC 对话一位说话人一段，避免多人台词挤在一起
 - 若需要更新当前场景，在回复末尾追加 \`[SET_SCENE:场景名|场景描述|NPC1,NPC2]\`
 - 若本轮形成了新的玩家已知线索，在回复末尾追加 \`[DISCOVER_CLUE:标题|玩家可见描述]\`
-- 若只有特定调查员应私下得知某条信息，在回复末尾追加 \`[PRIVATE_TO:调查员名1,调查员名2]私密内容[/PRIVATE_TO]\`
+- ${playPrivacyMode === 'secret'
+    ? '若只有特定调查员应私下得知某条信息，在回复末尾追加 \\`[PRIVATE_TO:调查员名1,调查员名2]私密内容[/PRIVATE_TO]\\`'
+    : '这是公开团。不要使用 \\`[PRIVATE_TO:...]\\`；若是个人感知、幻觉或只对个别调查员成立的信息，直接用公开叙事表达，例如“只有你注意到……”。'}
 - 若本轮引入了新的临时 NPC / 怪物，在回复末尾追加 \`[REGISTER_ENTITY:名称|npc或creature|身份|危险等级]\`
 - 若本轮引入了新的临时物品，在回复末尾追加 \`[REGISTER_ITEM:名称|类别|公开描述|归属]\`
 - 若物品的归属、位置或状态发生变化，在回复末尾追加 \`[ITEM_CHANGE:名称|归属|位置|状态说明]\`
@@ -295,15 +303,22 @@ ${this.buildBehavioralProfile(template)}
 
   // ─── 层 2：场景状态 ─────────────────────────────────────────────────────────
 
-  private buildSceneState(snapshot: SessionSnapshot, images?: ScenarioImage[]): string {
+  private buildSceneState(
+    snapshot: SessionSnapshot,
+    playPrivacyMode: 'public' | 'secret',
+    images?: ScenarioImage[],
+  ): string {
     const parts: string[] = ['# 当前场景状态'];
+    const hasSplitChannels = snapshot.activeChannels.some((channelId) => channelId !== 'main');
 
-    parts.push(`**当前场景频道**：${snapshot.channelId}`);
-    if (snapshot.focusChannelId !== snapshot.channelId) {
-      parts.push(`**当前镜头焦点**：${snapshot.focusChannelId}`);
-    }
-    if (snapshot.activeChannels.length > 1) {
-      parts.push(`**活跃频道**：${snapshot.activeChannels.join('、')}`);
+    if (playPrivacyMode === 'secret' || hasSplitChannels) {
+      parts.push(`**当前处理频道**：${snapshot.channelId}`);
+      if (snapshot.focusChannelId !== snapshot.channelId) {
+        parts.push(`**频道焦点**：${snapshot.focusChannelId}`);
+      }
+      if (snapshot.activeChannels.length > 1) {
+        parts.push(`**活跃频道**：${snapshot.activeChannels.join('、')}`);
+      }
     }
     if (snapshot.interruptChannels.length > 0) {
       parts.push(`⚠️ 注意：${snapshot.interruptChannels.join('、')} 存在紧急未处理事件，避免推进大量游戏时间。`);
@@ -400,6 +415,8 @@ ${this.buildBehavioralProfile(template)}
     if (!rulePack) return '';
 
     const lines: string[] = ['# 模组专属规则包'];
+    lines.push(`**推进模式**：${rulePack.playPrivacyMode === 'secret' ? '秘密团（允许私下推进）' : '公开团（默认群内公开推进）'}`);
+    if (rulePack.privacyNotes) lines.push(`**隐私说明**：${rulePack.privacyNotes}`);
     if (rulePack.sanRules) lines.push(`**理智规则**：${rulePack.sanRules}`);
     if (rulePack.combatRules) lines.push(`**战斗规则**：${rulePack.combatRules}`);
     if (rulePack.deathRules) lines.push(`**死亡规则**：${rulePack.deathRules}`);
@@ -410,18 +427,22 @@ ${this.buildBehavioralProfile(template)}
     return lines.join('\n');
   }
 
-  private buildDirectorState(snapshot: SessionSnapshot, directorCue: DirectorCue | null): string {
-    const hasSplitOpening = snapshot.openingAssignments.length > 0;
+  private buildDirectorState(
+    snapshot: SessionSnapshot,
+    directorCue: DirectorCue | null,
+    playPrivacyMode: 'public' | 'secret',
+  ): string {
+    const hasSplitOpening = snapshot.openingAssignments.some((assignment) => assignment.channelId !== 'main');
     const hasSeeds = snapshot.unresolvedDirectorSeeds.length > 0;
     const hasCueHistory = snapshot.recentDirectorCues.length > 0;
-    const hasSplitChannels = snapshot.activeChannels.length > 1;
+    const hasSplitChannels = snapshot.activeChannels.some((channelId) => channelId !== 'main');
     const hasMergeGoal = Boolean(snapshot.openingMergeGoal?.trim());
     if (!directorCue && !hasSplitOpening && !hasSeeds && !hasCueHistory && !hasSplitChannels && !hasMergeGoal) {
       return '';
     }
 
     const lines: string[] = [
-      '# 导演层（隐藏，仅供节奏与镜头调度参考）',
+      '# 导演层（隐藏，仅供节奏调度参考）',
       '以下信息用于自然编排开场与中途推动，不要把它们原样说给玩家。',
     ];
 
@@ -430,7 +451,7 @@ ${this.buildBehavioralProfile(template)}
     }
 
     if (hasSplitOpening) {
-      lines.push('**开场频道分配**：');
+      lines.push('**内部开场分配**：');
       for (const assignment of snapshot.openingAssignments) {
         lines.push(`- ${assignment.target} → ${assignment.channelId}`);
       }
@@ -459,9 +480,14 @@ ${this.buildBehavioralProfile(template)}
     }
 
     if (hasSplitChannels) {
-      lines.push(`**当前分频道状态**：焦点在 ${snapshot.focusChannelId}，活跃频道有 ${snapshot.activeChannels.join('、')}。`);
+      lines.push(`**当前分线状态**：焦点在 ${snapshot.focusChannelId}，活跃频道有 ${snapshot.activeChannels.join('、')}。`);
     }
 
+    lines.push(
+      playPrivacyMode === 'secret'
+        ? '这是秘密团。可以在必要时私下推进，但要严格控制私聊范围，不要把私聊当成默认表现层。'
+        : '这是公开团。即使短暂切到单人视角，也默认用群内公开叙事表达，不要把导演调度直接说给玩家。',
+    );
     lines.push('推进时优先提供自然的世界反应、人物跟进和时间压力，不要替调查员做决定。');
     return lines.join('\n');
   }

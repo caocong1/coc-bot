@@ -42,12 +42,12 @@ const Manual: Component = () => (
     </section>
 
     <section class="mb-8">
-      <h3 class="text-[0.9rem] text-text-dim mb-3">跑团房间指令</h3>
+      <h3 class="text-[0.9rem] text-text-dim mb-3">房间指令</h3>
       <table class="w-full border-collapse text-sm">
         <thead><tr><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">指令</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">说明</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">示例</th></tr></thead>
         <tbody>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.mod list</td><td class="px-3 py-1.5 border-b border-white/[0.04]">查看可用模组列表（含模组 ID）</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.mod list</td></tr>
-          <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room create &lt;名称&gt; [模组ID]</td><td class="px-3 py-1.5 border-b border-white/[0.04]">创建跑团房间，可选绑定模组</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room create 与苏珊共进晚餐 abc12345</td></tr>
+          <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room create &lt;名称&gt; [模组ID]</td><td class="px-3 py-1.5 border-b border-white/[0.04]">创建房间，可选绑定模组</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room create 与苏珊共进晚餐 abc12345</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room join &lt;房间ID&gt;</td><td class="px-3 py-1.5 border-b border-white/[0.04]">加入房间，私发 Web 车卡链接</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room join f3a9c1b2</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room start &lt;房间ID&gt;</td><td class="px-3 py-1.5 border-b border-white/[0.04]">在当前群开始跑团（需创建者）</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room start f3a9c1b2</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room pause</td><td class="px-3 py-1.5 border-b border-white/[0.04]">暂停当前群的跑团（保留全部进度）</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room pause</td></tr>

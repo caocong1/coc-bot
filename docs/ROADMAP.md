@@ -145,7 +145,7 @@
   - 第一层：AI 内部掌握所有 KP 知识
   - 第二层：`qwen3.5-flash` 二次审查，过滤 `[KP ONLY]` 信息泄露
 - [x] 滚动摘要压缩：超过 40 条消息时异步压缩最旧 20 条
-- [x] 结构化指令抽取：`[SET_SCENE]` / `[DISCOVER_CLUE]` / `[PRIVATE_TO]`
+- [x] 结构化指令抽取：`[SET_SCENE]` / `[DISCOVER_CLUE]` / `[PRIVATE_TO]`（仅秘密团真正走私聊；公开团会回落为公开叙事）
 - [x] 输出合规兜底：去除编号列表，屏蔽直接 `HP/MP/SAN +/-N`
 - [x] 每次 KP 回复后自动检测场景推进（`advanceSegmentIfTitleMatches`）
 - [x] 并发控制：per-group 锁 + per-channel 队列，非焦点频道消息不会丢失
@@ -157,10 +157,7 @@
 - [x] `.campaign start [模板ID]`
   - 检测是否有暂停中的团（提示先 resume 或 stop）
   - 查询群内所有激活 PC 角色卡
-  - AI 生成**三段式沉浸开场白**，逐条发到群聊：
-    1. 时代背景与场景导入（100-150字）
-    2. 调查员登场（根据角色卡，每人 50-80字）
-    3. 事件导火索/钩子（80-120字，以`……`结尾）
+  - AI 生成“开场计划 + beat 文本”式开场，默认按公开团在群里自然推进
 - [x] `.campaign pause` — 暂停（状态改为 `paused`，进度全保留）
 - [x] `.campaign resume` — 继续暂停的跑团
   - 恢复 SessionState + KPPipeline
@@ -168,6 +165,13 @@
     1. 上次进度回顾（基于摘要+线索+近期消息，150-250字）
     2. 重返场景（引导玩家继续，80-120字）
 - [x] `.campaign stop` — 彻底结束（同时能结束暂停中的 session）
+
+#### 导演与隐私模式（当前默认行为）
+
+- [x] 模组规则包支持 `playPrivacyMode = public | secret`
+- [x] 默认公开团：不向玩家显示“镜头/频道”概念，不自动创建分线频道，单人感知也以群内公开叙事表达
+- [x] 秘密团例外：允许私聊推进、秘密分线与更严格的个人秘密处理
+- [x] `.scene` 降级为高级手动工具，主要用于管理员/KP 显式分线或秘密团
   - 注意：这是纯技术指令；叙事上的"结团"由 AI KP 在故事中自然完成
 - [x] `.campaign load <文件名>` — 加载模组全文
   - 读取 `data/knowledge/manifest.json`，按文件名模糊匹配
@@ -213,8 +217,8 @@
   - Step 2：属性只读显示，选职业，职业点/兴趣点预算实时分配技能，填背景故事
   - 提交自动同步 bot DB，玩家无需发任何 QQ 命令
 - [x] 模组浏览：列表 + 时代/职业/属性约束展示
-- [x] 跑团房间：创建/加入/选 PC/触发开始/查看成员列表
-- [x] 我的团：参与过的团列表 + 团详情（场景/线索/消息历史只读）
+- [x] 房间：创建/加入/选 PC/触发开始/查看成员列表
+- [x] 房间即跑团：将旧“我的团”入口并回房间详情，统一在房间内查看消息历史、时间与运行状态
 - [x] 操作手册页面（指令列表 + CoC7 规则参考）
 - [x] `.web room <id>` — 私聊获取直达链接，token 自动存入
 
@@ -229,7 +233,7 @@
 - [x] AI 生成图片（调用 DashScope 图像 API，存储在 `data/knowledge/images/modules/{moduleId}/`）
 - [x] 图片服务端点：`/api/admin/modules/{moduleId}/images/{fileId}`
 - [x] 玩家端浏览模组（含约束预览）
-- [x] 创建房间时选择模组，自动继承约束（时代/职业限制/属性下限）
+- [x] 创建房间时选择模组，自动继承约束（时代/职业限制/主属性总点要求）
 - [x] 模组资产层：`module_entities` / `module_items` / `module_rule_packs`
 - [x] 模组自动提取扩展：元数据 / 资产候选 / 规则包候选三路独立执行
 - [x] Admin 模组子资源 API：实体 / 物品 / 规则包的列表、详情、更新和审核状态变更
@@ -239,10 +243,10 @@
 ### 13. 跑团房间系统
 
 - [x] **DB**：`campaign_rooms` + `campaign_room_members` 表
-- [x] **DB**：`campaign_room_relationships` 表 + `campaign_rooms.director_prefs_json`
+- [x] **DB**：`campaign_room_relationships` 表；`campaign_rooms.director_prefs_json` 仅兼容保留，不再作为产品配置入口
 - [x] 创建/加入/删除房间（运行中需 `force:true`）
 - [x] 房间成员选择 PC（软验证：不符合约束显示 ⚠️ 但允许强行开始）
-- [x] 房间关系预设（无向对）与导演偏好配置（分头开场、扩写强度、私密引子强度）
+- [x] 房间关系预设（无向对）；导演策略已内收为系统全局逻辑，不再按房间配置
 - [x] 从 Web 触发 `.campaign start`
 - [x] 管理员强制删除任意房间
 - [x] 一群只能有一个活跃跑团

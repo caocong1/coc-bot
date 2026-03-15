@@ -3,12 +3,13 @@ import Layout from '../../components/Layout';
 import Dashboard from './Dashboard';
 import Knowledge from './Knowledge';
 import ScenarioManager from './ScenarioManager';
+import ScenarioDetail from './ScenarioDetail';
 import KPStudio from './KPStudio';
 import RoomManager from './RoomManager';
 
 const NAV = [
   { label: '总览', href: '/admin', icon: '📊' },
-  { label: '跑团房间', href: '/admin/rooms', icon: '🎭' },
+  { label: '房间', href: '/admin/rooms', icon: '🎭' },
   { label: '模组管理', href: '/admin/scenarios', icon: '📖' },
   { label: '规则书', href: '/admin/knowledge', icon: '📚' },
   { label: 'KP Studio', href: '/admin/studio', icon: '🎨' },
@@ -52,12 +53,15 @@ const AdminApp: Component = () => {
         const path = location.pathname;
         let page: Component;
         if (path === '/admin/rooms') page = RoomManager;
+        else if (path.startsWith('/admin/scenarios/')) page = ScenarioDetail;
         else if (path === '/admin/scenarios') page = ScenarioManager;
         else if (path === '/admin/knowledge') page = Knowledge;
         else if (path === '/admin/studio') page = KPStudio;
         else page = Dashboard;
 
-        const title = NAV.find((n) => n.href === path)?.label ?? '总览';
+        const title = path.startsWith('/admin/scenarios/')
+          ? '模组详情'
+          : NAV.find((n) => n.href === path)?.label ?? '总览';
 
         return (
           <Layout title={`管理端 — ${title}`} nav={NAV} activeKey={path}>

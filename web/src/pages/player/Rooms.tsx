@@ -15,6 +15,7 @@ const Rooms: Component = () => {
   const [creating, setCreating] = createSignal(false);
   const [form, setForm] = createSignal({ name: '', moduleId: '' });
   const [error, setError] = createSignal('');
+  const archivedHint = new URLSearchParams(location.search).get('archived') === '1';
 
   const selectedModule = () => (modules() ?? []).find((m) => m.id === form().moduleId) ?? null;
 
@@ -43,6 +44,14 @@ const Rooms: Component = () => {
 
   return (
     <div>
+      <div class="mb-5 rounded-2xl border border-accent/20 bg-accent/[0.07] px-4 py-4 text-[0.85rem] leading-6 text-text-dim shadow-sm shadow-black/10">
+        <strong class="text-text">一个房间就是一场跑团。</strong> 从组队、绑卡、审卡到进行中的消息历史，都统一挂在房间下；旧的“我的团”入口已并回这里。
+      </div>
+      <Show when={archivedHint}>
+        <div class="mb-5 rounded-2xl border border-warn/20 bg-warn/10 px-4 py-3 text-[0.84rem] text-text-dim">
+          你访问的是旧的跑团记录链接。对应房间已归档或不再对玩家侧单独暴露，因此已为你回到房间列表。
+        </div>
+      </Show>
       <div class="flex justify-end mb-6 gap-3">
         <button class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" onClick={() => setShowCreate(!showCreate())}>
           {showCreate() ? '取消' : '＋ 创建房间'}
@@ -51,7 +60,7 @@ const Rooms: Component = () => {
 
       <Show when={showCreate()}>
         <div class="bg-surface border border-border rounded-xl p-6 mb-6">
-          <h3 style={{ margin: '0 0 1rem' }}>新建跑团房间</h3>
+          <h3 style={{ margin: '0 0 1rem' }}>新建房间</h3>
           <label class="block text-[0.82rem] text-text-dim mt-3 mb-1 first:mt-0">房间名称 *</label>
           <input
             class="w-full bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent"
@@ -73,17 +82,25 @@ const Rooms: Component = () => {
           {/* 选中模组后展示约束预览 */}
           <Show when={selectedModule()}>
             {(m) => (
-              <div style={{
-                background: 'rgba(124,106,247,0.06)', border: '1px solid rgba(124,106,247,0.2)',
-                'border-radius': '6px', padding: '0.6rem 0.75rem', 'font-size': '0.82rem',
-              }}>
-                <div style={{ color: 'var(--text-dim)', 'margin-bottom': '0.25rem' }}>{m().description || '（无简介）'}</div>
-                <Show when={m().allowedOccupations.length > 0}>
-                  <div>职业：{m().allowedOccupations.join('、')}</div>
-                </Show>
-                <Show when={Object.keys(m().minStats).length > 0}>
-                  <div>最低属性：{Object.entries(m().minStats).map(([k, v]) => `${k}≥${v}`).join(' ')}</div>
-                </Show>
+              <div class="mt-3 rounded-xl border border-accent/25 bg-accent/[0.07] px-4 py-3 text-[0.82rem] shadow-sm shadow-black/10">
+                <div class="flex items-center justify-between gap-3 mb-2">
+                  <div class="font-semibold text-text">将继承到房间的筛卡条件</div>
+                  <span class="rounded-full border border-accent/20 bg-white/5 px-2.5 py-0.5 text-[0.72rem] text-accent">
+                    创建后可再调整
+                  </span>
+                </div>
+                <div class="text-text-dim mb-2">{m().description || '（无简介）'}</div>
+                <div class="flex flex-col gap-1">
+                  <Show when={m().allowedOccupations.length > 0} fallback={<div>职业限制：不限</div>}>
+                    <div>职业限制：{m().allowedOccupations.join('、')}</div>
+                  </Show>
+                  <Show when={m().totalPoints != null} fallback={<div>主属性总点：不校验</div>}>
+                    <div>主属性总点：{m().totalPoints}</div>
+                  </Show>
+                </div>
+                <div class="mt-2 text-[0.75rem] text-text-dim">
+                  房间创建后，房主仍可在房间详情里微调总点要求；这不会改动角色卡本身。
+                </div>
               </div>
             )}
           </Show>
@@ -99,7 +116,7 @@ const Rooms: Component = () => {
       <Show when={!rooms.loading} fallback={<p class="text-text-dim">加载中...</p>}>
         <Show when={(rooms() ?? []).length > 0} fallback={
           <div class="text-center py-16 px-8 text-text-dim">
-            <p>还没有跑团房间</p>
+            <p>还没有房间</p>
             <p class="text-text-dim" style={{ 'margin-top': '0.5rem' }}>
               点击「创建房间」发起一次跑团，或让 KP 分享房间 ID。
             </p>

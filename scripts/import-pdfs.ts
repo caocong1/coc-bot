@@ -61,6 +61,8 @@ interface CliOptions {
   maxFiles?: number;
   /** 单文件模式：只处理这一个文件并合并到 manifest */
   singleFile?: string;
+  /** 可选：将导入产物（尤其图片）关联到外部 source file id */
+  sourceFileId?: string;
   category: KnowledgeCategory;
 }
 
@@ -77,6 +79,8 @@ function parseArgs(argv: string[]): CliOptions {
       options.sourceDir = arg.slice('--source='.length);
     } else if (arg.startsWith('--file=')) {
       options.singleFile = arg.slice('--file='.length);
+    } else if (arg.startsWith('--source-file-id=')) {
+      options.sourceFileId = arg.slice('--source-file-id='.length);
     } else if (arg.startsWith('--out=')) {
       options.outputDir = arg.slice('--out='.length);
     } else if (arg.startsWith('--max=')) {
@@ -318,7 +322,8 @@ async function analyzeAndGenerateSceneImages(
   apiKey: string,
   text: string,
   existingCaptions: string[],
-  fileId: string,
+  imageBucketId: string,
+  sourceFileId: string,
   imageLibrary: ImageLibrary,
 ): Promise<string[]> {
   const generatedIds: string[] = [];
@@ -371,7 +376,7 @@ ${textSnippet}
   console.log(`[import] AI 建议生成 ${suggestions.length} 张场景图`);
 
   const client = new DashScopeClient(apiKey);
-  const imgDir = resolve(`data/knowledge/images/${fileId}`);
+  const imgDir = resolve(`data/knowledge/images/${imageBucketId}`);
   mkdirSync(imgDir, { recursive: true });
 
   for (const suggestion of suggestions) {
@@ -394,7 +399,7 @@ ${textSnippet}
       const imgId = ImageLibrary.generateId();
       const imgFilename = `${imgId}.jpg`;
       const imgAbsPath = join(imgDir, imgFilename);
-      const imgRelPath = `data/knowledge/images/${fileId}/${imgFilename}`;
+      const imgRelPath = `data/knowledge/images/${imageBucketId}/${imgFilename}`;
       writeFileSync(imgAbsPath, imgBuffer);
 
       // 写入 ImageLibrary
@@ -405,7 +410,7 @@ ${textSnippet}
         mimeType: 'image/jpeg',
         caption: suggestion.label,
         playerVisible: true,
-        sourceFileId: fileId,
+        sourceFileId,
         generatedPrompt: suggestion.description,
         optimizedPrompt,
         createdAt: new Date().toISOString(),
@@ -430,11 +435,14 @@ async function processFile(
   pdfExtractor: PdfTextExtractor,
   chunkPipeline: ChunkPipeline,
   imageLibrary: ImageLibrary,
+  sourceFileIdOverride?: string,
 ): Promise<ImportedFileEntry> {
   const ext = extname(filePath).toLowerCase();
   const stat = statSync(filePath);
   const id = makeEntryId(relPath, stat.size);
   const fileType: 'pdf' | 'text' | 'docx' = ext === '.pdf' ? 'pdf' : ext === '.docx' ? 'docx' : 'text';
+  const imageSourceFileId = sourceFileIdOverride ?? id;
+  const imageBucketId = imageSourceFileId;
 
   console.log(`[import] extracting (${fileType}): ${relPath}`);
 
@@ -455,7 +463,7 @@ async function processFile(
     pages = Math.ceil(extractedText.length / 3000);
 
     // 保存提取的图片到图片库
-    const imgDir = resolve(`data/knowledge/images/${id}`);
+    const imgDir = resolve(`data/knowledge/images/${imageBucketId}`);
     mkdirSync(imgDir, { recursive: true });
 
     // 建立图文映射（用于 AI 生成 caption）
@@ -467,7 +475,7 @@ async function processFile(
       const imgId = ImageLibrary.generateId();
       const imgFilename = `${imgId}${imgExt}`;
       const imgAbsPath = join(imgDir, imgFilename);
-      const imgRelPath = `data/knowledge/images/${id}/${imgFilename}`;
+      const imgRelPath = `data/knowledge/images/${imageBucketId}/${imgFilename}`;
 
       writeFileSync(imgAbsPath, img.buffer);
 
@@ -486,7 +494,7 @@ async function processFile(
         mimeType: img.mimeType,
         caption,
         playerVisible: !!caption,
-        sourceFileId: id,
+        sourceFileId: imageSourceFileId,
         createdAt: new Date().toISOString(),
       });
       imageIds.push(imgId);
@@ -543,7 +551,7 @@ async function processFile(
 
     try {
       const generatedIds = await analyzeAndGenerateSceneImages(
-        aiApiKey, extractedText, existingCaptions, id, imageLibrary,
+        aiApiKey, extractedText, existingCaptions, imageBucketId, imageSourceFileId, imageLibrary,
       );
       imageIds.push(...generatedIds);
       if (generatedIds.length > 0) {
@@ -609,7 +617,17 @@ async function main(): Promise<void> {
     let entry: ImportedFileEntry;
     let exitCode = 0;
     try {
-      entry = await processFile(filePath, relPath, options.category, outputDir, chunkOutputDir, pdfExtractor, chunkPipeline, imageLibrary);
+      entry = await processFile(
+        filePath,
+        relPath,
+        options.category,
+        outputDir,
+        chunkOutputDir,
+        pdfExtractor,
+        chunkPipeline,
+        imageLibrary,
+        options.sourceFileId,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[import] failed: ${relPath} -> ${message}`);
@@ -645,7 +663,16 @@ async function main(): Promise<void> {
   for (const filePath of targetFiles) {
     const relPath = relative(sourceRoot, filePath);
     try {
-      const entry = await processFile(filePath, relPath, options.category, outputDir, chunkOutputDir, pdfExtractor, chunkPipeline, imageLibrary);
+      const entry = await processFile(
+        filePath,
+        relPath,
+        options.category,
+        outputDir,
+        chunkOutputDir,
+        pdfExtractor,
+        chunkPipeline,
+        imageLibrary,
+      );
       imported.push(entry);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

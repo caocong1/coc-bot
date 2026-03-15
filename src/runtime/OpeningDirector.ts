@@ -104,13 +104,17 @@ export class OpeningDirector {
   }
 
   private async generateSkeleton(input: ResolvedOpeningDirectorInput): Promise<OpeningDirectorPlanSkeleton> {
+    const privacyMode = getPlayPrivacyMode(input.moduleRulePack);
     const systemPrompt = [
       '你是一位擅长 CoC 跑团开场编排的导演型守秘人。',
       '你的任务是生成一个严格合法的 JSON 开场骨架，不要输出任何解释、Markdown 或代码块。',
       '你可以在不改写模组核心真相、关键谜底、关键线索链和终局条件的前提下，补充合理的连接场景、非关键路人、委托细节、天气、路途和个人化引子。',
       '显式房间关系优先，未设定的关系可以推断为轻量关系，但只能写进 assumedLinks，不能假定所有人都互相认识。',
-      '优先参考模组原文、已审核实体/物品/规则包、调查员职业与背景。',
-      '如果导演偏好允许，可以把不同调查员安排为不同时间和地点进场，并给出自然汇合目标。',
+      '优先参考模组原文、已审核实体、已审核物品、已审核规则包和调查员职业背景。',
+      privacyMode === 'secret'
+        ? '这是秘密团，可以在内部调度上安排不同调查员分线开场，并在需要时设置 privateTargets。'
+        : '这是公开团，所有剧情默认在群内公开推进。不要依赖私聊或玩家可见分镜；initialAssignments 应全部为 main，privateTargets 应为空数组。',
+      '如果系统导演策略允许，可以把不同调查员安排为不同时间和地点进场，并给出自然汇合目标。',
       '严格返回 JSON 对象，字段必须符合约定：startTime, randomSeed, assumedLinks, initialAssignments, beats, mergeGoal, directorSeeds。',
       'beats 数量控制在 2 到 5 个；initialAssignments 必须覆盖所有调查员；directorSeeds 至少包含 2 个 seed。',
     ].join('\n');
@@ -122,7 +126,7 @@ export class OpeningDirector {
       '【房间显式关系】',
       this.buildRoomRelationshipSummary(input.roomRelationships, input.characters),
       '',
-      '【导演偏好】',
+      '【系统导演策略】',
       this.buildDirectorPrefsSummary(input.directorPrefs),
       '',
       '【模组规则包】',
@@ -182,13 +186,17 @@ export class OpeningDirector {
     skeleton: OpeningDirectorPlanSkeleton,
     beat: OpeningBeatSkeleton,
   ): Promise<OpeningBeatText> {
+    const privacyMode = getPlayPrivacyMode(input.moduleRulePack);
     const systemPrompt = [
       '你是一位克苏鲁跑团守秘人，负责为一个开场 beat 生成文本。',
       '只返回 JSON 对象，不要输出解释、Markdown 或代码块。',
       'publicText 可以略长一些，但必须自然、沉浸、克制，不泄露 KP ONLY 内容。',
       '允许补充合理的连接内容和轻量原创细节，但不要改写模组核心真相、幕后身份、终局条件或关键解法。',
-      'privateTexts 只给 beat.privateTargets 中的角色写私密引子；没有则返回空数组。',
-      '返回结构：{"publicText":"...","privateTexts":[{"target":"角色名","text":"..."}],"followupHint":"一句对后续镜头有用的隐藏提示"}',
+      privacyMode === 'secret'
+        ? 'privateTexts 只给 beat.privateTargets 中的角色写私密引子；没有则返回空数组。'
+        : '这是公开团。不要使用私聊语气；若是单人感知或个人细节，也直接写进 publicText，例如“只有你注意到……”。privateTexts 必须返回空数组。',
+      'beat 之间如果需要切到另一位调查员，请使用正常 KP 话术，例如“与此同时”“而在另一边”，不要提及镜头、频道或导演调度。',
+      '返回结构：{"publicText":"...","privateTexts":[{"target":"角色名","text":"..."}],"followupHint":"一句对后续推进有用的隐藏提示"}',
     ].join('\n');
 
     const userPrompt = [
@@ -250,12 +258,13 @@ export class OpeningDirector {
   private buildFallbackSkeleton(input: ResolvedOpeningDirectorInput): OpeningDirectorPlanSkeleton {
     const cast = input.characters.map((character) => character.name);
     const randomSeed = `seed-${Math.random().toString(36).slice(2, 8)}`;
-    const allowSplit = input.directorPrefs.allowSplitOpening && input.directorPrefs.preferredStartStyle !== 'together' && cast.length > 1;
+    const secretMode = getPlayPrivacyMode(input.moduleRulePack) === 'secret';
+    const allowSplit = shouldUseSplitOpening(input);
     const firstGroup = allowSplit ? cast.filter((_, index) => index % 2 === 0) : cast;
     const secondGroup = allowSplit ? cast.filter((_, index) => index % 2 === 1) : cast;
     const assignments: OpeningAssignment[] = cast.map((target, index) => ({
       target,
-      channelId: allowSplit && secondGroup.includes(target) ? `line-${Math.max(1, index)}` : 'main',
+      channelId: secretMode && allowSplit && secondGroup.includes(target) ? `line-${Math.max(1, index)}` : 'main',
     }));
 
     const beats: OpeningBeatSkeleton[] = [];
@@ -263,7 +272,7 @@ export class OpeningDirector {
       id: 'beat-1',
       channelId: 'main',
       participants: firstGroup.length > 0 ? firstGroup : cast,
-      sceneName: '开场镜头',
+      sceneName: '开场',
       purpose: 'intro',
       advanceMinutes: 0,
       sceneState: {
@@ -274,16 +283,16 @@ export class OpeningDirector {
     });
     beats.push({
       id: 'beat-2',
-      channelId: allowSplit && secondGroup.length > 0 ? assignments.find((item) => item.target === secondGroup[0])?.channelId ?? 'side-1' : 'main',
+      channelId: secretMode && allowSplit && secondGroup.length > 0 ? assignments.find((item) => item.target === secondGroup[0])?.channelId ?? 'side-1' : 'main',
       participants: allowSplit && secondGroup.length > 0 ? secondGroup : cast,
-      sceneName: '钩子镜头',
+      sceneName: '异样浮现',
       purpose: cast.length > 1 ? 'merge_setup' : 'hook',
       advanceMinutes: 10,
       sceneState: {
         description: '一条把众人逐步引向同一个谜团的线索悄然浮现。',
         activeNpcs: [],
       },
-      privateTargets: input.directorPrefs.privateHookLevel === 'none' ? [] : [cast[0]].filter(Boolean),
+      privateTargets: secretMode && input.directorPrefs.privateHookLevel !== 'none' ? [cast[0]].filter(Boolean) : [],
     });
 
     const mergeGoal = cast.length > 1
@@ -330,17 +339,19 @@ export class OpeningDirector {
       ? `${participants}还不知道彼此已被同一股阴影牵住。`
       : `${participants}此刻出现在这里并不突兀，而像是命运把他们推向了同一条线索的不同入口。`;
     const publicText = [
-      `${intro} ${beat.sceneState.description || `镜头落在${beat.sceneName}。`}`,
+      `${intro} ${beat.sceneState.description || `${beat.sceneName}的异样逐渐浮现。`}` ,
       input.directorPrefs.allowModuleExpansion
         ? '周围一些原本不值一提的小人物、天气和日常声响，都在这个时刻变得略显不合时宜。'
         : '模组原有的开场异样正以一种足够自然的方式逼近。',
       skeleton.mergeGoal ? `你隐约能感觉到，这一切最终会把人引向同一个问题：${skeleton.mergeGoal}` : '',
     ].filter(Boolean).join(' ');
 
-    const privateTexts = beat.privateTargets.slice(0, 1).map((target) => ({
-      target,
-      text: `${target}会比其他人更早注意到一点只对自己有意义的细节，它足以让你多留一个心眼，但还不足以直接说明真相。`,
-    }));
+    const privateTexts = getPlayPrivacyMode(input.moduleRulePack) === 'secret'
+      ? beat.privateTargets.slice(0, 1).map((target) => ({
+          target,
+          text: `${target}会比其他人更早注意到一点只对自己有意义的细节，它足以让你多留一个心眼，但还不足以直接说明真相。`,
+        }))
+      : [];
 
     return {
       publicText,
@@ -385,7 +396,9 @@ export class OpeningDirector {
   private buildDirectorPrefsSummary(prefs: RoomDirectorPrefs): string {
     return [
       `allowSplitOpening=${prefs.allowSplitOpening}`,
-      `preferredStartStyle=${prefs.preferredStartStyle}`,
+      prefs.preferredStartStyle === 'auto'
+        ? 'preferredStartStyle=auto（根据调查员职业、背景和人物关系自然判断是否分头或同场开场）'
+        : `preferredStartStyle=${prefs.preferredStartStyle}`,
       `allowModuleExpansion=${prefs.allowModuleExpansion}`,
       `expansionLevel=${prefs.expansionLevel}`,
       `privateHookLevel=${prefs.privateHookLevel}`,
@@ -394,14 +407,16 @@ export class OpeningDirector {
   }
 
   private buildRulePackSummary(rulePack: ModuleRulePack | null): string {
-    if (!rulePack) return '（暂无已审核规则包）';
+    if (!rulePack) return '（暂无已审核规则包，默认按公开团处理）';
     return [
-      rulePack.sanRules && `理智规则：${rulePack.sanRules}`,
-      rulePack.combatRules && `战斗规则：${rulePack.combatRules}`,
-      rulePack.timeRules && `时间规则：${rulePack.timeRules}`,
-      rulePack.revelationRules && `信息揭示：${rulePack.revelationRules}`,
-      rulePack.forbiddenAssumptions && `禁止假设：${rulePack.forbiddenAssumptions}`,
-      rulePack.freeText && `补充：${rulePack.freeText}`,
+      `隐私模式：${rulePack.playPrivacyMode === 'secret' ? '秘密团' : '公开团'}` ,
+      rulePack.privacyNotes && `隐私说明：${rulePack.privacyNotes}` ,
+      rulePack.sanRules && `理智规则：${rulePack.sanRules}` ,
+      rulePack.combatRules && `战斗规则：${rulePack.combatRules}` ,
+      rulePack.timeRules && `时间规则：${rulePack.timeRules}` ,
+      rulePack.revelationRules && `信息揭示：${rulePack.revelationRules}` ,
+      rulePack.forbiddenAssumptions && `禁止假设：${rulePack.forbiddenAssumptions}` ,
+      rulePack.freeText && `补充：${rulePack.freeText}` ,
     ].filter(Boolean).join('\n');
   }
 
@@ -464,8 +479,9 @@ function normalizeOpeningSkeleton(
 ): OpeningDirectorPlanSkeleton {
   const cast = input.characters.map((character) => character.name);
   const castSet = new Set(cast.map(normalizeName));
-  const assignments = normalizeAssignments(parsed.initialAssignments, cast);
-  const beats = normalizeBeats(parsed.beats, cast, assignments);
+  const secretMode = getPlayPrivacyMode(input.moduleRulePack) === 'secret';
+  const assignments = normalizeAssignments(parsed.initialAssignments, cast, secretMode);
+  const beats = normalizeBeats(parsed.beats, cast, assignments, secretMode);
   const mergeGoal = String(parsed.mergeGoal ?? '').trim() || (cast.length > 1
     ? '让调查员从不同入口逐渐意识到，他们面对的是同一桩异样。'
     : '让调查员抓住眼前最值得追查的异样。');
@@ -483,12 +499,14 @@ function normalizeOpeningSkeleton(
   };
 }
 
-function normalizeAssignments(raw: unknown, cast: string[]): OpeningAssignment[] {
+function normalizeAssignments(raw: unknown, cast: string[], allowSecretSplit: boolean): OpeningAssignment[] {
   const assignments = Array.isArray(raw) ? raw : [];
   const byTarget = new Map<string, OpeningAssignment>();
   for (const item of assignments) {
     const target = String((item as OpeningAssignment).target ?? '').trim();
-    const channelId = normalizeChannelId(String((item as OpeningAssignment).channelId ?? '').trim() || 'main');
+    const channelId = allowSecretSplit
+      ? normalizeChannelId(String((item as OpeningAssignment).channelId ?? '').trim() || 'main')
+      : 'main';
     if (!target) continue;
     byTarget.set(normalizeName(target), { target, channelId });
   }
@@ -504,6 +522,7 @@ function normalizeBeats(
   raw: unknown,
   cast: string[],
   assignments: OpeningAssignment[],
+  allowSecretSplit: boolean,
 ): OpeningBeatSkeleton[] {
   const assignmentMap = new Map(assignments.map((assignment) => [normalizeName(assignment.target), assignment.channelId]));
   const beats = (Array.isArray(raw) ? raw : [])
@@ -513,13 +532,15 @@ function normalizeBeats(
         ? beat.participants.map((participant) => String(participant).trim()).filter(Boolean)
         : [];
       if (participants.length === 0) return null;
-      const channelId = normalizeChannelId(String(beat.channelId ?? assignmentMap.get(normalizeName(participants[0])) ?? 'main'));
+      const channelId = allowSecretSplit
+        ? normalizeChannelId(String(beat.channelId ?? assignmentMap.get(normalizeName(participants[0])) ?? 'main'))
+        : 'main';
       const purpose = beat.purpose === 'hook' || beat.purpose === 'merge_setup' ? beat.purpose : 'intro';
       return {
         id: String(beat.id ?? `beat-${index + 1}`),
         channelId,
         participants,
-        sceneName: String(beat.sceneName ?? `镜头 ${index + 1}`).trim() || `镜头 ${index + 1}`,
+        sceneName: String(beat.sceneName ?? `开场 ${index + 1}`).trim() || `开场 ${index + 1}`,
         purpose,
         advanceMinutes: clampNumber(Number(beat.advanceMinutes ?? 0), 0, 180),
         sceneState: {
@@ -528,7 +549,7 @@ function normalizeBeats(
             ? beat.sceneState!.activeNpcs.map((name) => String(name).trim()).filter(Boolean)
             : [],
         },
-        privateTargets: Array.isArray(beat.privateTargets)
+        privateTargets: allowSecretSplit && Array.isArray(beat.privateTargets)
           ? beat.privateTargets.map((target) => String(target).trim()).filter((target) => participants.some((p) => normalizeName(p) === normalizeName(target)))
           : [],
       } satisfies OpeningBeatSkeleton;
@@ -651,6 +672,10 @@ function normalizeName(value: string): string {
   return value.toLowerCase().replace(/[\s【】（）()：:，,、]/g, '').trim();
 }
 
+function getPlayPrivacyMode(rulePack: ModuleRulePack | null | undefined): 'public' | 'secret' {
+  return rulePack?.playPrivacyMode === 'secret' ? 'secret' : 'public';
+}
+
 function isRelationType(value: string): boolean {
   return ['heard_of', 'acquainted', 'close', 'bound', 'secret_tie'].includes(value);
 }
@@ -658,6 +683,22 @@ function isRelationType(value: string): boolean {
 function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function shouldUseSplitOpening(input: ResolvedOpeningDirectorInput): boolean {
+  if (getPlayPrivacyMode(input.moduleRulePack) !== 'secret') return false;
+  if (!input.directorPrefs.allowSplitOpening || input.characters.length <= 1) return false;
+  if (input.directorPrefs.preferredStartStyle === 'together') return false;
+  if (input.directorPrefs.preferredStartStyle === 'split') return true;
+  if (input.directorPrefs.preferredStartStyle === 'mixed') return input.characters.length > 1;
+
+  const occupations = new Set(
+    input.characters
+      .map((character) => character.occupation?.trim())
+      .filter((value): value is string => Boolean(value)),
+  );
+  const relationshipCount = roomRelationshipsToLinks(input.roomRelationships, input.characters).length;
+  return input.characters.length >= 3 || occupations.size >= 2 || relationshipCount === 0;
 }
 
 function compact(text: string, max: number): string {

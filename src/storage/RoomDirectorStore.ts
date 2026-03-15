@@ -145,7 +145,7 @@ function sanitizeRoomDirectorPrefs(input: Partial<RoomDirectorPrefs> | null | un
   const prefs = input ?? {};
   return {
     allowSplitOpening: typeof prefs.allowSplitOpening === 'boolean' ? prefs.allowSplitOpening : undefined,
-    preferredStartStyle: ['together', 'split', 'mixed'].includes(String(prefs.preferredStartStyle))
+    preferredStartStyle: ['auto', 'together', 'split', 'mixed'].includes(String(prefs.preferredStartStyle))
       ? prefs.preferredStartStyle
       : undefined,
     allowModuleExpansion: typeof prefs.allowModuleExpansion === 'boolean' ? prefs.allowModuleExpansion : undefined,

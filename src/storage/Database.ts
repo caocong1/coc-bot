@@ -225,6 +225,7 @@ export function migrateCoreSchema(db: Database): void {
       era TEXT,
       allowed_occupations TEXT NOT NULL DEFAULT '[]',
       min_stats TEXT NOT NULL DEFAULT '{}',
+      total_points INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -298,6 +299,8 @@ export function migrateCoreSchema(db: Database): void {
     CREATE TABLE IF NOT EXISTS module_rule_packs (
       id TEXT PRIMARY KEY,
       module_id TEXT NOT NULL REFERENCES scenario_modules(id),
+      play_privacy_mode TEXT NOT NULL DEFAULT 'public',
+      privacy_notes TEXT NOT NULL DEFAULT '',
       san_rules TEXT NOT NULL DEFAULT '',
       combat_rules TEXT NOT NULL DEFAULT '',
       death_rules TEXT NOT NULL DEFAULT '',
@@ -343,6 +346,26 @@ export function migrateCoreSchema(db: Database): void {
   try {
     db.exec("ALTER TABLE campaign_rooms ADD COLUMN director_prefs_json TEXT NOT NULL DEFAULT '{}';");
   } catch { /* 列已存在，忽略 */ }
+
+  try {
+    db.exec("ALTER TABLE module_rule_packs ADD COLUMN play_privacy_mode TEXT NOT NULL DEFAULT 'public';");
+  } catch { /* ??????? */ }
+
+  try {
+    db.exec("ALTER TABLE module_rule_packs ADD COLUMN privacy_notes TEXT NOT NULL DEFAULT '';");
+  } catch { /* ??????? */ }
+
+  let addedScenarioModuleTotalPoints = false;
+  try {
+    db.exec('ALTER TABLE scenario_modules ADD COLUMN total_points INTEGER;');
+    addedScenarioModuleTotalPoints = true;
+  } catch { /* 列已存在，忽略 */ }
+
+  if (addedScenarioModuleTotalPoints) {
+    try {
+      db.exec('UPDATE scenario_modules SET total_points = 460 WHERE total_points IS NULL;');
+    } catch { /* 忽略已有或异常 */ }
+  }
 
   try {
     db.exec('ALTER TABLE player_tokens ADD COLUMN group_id INTEGER;');

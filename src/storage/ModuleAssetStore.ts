@@ -56,6 +56,8 @@ interface ModuleItemRow {
 interface ModuleRulePackRow {
   id: string;
   module_id: string;
+  play_privacy_mode: 'public' | 'secret' | null;
+  privacy_notes: string | null;
   san_rules: string | null;
   combat_rules: string | null;
   death_rules: string | null;
@@ -200,6 +202,8 @@ export function rowToModuleRulePack(row: ModuleRulePackRow): ModuleRulePack {
   return {
     id: row.id,
     moduleId: row.module_id,
+    playPrivacyMode: row.play_privacy_mode === 'secret' ? 'secret' : 'public',
+    privacyNotes: row.privacy_notes ?? '',
     sanRules: row.san_rules ?? '',
     combatRules: row.combat_rules ?? '',
     deathRules: row.death_rules ?? '',

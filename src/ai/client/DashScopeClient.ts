@@ -7,9 +7,8 @@
 const DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DASHSCOPE_ENDPOINT = `${DASHSCOPE_BASE}/chat/completions`;
 const DASHSCOPE_EMBED_ENDPOINT = `${DASHSCOPE_BASE}/embeddings`;
-/** 图片生成（qwen-image-2.0-pro）专有 API，不走兼容模式 */
-const DASHSCOPE_IMAGE_SUBMIT = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis';
-const DASHSCOPE_TASK_URL = 'https://dashscope.aliyuncs.com/api/v1/tasks';
+/** 图片生成专有 API，不走兼容模式 */
+const DASHSCOPE_IMAGE_SYNC = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';
 
 /** text-embedding-v4 每批最多 25 条 */
 const EMBED_BATCH_SIZE = 25;
@@ -173,76 +172,72 @@ export class DashScopeClient {
   }
 
   /**
-   * 图片生成（qwen-image-2.0-pro，异步任务模式）
+   * 图片生成。
    *
-   * 流程：提交任务 → 轮询直至 SUCCEEDED → 返回图片 URL
-   * @param prompt     已优化的英文提示词
+   * 当前默认使用 qwen-image-2.0-pro，该模型应走同步 multimodal-generation 接口。
+   * 若后续切回仅支持异步的 qwen-image / qwen-image-plus，可再恢复 task 轮询分支。
+   *
+   * @param prompt     已优化的提示词
    * @param size       图片尺寸，默认 1024*1024
-   * @param timeoutMs  最长等待时间（默认 90 秒）
    */
   async generateImage(
     prompt: string,
     size = '1024*1024',
-    timeoutMs = 90_000,
   ): Promise<string> {
-    // 1. 提交任务
-    const submitResp = await fetch(DASHSCOPE_IMAGE_SUBMIT, {
+    const response = await fetch(DASHSCOPE_IMAGE_SYNC, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
-        'X-DashScope-Async': 'enable',
       },
       body: JSON.stringify({
         model: 'qwen-image-2.0-pro',
-        input: { prompt },
-        parameters: { size, n: 1 },
+        input: {
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { text: prompt },
+              ],
+            },
+          ],
+        },
+        parameters: {
+          size,
+          n: 1,
+          prompt_extend: false,
+          watermark: false,
+        },
       }),
     });
 
-    if (!submitResp.ok) {
-      const body = await submitResp.text().catch(() => '');
-      throw new Error(`图片生成提交失败 (${submitResp.status}): ${body}`);
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`图片生成失败 (${response.status}): ${body}`);
     }
 
-    const submitJson = await submitResp.json() as {
-      output: { task_id: string; task_status: string };
-    };
-    const taskId = submitJson.output?.task_id;
-    if (!taskId) throw new Error('图片生成：未返回 task_id');
-
-    // 2. 轮询结果
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      await new Promise<void>((r) => setTimeout(r, 3000));
-
-      const pollResp = await fetch(`${DASHSCOPE_TASK_URL}/${taskId}`, {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
-      });
-
-      if (!pollResp.ok) continue;
-
-      const pollJson = await pollResp.json() as {
-        output: {
-          task_status: string;
-          results?: Array<{ url?: string }>;
-          message?: string;
-        };
+    const json = await response.json() as {
+      output?: {
+        choices?: Array<{
+          message?: {
+            content?: Array<{
+              image?: string;
+            }>;
+          };
+        }>;
       };
+      code?: string;
+      message?: string;
+    };
 
-      const status = pollJson.output?.task_status;
-      if (status === 'SUCCEEDED') {
-        const url = pollJson.output?.results?.[0]?.url;
-        if (!url) throw new Error('图片生成成功但未返回 URL');
-        return url;
+    const imageUrl = json.output?.choices?.[0]?.message?.content?.[0]?.image;
+    if (!imageUrl) {
+      if (json.code || json.message) {
+        throw new Error(`图片生成失败: ${json.code ?? 'unknown'} ${json.message ?? ''}`.trim());
       }
-      if (status === 'FAILED') {
-        throw new Error(`图片生成失败: ${pollJson.output?.message ?? 'unknown'}`);
-      }
-      // PENDING / RUNNING → 继续等
+      throw new Error('图片生成成功但未返回图片 URL');
     }
-
-    throw new Error(`图片生成超时（>${timeoutMs / 1000}秒）`);
+    return imageUrl;
   }
 
   /**

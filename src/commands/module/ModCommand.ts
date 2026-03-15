@@ -17,7 +17,7 @@ interface ModuleRow {
   description: string | null;
   era: string | null;
   allowed_occupations: string;
-  min_stats: string;
+  total_points: number | null;
 }
 
 export class ModCommand {
@@ -35,10 +35,20 @@ export class ModCommand {
 
   /**
    * 按 created_at DESC 返回所有模组（用于序号查找）。
+   * 玩家侧只展示当前没有文档处于导入中的模组，避免把未就绪模组暴露给 .mod / .room 流程。
    */
   private allModules(): ModuleRow[] {
     return this.db.query<ModuleRow, []>(
-      'SELECT id, name, description, era, allowed_occupations, min_stats FROM scenario_modules ORDER BY created_at DESC',
+      `SELECT m.id, m.name, m.description, m.era, m.allowed_occupations, m.total_points
+       FROM scenario_modules m
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM scenario_module_files f
+         WHERE f.module_id = m.id
+           AND f.file_type = 'document'
+           AND f.import_status = 'pending'
+       )
+       ORDER BY m.created_at DESC`,
     ).all();
   }
 
@@ -89,15 +99,14 @@ export class ModCommand {
     if (!m) return { text: `序号 ${index} 超出范围，请通过 .mod list 查看可用模组` };
 
     const occs = (JSON.parse(m.allowed_occupations) as string[]).join('、');
-    const stats = Object.entries(JSON.parse(m.min_stats) as Record<string, number>)
-      .map(([k, v]) => `${k}≥${v}`).join(' ');
+    const totalPoints = typeof m.total_points === 'number' ? m.total_points : null;
 
     return {
       text:
         `📖 ${m.name}\n` +
         (m.era ? `时代：${m.era}\n` : '') +
         (occs ? `职业限制：${occs}\n` : '') +
-        (stats ? `最低属性：${stats}\n` : '') +
+        (totalPoints != null ? `总点要求：${totalPoints}\n` : '') +
         `\n${m.description ?? '（无简介）'}\n\n` +
         `创建房间：.room create <名称> ${index}`,
     };

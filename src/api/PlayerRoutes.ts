@@ -8,9 +8,10 @@
  * POST /characters                  — 新建角色卡
  * PUT  /characters/:id              — 更新角色卡（正在跑团的卡不可更新）
  * DELETE /characters/:id            — 删除角色卡
- * GET  /campaigns                   — 我参与的团列表
- * GET  /campaigns/:id               — 团详情（玩家视角）
- * GET  /campaigns/:id/messages      — 团消息历史（只读）
+ * GET  /campaigns                   — 我参与的团列表（兼容旧入口）
+ * GET  /campaigns/:id               — 团详情（玩家视角，兼容旧入口）
+ * GET  /campaigns/:id/messages      — 团消息历史（只读，兼容旧入口）
+ * GET  /campaigns/:id/redirect      — 将旧 campaign 记录解析到对应房间
  * GET  /scenarios                   — 模组列表（标题+简介）
  *
  * GET  /rooms                       — 跑团房间列表
@@ -29,24 +30,16 @@ import type { CharacterStore } from '../commands/sheet/CharacterStore';
 import type { CampaignHandler } from '../runtime/CampaignHandler';
 import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
 import { deliverCampaignOutput } from '../runtime/CampaignOutputDelivery';
+import { calculatePrimaryAttributeTotal, normalizeOptionalTotalPoints } from '@shared/coc7/attributeTotals';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { parseExcelCharacter } from '../import/ExcelCharacterParser';
 import {
-  countRoomRelationships,
   deleteRoomRelationship,
-  getRoomDirectorPrefs,
   listRoomRelationships,
-  updateRoomDirectorPrefs,
   upsertRoomRelationship,
   isRoomRelationType,
 } from '../storage/RoomDirectorStore';
-import {
-  createDefaultRoomDirectorPrefs,
-  type RoomDirectorPrefs,
-  type RoomRelationship,
-  type RoomRelationType,
-} from '@shared/types/StoryDirector';
 
 export class PlayerRoutes {
   constructor(
@@ -84,6 +77,7 @@ export class PlayerRoutes {
     if (resource === 'characters') {
       if (method === 'POST' && resourceId === 'import-excel') return this.importExcelCharacter(req);
       if (method === 'GET' && !resourceId) return this.listCharacters(qqId);
+      if (method === 'GET' && resourceId) return this.getCharacter(qqId, resourceId);
       if (method === 'POST') return this.createCharacter(qqId, req);
       if (method === 'PUT' && resourceId) return this.updateCharacter(qqId, resourceId, req);
       if (method === 'DELETE' && resourceId) return this.deleteCharacter(qqId, resourceId);
@@ -96,6 +90,9 @@ export class PlayerRoutes {
       if (method === 'GET' && resourceId && sub2 === 'messages') {
         return this.getCampaignMessages(qqId, resourceId);
       }
+      if (method === 'GET' && resourceId && sub2 === 'redirect') {
+        return this.getCampaignRedirect(qqId, resourceId);
+      }
     }
 
     // /scenarios (旧) 和 /modules (新)
@@ -107,7 +104,7 @@ export class PlayerRoutes {
       if (method === 'GET' && !resourceId) return this.listRooms(qqId);
       if (method === 'POST' && !resourceId) return this.createRoom(qqId, req, tokenGroupId);
       if (method === 'GET' && resourceId && !sub2) return this.getRoom(qqId, resourceId);
-      if (method === 'DELETE' && resourceId && !sub2) return this.deleteRoom(qqId, resourceId);
+      if (method === 'DELETE' && resourceId && !sub2) return this.deleteRoomForce(qqId, resourceId, req);
       if (method === 'POST' && resourceId && sub2 === 'join') return this.joinRoom(qqId, resourceId);
       if (method === 'PUT' && resourceId && sub2 === 'character') return this.setRoomCharacter(qqId, resourceId, req);
       if (method === 'POST' && resourceId && sub2 === 'start') return this.startRoom(qqId, resourceId, req);
@@ -119,8 +116,6 @@ export class PlayerRoutes {
       if (method === 'DELETE' && resourceId && sub2 === 'relationships' && segments[3]) {
         return this.deleteRoomRelationship(qqId, resourceId, segments[3]);
       }
-      if (method === 'GET' && resourceId && sub2 === 'director-prefs') return this.getRoomDirectorPrefs(qqId, resourceId);
-      if (method === 'PATCH' && resourceId && sub2 === 'director-prefs') return this.updateDirectorPrefs(qqId, resourceId, req);
       if (method === 'GET' && resourceId && sub2 === 'messages') return this.getRoomMessages(qqId, resourceId);
       if (method === 'GET' && resourceId && sub2 === 'time') return this.getRoomTime(qqId, resourceId);
     }
@@ -181,8 +176,10 @@ export class PlayerRoutes {
         name: r.name,
         occupation: r.occupation,
         age: r.age,
+        era: typeof payload.era === 'string' ? payload.era : null,
         hp: payload.derived?.hp ?? null,
         san: payload.derived?.san ?? null,
+        primaryAttributeTotal: payload.attributes ? calculatePrimaryAttributeTotal(payload.attributes) : null,
         updatedAt: r.updated_at,
         readonly: activeIds.has(r.id),
       };
@@ -211,6 +208,34 @@ export class PlayerRoutes {
     );
 
     return Response.json({ id }, { status: 201 });
+  }
+
+  private getCharacter(qqId: number, id: string): Response {
+    const row = this.db.query<{
+      id: string;
+      player_id: number;
+      name: string;
+      occupation: string | null;
+      age: number | null;
+      payload_json: string;
+      updated_at: string;
+    }, string>(
+      'SELECT id, player_id, name, occupation, age, payload_json, updated_at FROM characters WHERE id = ?',
+    ).get(id);
+    if (!row) return Response.json({ error: '角色卡不存在' }, { status: 404 });
+    if (row.player_id !== qqId) return Response.json({ error: 'Forbidden' }, { status: 403 });
+
+    const activeIds = this.getActiveSessionCharacterIds();
+    const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+    return Response.json({
+      id: row.id,
+      name: row.name,
+      occupation: row.occupation,
+      age: row.age,
+      updatedAt: row.updated_at,
+      readonly: activeIds.has(row.id),
+      ...payload,
+    });
   }
 
   private async updateCharacter(qqId: number, id: string, req: Request): Promise<Response> {
@@ -346,6 +371,23 @@ export class PlayerRoutes {
     })));
   }
 
+  private getCampaignRedirect(qqId: number, sessionId: string): Response {
+    const membership = this.db.query<{ user_id: number }, [string, number]>(
+      'SELECT user_id FROM kp_session_players WHERE session_id = ? AND user_id = ?',
+    ).get(sessionId, qqId);
+    if (!membership) return Response.json({ error: 'Forbidden' }, { status: 403 });
+
+    const linkedRoom = this.db.query<{ id: string }, string>(
+      'SELECT id FROM campaign_rooms WHERE kp_session_id = ? ORDER BY updated_at DESC LIMIT 1',
+    ).get(sessionId);
+
+    return Response.json({
+      sessionId,
+      roomId: linkedRoom?.id ?? null,
+      archived: !linkedRoom,
+    });
+  }
+
   // ─── Scenarios / Modules ───────────────────────────────────────────────────
 
   private listScenarios(): Response {
@@ -356,8 +398,19 @@ export class PlayerRoutes {
   private listModules(): Response {
     const modules = this.db.query<{
       id: string; name: string; description: string | null; era: string | null;
-      allowed_occupations: string; min_stats: string; created_at: string;
-    }, []>('SELECT id, name, description, era, allowed_occupations, min_stats, created_at FROM scenario_modules ORDER BY created_at DESC').all();
+      allowed_occupations: string; total_points: number | null; created_at: string;
+    }, []>(`
+      SELECT m.id, m.name, m.description, m.era, m.allowed_occupations, m.total_points, m.created_at
+      FROM scenario_modules m
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM scenario_module_files f
+        WHERE f.module_id = m.id
+          AND f.file_type = 'document'
+          AND f.import_status = 'pending'
+      )
+      ORDER BY m.created_at DESC
+    `).all();
 
     return Response.json(modules.map((m) => ({
       id: m.id,
@@ -365,7 +418,7 @@ export class PlayerRoutes {
       description: m.description ?? '',
       era: m.era,
       allowedOccupations: JSON.parse(m.allowed_occupations) as string[],
-      minStats: JSON.parse(m.min_stats) as Record<string, number>,
+      totalPoints: normalizeOptionalTotalPoints(m.total_points),
     })));
   }
 
@@ -376,10 +429,10 @@ export class PlayerRoutes {
     const rooms = this.db.query<{
       id: string; name: string; group_id: number | null; creator_qq_id: number;
       scenario_name: string | null; constraints_json: string; status: string;
-      kp_session_id: string | null; created_at: string;
+      kp_session_id: string | null; created_at: string; updated_at: string;
     }, [number, number]>(`
       SELECT DISTINCT r.id, r.name, r.group_id, r.creator_qq_id, r.scenario_name,
-             r.constraints_json, r.status, r.kp_session_id, r.created_at
+             r.constraints_json, r.status, r.kp_session_id, r.created_at, r.updated_at
       FROM campaign_rooms r
       LEFT JOIN campaign_room_members m ON m.room_id = r.id AND m.qq_id = ?
       WHERE r.creator_qq_id = ? OR m.qq_id IS NOT NULL
@@ -408,29 +461,28 @@ export class PlayerRoutes {
 
     // 若传入 moduleId，从模组自动读取 scenarioName 和约束
     let scenarioName = (body.scenarioName as string | null) ?? null;
-    let constraints = body.constraints ?? {};
+    let constraints = normalizeRoomConstraints(body.constraints ?? {});
     const moduleId = (body.moduleId as string | null) ?? null;
     if (moduleId) {
       const mod = this.db.query<{
-        name: string; allowed_occupations: string; min_stats: string; era: string | null;
-      }, string>('SELECT name, allowed_occupations, min_stats, era FROM scenario_modules WHERE id = ?').get(moduleId);
+        name: string; allowed_occupations: string; total_points: number | null; era: string | null;
+      }, string>('SELECT name, allowed_occupations, total_points, era FROM scenario_modules WHERE id = ?').get(moduleId);
       if (mod) {
         scenarioName = mod.name;
         constraints = {
           era: mod.era ?? undefined,
           allowedOccupations: JSON.parse(mod.allowed_occupations),
-          minStats: JSON.parse(mod.min_stats),
+          totalPoints: normalizeOptionalTotalPoints(mod.total_points),
         };
       }
     }
 
     this.db.run(
-      `INSERT INTO campaign_rooms (id, name, group_id, creator_qq_id, module_id, scenario_name, constraints_json, director_prefs_json, status, created_at, updated_at)
-       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'waiting', ?, ?)`,
+      `INSERT INTO campaign_rooms (id, name, group_id, creator_qq_id, module_id, scenario_name, constraints_json, status, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, 'waiting', ?, ?)`,
       [id, name, qqId, moduleId,
         scenarioName,
         JSON.stringify(constraints),
-        JSON.stringify(createDefaultRoomDirectorPrefs()),
         now, now],
     );
 
@@ -446,10 +498,10 @@ export class PlayerRoutes {
   private getRoom(qqId: number, roomId: string): Response {
     const room = this.db.query<{
       id: string; name: string; group_id: number | null; creator_qq_id: number;
-      scenario_name: string | null; constraints_json: string; director_prefs_json: string; status: string;
-      kp_session_id: string | null; created_at: string;
+      scenario_name: string | null; constraints_json: string; status: string;
+      kp_session_id: string | null; created_at: string; updated_at: string;
     }, string>(
-      'SELECT id, name, group_id, creator_qq_id, scenario_name, constraints_json, director_prefs_json, status, kp_session_id, created_at FROM campaign_rooms WHERE id = ?',
+      'SELECT id, name, group_id, creator_qq_id, scenario_name, constraints_json, status, kp_session_id, created_at, updated_at FROM campaign_rooms WHERE id = ?',
     ).get(roomId);
 
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
@@ -485,17 +537,17 @@ export class PlayerRoutes {
     });
 
     // PC 合规性检查（软验证）
-    const constraints = JSON.parse(room.constraints_json) as RoomConstraints;
+    const constraints = normalizeRoomConstraints(JSON.parse(room.constraints_json));
     const warnings = this.validateMembers(memberDetails, constraints);
     const relationships = listRoomRelationships(this.db, roomId);
-    const directorPrefs = getRoomDirectorPrefs(this.db, roomId);
 
     return Response.json({
       ...this.formatRoom(room, qqId),
+      memberCount: members.length,
       members: memberDetails,
       relationships,
-      directorPrefs,
       warnings,
+      runtime: this.getRoomRuntime(room.kp_session_id),
     });
   }
 
@@ -687,7 +739,7 @@ export class PlayerRoutes {
     const now = new Date().toISOString();
     this.db.run(
       'UPDATE campaign_rooms SET scenario_name = ?, constraints_json = ?, updated_at = ? WHERE id = ?',
-      [(body.scenarioName as string | null) ?? null, JSON.stringify(body.constraints ?? {}), now, roomId],
+      [(body.scenarioName as string | null) ?? null, JSON.stringify(normalizeRoomConstraints(body.constraints ?? {})), now, roomId],
     );
     return Response.json({ ok: true });
   }
@@ -743,34 +795,6 @@ export class PlayerRoutes {
 
     deleteRoomRelationship(this.db, roomId, qqId, targetQqId);
     return Response.json({ ok: true });
-  }
-
-  private getRoomDirectorPrefs(qqId: number, roomId: string): Response {
-    if (!this.isRoomMember(roomId, qqId)) {
-      return Response.json({ error: '不是该房间成员' }, { status: 403 });
-    }
-    return Response.json(getRoomDirectorPrefs(this.db, roomId));
-  }
-
-  private async updateDirectorPrefs(qqId: number, roomId: string, req: Request): Promise<Response> {
-    const room = this.db.query<{ creator_qq_id: number; status: string }, [string]>(
-      'SELECT creator_qq_id, status FROM campaign_rooms WHERE id = ?',
-    ).get(roomId);
-    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
-    if (room.creator_qq_id !== qqId) return Response.json({ error: '只有创建者可以修改导演偏好' }, { status: 403 });
-    if (room.status === 'running' || room.status === 'ended') {
-      return Response.json({ error: '跑团已开始或已结束，不可修改导演偏好' }, { status: 409 });
-    }
-
-    let body: Partial<RoomDirectorPrefs>;
-    try {
-      body = await req.json() as Partial<RoomDirectorPrefs>;
-    } catch {
-      return Response.json({ error: 'Invalid JSON' }, { status: 400 });
-    }
-
-    const prefs = updateRoomDirectorPrefs(this.db, roomId, body);
-    return Response.json(prefs);
   }
 
   // ─── Room Messages ─────────────────────────────────────────────────────────
@@ -848,8 +872,8 @@ export class PlayerRoutes {
 
   private formatRoom(r: {
     id: string; name: string; group_id: number | null; creator_qq_id: number;
-    scenario_name: string | null; constraints_json: string; director_prefs_json?: string | null; status: string;
-    kp_session_id: string | null; created_at: string;
+    scenario_name: string | null; constraints_json: string; status: string;
+    kp_session_id: string | null; created_at: string; updated_at?: string;
   }, viewerQqId: number) {
     return {
       id: r.id,
@@ -858,11 +882,43 @@ export class PlayerRoutes {
       creatorQqId: r.creator_qq_id,
       isCreator: r.creator_qq_id === viewerQqId,
       scenarioName: r.scenario_name,
-      constraints: JSON.parse(r.constraints_json) as RoomConstraints,
-      directorPrefs: parseRoomDirectorPrefsSafe(r.director_prefs_json),
+      constraints: normalizeRoomConstraints(JSON.parse(r.constraints_json)),
       status: r.status,
       kpSessionId: r.kp_session_id,
       createdAt: r.created_at,
+      updatedAt: r.updated_at ?? r.created_at,
+    };
+  }
+
+  private getRoomRuntime(sessionId: string | null) {
+    if (!sessionId) return null;
+
+    const session = this.db.query<{
+      id: string;
+      group_id: number;
+      status: string;
+      started_at: string;
+      ingame_time: string | null;
+    }, string>(
+      'SELECT id, group_id, status, started_at, ingame_time FROM kp_sessions WHERE id = ?',
+    ).get(sessionId);
+    if (!session) return null;
+
+    const messageCount = this.db.query<{ cnt: number }, string>(
+      'SELECT COUNT(*) as cnt FROM kp_messages WHERE session_id = ?',
+    ).get(sessionId)?.cnt ?? 0;
+    const segmentCount = this.db.query<{ cnt: number }, string>(
+      'SELECT COUNT(*) as cnt FROM kp_scene_segments WHERE session_id = ?',
+    ).get(sessionId)?.cnt ?? 0;
+
+    return {
+      sessionId: session.id,
+      groupId: session.group_id,
+      status: session.status,
+      ingameTime: session.ingame_time,
+      messageCount,
+      segmentCount,
+      startedAt: session.started_at,
     };
   }
 
@@ -894,12 +950,10 @@ export class PlayerRoutes {
           !constraints.allowedOccupations.includes(m.character.occupation)) {
         warnings.push(`QQ ${m.qqId} 的职业「${m.character.occupation}」不在模组允许范围内`);
       }
-      if (constraints.minStats) {
-        for (const [stat, minVal] of Object.entries(constraints.minStats)) {
-          const actual = m.character.attributes[stat] ?? 0;
-          if (actual < minVal) {
-            warnings.push(`QQ ${m.qqId} 的 ${stat} (${actual}) 低于最低要求 (${minVal})`);
-          }
+      if (constraints.totalPoints != null) {
+        const actual = calculatePrimaryAttributeTotal(m.character.attributes);
+        if (actual !== constraints.totalPoints) {
+          warnings.push(`QQ ${m.qqId} 的主属性总点为 ${actual}，不等于房间要求 ${constraints.totalPoints}`);
         }
       }
     }
@@ -956,16 +1010,17 @@ export class PlayerRoutes {
 interface RoomConstraints {
   era?: string;
   allowedOccupations?: string[];
-  minStats?: Record<string, number>;
+  totalPoints?: number | null;
 }
 
-function parseRoomDirectorPrefsSafe(raw?: string | null): RoomDirectorPrefs {
-  try {
-    return raw ? {
-      ...createDefaultRoomDirectorPrefs(),
-      ...(JSON.parse(raw) as Partial<RoomDirectorPrefs>),
-    } : createDefaultRoomDirectorPrefs();
-  } catch {
-    return createDefaultRoomDirectorPrefs();
-  }
+function normalizeRoomConstraints(input: unknown): RoomConstraints {
+  if (!input || typeof input !== 'object') return {};
+  const raw = input as Record<string, unknown>;
+  return {
+    era: typeof raw.era === 'string' && raw.era.trim() ? raw.era : undefined,
+    allowedOccupations: Array.isArray(raw.allowedOccupations)
+      ? raw.allowedOccupations.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : undefined,
+    totalPoints: normalizeOptionalTotalPoints(raw.totalPoints),
+  };
 }

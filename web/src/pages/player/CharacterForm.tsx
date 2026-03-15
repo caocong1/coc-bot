@@ -6,7 +6,7 @@
  */
 
 import {
-  createSignal, createMemo, For, Show, type Component,
+  createEffect, createResource, createSignal, createMemo, For, Show, type Component,
 } from 'solid-js';
 import { playerApi } from '../../api';
 import { OCCUPATIONS } from './data/occupations';
@@ -27,6 +27,35 @@ type Tab = 'basic' | 'skills' | 'assets' | 'combat' | 'backstory' | 'magic' | 'c
 interface RollSet extends Attrs { luck: number; total: number; }
 
 interface Props { editId?: string; }
+
+const DEFAULT_BACKSTORY = {
+  appearance: '', ideology: '', significantPerson: '',
+  meaningfulLocation: '', treasuredPossession: '', traits: '',
+  injuries: '', backstory: '',
+};
+
+const createDefaultWeapons = (): WeaponItem[] => ([
+  { name: '无', templateName: '徒手', type: '肉搏', skill: '斗殴', damage: '1D3+DB', range: '', impale: false, rof: 1, ammo: '', malfunction: '', _default: true },
+]);
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function matchOccupationId(occupationName: unknown): number | null {
+  if (typeof occupationName !== 'string' || !occupationName.trim()) return null;
+  let match = OCCUPATIONS.find((o) => o.name === occupationName);
+  if (!match) {
+    const parts = occupationName.split(/[、，/／（(）)]+/).map((s) => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      match = OCCUPATIONS.find((o) => o.name.includes(part));
+      if (match) break;
+    }
+  }
+  return match?.id ?? null;
+}
 
 // ─── 随机名字 ──────────────────────────────────────────────────────────────────
 
@@ -117,10 +146,15 @@ function rollOneSetWithTotal(target: number): RollSet {
 // ─── 主组件 ──────────────────────────────────────────────────────────────────
 
 const CharacterForm: Component<Props> = (props) => {
-  const importJson = sessionStorage.getItem('import_data');
+  const importJson = props.editId ? null : sessionStorage.getItem('import_data');
   const isImport = !!importJson;
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal('');
+  const [loadedEditId, setLoadedEditId] = createSignal<string | null>(null);
+  const [editCharacter] = createResource(
+    () => props.editId ?? null,
+    async (id) => playerApi.getCharacter(id),
+  );
 
   // ── 掷骰（集成在基本信息 Tab 中） ─────────────────────────────────────────
   const [showRoller, setShowRoller] = createSignal(false);
@@ -230,11 +264,7 @@ const CharacterForm: Component<Props> = (props) => {
 
   const [tab, setTab] = createSignal<Tab>('basic');
 
-  const [backstory, setBackstory] = createSignal({
-    appearance: '', ideology: '', significantPerson: '',
-    meaningfulLocation: '', treasuredPossession: '', traits: '',
-    injuries: '', backstory: '',
-  });
+  const [backstory, setBackstory] = createSignal({ ...DEFAULT_BACKSTORY });
 
   // ── 资产与装备 ──────────────────────────────────────────────────────────
   const [assetTransport, setAssetTransport] = createSignal('');
@@ -249,9 +279,7 @@ const CharacterForm: Component<Props> = (props) => {
     setInventory((l) => l.map((it, i) => i === idx ? { ...it, ...patch } : it));
 
   // ── 战斗装备 ──────────────────────────────────────────────────────────
-  const [weapons, setWeapons] = createSignal<WeaponItem[]>([
-    { name: '无', templateName: '徒手', type: '肉搏', skill: '斗殴', damage: '1D3+DB', range: '', impale: false, rof: 1, ammo: '', malfunction: '', _default: true },
-  ]);
+  const [weapons, setWeapons] = createSignal<WeaponItem[]>(createDefaultWeapons());
   const removeWeapon = (idx: number) => setWeapons((l) => l.filter((_, i) => i !== idx));
   const updateWeapon = (idx: number, patch: Partial<WeaponItem>) =>
     setWeapons((l) => l.map((it, i) => i === idx ? { ...it, ...patch } : it));
@@ -332,59 +360,124 @@ const CharacterForm: Component<Props> = (props) => {
   const updateExperience = (idx: number, patch: Partial<Experience>) =>
     setExperiences((l) => l.map((it, i) => i === idx ? { ...it, ...patch } : it));
 
+  const applyCharacterPayload = (data: Record<string, unknown>) => {
+    if (typeof data.name === 'string') setName(data.name);
+    if (typeof data.age === 'number' && Number.isFinite(data.age)) setAge(data.age);
+    if (typeof data.gender === 'string') setGender(data.gender);
+    if (typeof data.residence === 'string') setResidence(data.residence);
+    if (typeof data.hometown === 'string') setHometown(data.hometown);
+    if (typeof data.luck === 'number' && Number.isFinite(data.luck)) setLuck(data.luck);
+    if (data.era === '1920s' || data.era === '现代' || data.era === '其他') setEra(data.era);
+
+    const nextAttrs = asRecord(data.attributes);
+    if (Object.keys(nextAttrs).length > 0) {
+      const current = attrs();
+      setAttrs({
+        str: typeof nextAttrs.str === 'number' ? nextAttrs.str : current.str,
+        con: typeof nextAttrs.con === 'number' ? nextAttrs.con : current.con,
+        siz: typeof nextAttrs.siz === 'number' ? nextAttrs.siz : current.siz,
+        dex: typeof nextAttrs.dex === 'number' ? nextAttrs.dex : current.dex,
+        app: typeof nextAttrs.app === 'number' ? nextAttrs.app : current.app,
+        int: typeof nextAttrs.int === 'number' ? nextAttrs.int : current.int,
+        pow: typeof nextAttrs.pow === 'number' ? nextAttrs.pow : current.pow,
+        edu: typeof nextAttrs.edu === 'number' ? nextAttrs.edu : current.edu,
+      });
+    }
+
+    const nextSkillPoints = asRecord(data.skillPoints);
+    setSkillPts(Object.keys(nextSkillPoints).length > 0 ? nextSkillPoints as SkillPoints : {});
+
+    const nextBackstory = asRecord(data.backstory);
+    setBackstory({
+      appearance: typeof nextBackstory.appearance === 'string' ? nextBackstory.appearance : '',
+      ideology: typeof nextBackstory.ideology === 'string' ? nextBackstory.ideology : '',
+      significantPerson: typeof nextBackstory.significantPerson === 'string' ? nextBackstory.significantPerson : '',
+      meaningfulLocation: typeof nextBackstory.meaningfulLocation === 'string' ? nextBackstory.meaningfulLocation : '',
+      treasuredPossession: typeof nextBackstory.treasuredPossession === 'string' ? nextBackstory.treasuredPossession : '',
+      traits: typeof nextBackstory.traits === 'string' ? nextBackstory.traits : '',
+      injuries: typeof data.woundsAndScars === 'string'
+        ? data.woundsAndScars
+        : (typeof nextBackstory.injuries === 'string' ? nextBackstory.injuries : ''),
+      backstory: typeof nextBackstory.backstory === 'string' ? nextBackstory.backstory : '',
+    });
+
+    const assets = asRecord(data.assets);
+    setAssetTransport(typeof assets.transportation === 'string' ? assets.transportation : '');
+    setAssetResidence(typeof assets.residence === 'string' ? assets.residence : '');
+    setAssetLuxuries(typeof assets.luxuries === 'string' ? assets.luxuries : '');
+    setAssetSecurities(typeof assets.securities === 'string' ? assets.securities : '');
+    setAssetOther(typeof assets.other === 'string' ? assets.other : '');
+
+    setInventory(Array.isArray(data.inventory) ? data.inventory as InventoryItem[] : []);
+
+    const nextWeapons = Array.isArray(data.weapons) ? data.weapons as WeaponItem[] : [];
+    setWeapons(nextWeapons.length > 0 ? nextWeapons : createDefaultWeapons());
+
+    const armor = asRecord(data.armor);
+    setArmorName(typeof armor.name === 'string' ? armor.name : '');
+    setArmorValue(
+      typeof armor.armorValue === 'string'
+        ? armor.armorValue
+        : (typeof armor.armorValue === 'number' ? String(armor.armorValue) : ''),
+    );
+
+    const vehicle = asRecord(data.vehicle);
+    setVehicleName(typeof vehicle.name === 'string' ? vehicle.name : '');
+    setVehicleSkill(typeof vehicle.skill === 'string' ? vehicle.skill : '');
+
+    setSpells(Array.isArray(data.spells) ? data.spells as Spell[] : []);
+    setCompanions(Array.isArray(data.companions) ? data.companions as Companion[] : []);
+    setExperiences(Array.isArray(data.experiences) ? data.experiences as Experience[] : []);
+    setMythosEncounters(Array.isArray(data.mythosEncounters) ? data.mythosEncounters as MythosEncounter[] : []);
+
+    if (Array.isArray(data.phobiasAndManias)) {
+      setPhobiasManias(
+        data.phobiasAndManias
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .join('、'),
+      );
+    } else if (typeof data.phobiasAndManias === 'string') {
+      setPhobiasManias(data.phobiasAndManias);
+    } else {
+      setPhobiasManias('');
+    }
+
+    const matchedOccupationId = matchOccupationId(data.occupation);
+    if (matchedOccupationId !== null) {
+      setOccId(matchedOccupationId);
+    } else if (typeof data.occupation === 'string' && data.occupation.trim()) {
+      setOccId(0);
+      setError(`职业「${data.occupation}」未匹配到标准列表，请手动选择。`);
+    }
+  };
+
   // ── Excel 导入预填充（用 queueMicrotask 确保 signal 初始化完成后再设值）──
   if (isImport && importJson) {
     queueMicrotask(() => {
       try {
-        const d = JSON.parse(importJson);
+        const d = JSON.parse(importJson) as Record<string, unknown>;
         sessionStorage.removeItem('import_data'); // 成功解析后才清除
-
-        if (d.name) setName(d.name);
-        if (d.age) setAge(d.age);
-        if (d.gender) setGender(d.gender);
-        if (d.era) setEra(d.era === '1920s' ? '1920s' : d.era === '现代' ? '现代' : '其他');
-        if (d.attributes) setAttrs(d.attributes);
-        if (d.luck) setLuck(d.luck);
-        if (d.skillPoints) setSkillPts(d.skillPoints);
-        if (d.backstory) setBackstory((b) => ({ ...b, ...d.backstory }));
-        if (d.phobiasAndManias?.length) setPhobiasManias(d.phobiasAndManias.join('、'));
-        if (d.inventory?.length) setInventory(d.inventory);
-        if (d.spells?.length) setSpells(d.spells);
-        if (d.companions?.length) setCompanions(d.companions);
-        if (d.experiences?.length) setExperiences(d.experiences);
-        if (d.mythosEncounters?.length) setMythosEncounters(d.mythosEncounters);
-        if (d.woundsAndScars) setBackstory((b) => ({ ...b, injuries: d.woundsAndScars }));
-        if (d.weapons?.length) setWeapons(d.weapons);
-        if (d.assets) {
-          setAssetTransport(d.assets.transportation || '');
-          setAssetResidence(d.assets.residence || '');
-          setAssetLuxuries(d.assets.luxuries || '');
-          setAssetSecurities(d.assets.securities || '');
-          setAssetOther(d.assets.other || '');
-        }
-        // 职业匹配：精确 → 拆分关键词匹配 → 提示
-        const occName = d.occupationExcelName || d.occupation;
-        if (occName) {
-          let match = OCCUPATIONS.find((o) => o.name === occName);
-          if (!match) {
-            // 将 Excel 职业名按分隔符拆分为关键词，逐个尝试匹配
-            const parts = occName.split(/[、，/／（(）)]+/).map((s: string) => s.trim()).filter(Boolean);
-            for (const part of parts) {
-              match = OCCUPATIONS.find((o) => o.name.includes(part));
-              if (match) break;
-            }
-          }
-          if (match) {
-            setOccId(match.id);
-          } else {
-            setError(`导入的职业「${d.occupation}」未在标准列表中找到，请手动选择职业。`);
-          }
-        }
+        applyCharacterPayload({ ...d, occupation: d.occupationExcelName ?? d.occupation });
       } catch (e) {
         console.error('[Excel Import] 预填充失败:', e);
       }
     });
   }
+
+  createEffect(() => {
+    const loaded = editCharacter();
+    if (!props.editId || !loaded || loadedEditId() === loaded.id) return;
+    applyCharacterPayload(loaded as Record<string, unknown>);
+    if (loaded.readonly) {
+      setError('该角色卡正参与进行中的跑团，当前仅供查看，无法保存修改。');
+    }
+    setLoadedEditId(loaded.id);
+  });
+
+  createEffect(() => {
+    if (!props.editId || !editCharacter.error) return;
+    setError(editCharacter.error.message || '角色卡加载失败');
+  });
 
   // ── 保存 ──────────────────────────────────────────────────────────────────
   const save = async () => {
@@ -440,6 +533,9 @@ const CharacterForm: Component<Props> = (props) => {
   return (
     <div>
       <Show when={error()}><div class="bg-danger/15 border border-danger rounded-md px-4 py-3 text-danger mb-6">{error()}</div></Show>
+      <Show when={props.editId && editCharacter.loading}>
+        <div class="bg-surface border border-border rounded-md px-4 py-3 text-text-dim mb-6">正在加载角色卡原始数据…</div>
+      </Show>
 
       {/* Tab 导航 + 操作按钮 */}
       <div class="flex items-center border-b border-border mb-6 flex-wrap">
@@ -456,8 +552,8 @@ const CharacterForm: Component<Props> = (props) => {
         </div>
         <div class="flex gap-3 ml-auto pb-1">
           <a href="/player" class="inline-block px-5 py-2 bg-transparent text-text-dim border border-border rounded-md text-[0.9rem] cursor-pointer no-underline hover:text-text hover:border-text-dim transition-all duration-200 active:scale-95">取消</a>
-          <button class="inline-block px-5 py-2 bg-accent text-white border border-transparent rounded-md text-[0.9rem] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-85 transition-all duration-200 active:scale-95" onClick={save} disabled={saving()}>
-            {saving() ? '保存中...' : '💾 保存角色卡'}
+          <button class="inline-block px-5 py-2 bg-accent text-white border border-transparent rounded-md text-[0.9rem] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-85 transition-all duration-200 active:scale-95" onClick={save} disabled={saving() || (!!props.editId && editCharacter.loading)}>
+            {saving() ? '保存中...' : (!!props.editId && editCharacter.loading) ? '加载中...' : '💾 保存角色卡'}
           </button>
         </div>
       </div>

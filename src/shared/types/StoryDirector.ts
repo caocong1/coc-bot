@@ -15,7 +15,7 @@ export interface RoomRelationship {
   updatedAt: string;
 }
 
-export type OpeningStartStyle = 'together' | 'split' | 'mixed';
+export type OpeningStartStyle = 'auto' | 'together' | 'split' | 'mixed';
 export type OpeningExpansionLevel = 'light' | 'medium' | 'high';
 export type OpeningPrivateHookLevel = 'none' | 'light' | 'medium';
 
@@ -122,9 +122,9 @@ export interface DirectorCue {
 export function createDefaultRoomDirectorPrefs(): RoomDirectorPrefs {
   return {
     allowSplitOpening: true,
-    preferredStartStyle: 'mixed',
+    preferredStartStyle: 'auto',
     allowModuleExpansion: true,
-    expansionLevel: 'medium',
+    expansionLevel: 'high',
     privateHookLevel: 'light',
     notes: '',
   };

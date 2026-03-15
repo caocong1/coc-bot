@@ -12,8 +12,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 
-const LIBRARY_PATH = 'data/knowledge/images/library.json';
-const IMAGES_DIR = 'data/knowledge/images';
+const PROJECT_ROOT = resolve(import.meta.dir, '..', '..', '..');
+const LIBRARY_PATH = resolve(PROJECT_ROOT, 'data', 'knowledge', 'images', 'library.json');
+const IMAGES_DIR = resolve(PROJECT_ROOT, 'data', 'knowledge', 'images');
 
 export type ImageSource = 'docx' | 'pdf' | 'generated';
 
@@ -51,21 +52,24 @@ export class ImageLibrary {
 
   constructor(libraryPath = LIBRARY_PATH) {
     this.libraryPath = resolve(libraryPath);
-    mkdirSync(resolve(IMAGES_DIR), { recursive: true });
+    mkdirSync(IMAGES_DIR, { recursive: true });
     this.data = this.load();
   }
 
   // ─── 读取 ─────────────────────────────────────────────────────────────────
 
   getAll(): ImageEntry[] {
+    this.refresh();
     return this.data.entries;
   }
 
   getById(id: string): ImageEntry | undefined {
+    this.refresh();
     return this.data.entries.find((e) => e.id === id);
   }
 
   getBySourceFile(fileId: string): ImageEntry[] {
+    this.refresh();
     return this.data.entries.filter((e) => e.sourceFileId === fileId);
   }
 
@@ -73,6 +77,7 @@ export class ImageLibrary {
 
   /** 新增或更新一条图片记录（按 id 幂等） */
   upsert(entry: ImageEntry): void {
+    this.refresh();
     const idx = this.data.entries.findIndex((e) => e.id === entry.id);
     if (idx >= 0) {
       this.data.entries[idx] = entry;
@@ -84,6 +89,7 @@ export class ImageLibrary {
 
   /** 更新部分字段（caption / playerVisible / optimizedPrompt） */
   patch(id: string, patch: Partial<Pick<ImageEntry, 'caption' | 'playerVisible' | 'optimizedPrompt' | 'generatedPrompt'>>): boolean {
+    this.refresh();
     const entry = this.data.entries.find((e) => e.id === id);
     if (!entry) return false;
     Object.assign(entry, patch);
@@ -91,8 +97,19 @@ export class ImageLibrary {
     return true;
   }
 
+  /** 删除一条图片记录并返回原条目 */
+  remove(id: string): ImageEntry | undefined {
+    this.refresh();
+    const idx = this.data.entries.findIndex((e) => e.id === id);
+    if (idx < 0) return undefined;
+    const [entry] = this.data.entries.splice(idx, 1);
+    this.save();
+    return entry;
+  }
+
   /** 替换某张图片的文件路径（重新生成后更新） */
   replaceFile(id: string, newRelativePath: string): boolean {
+    this.refresh();
     const entry = this.data.entries.find((e) => e.id === id);
     if (!entry) return false;
     entry.relativePath = newRelativePath;
@@ -111,7 +128,7 @@ export class ImageLibrary {
 
   /** 由相对路径得到绝对路径 */
   static absPath(relativePath: string): string {
-    return resolve(relativePath);
+    return resolve(PROJECT_ROOT, relativePath);
   }
 
   // ─── 私有 ─────────────────────────────────────────────────────────────────
@@ -127,9 +144,13 @@ export class ImageLibrary {
     }
   }
 
+  private refresh(): void {
+    this.data = this.load();
+  }
+
   private save(): void {
     this.data.updatedAt = new Date().toISOString();
-    mkdirSync(resolve(IMAGES_DIR), { recursive: true });
+    mkdirSync(IMAGES_DIR, { recursive: true });
     writeFileSync(this.libraryPath, JSON.stringify(this.data, null, 2) + '\n', 'utf-8');
   }
 }
