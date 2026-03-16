@@ -89,6 +89,8 @@ export interface KPPipelineOptions {
   enableGuardrail?: boolean;
   /** 触发摘要压缩的消息条数阈值（默认 40） */
   summaryTriggerCount?: number;
+  /** 关联房间 ID，用于读取房间绑定的角色卡 */
+  roomId?: string;
   /** 数据库实例（用于加载自定义模板） */
   db?: import('bun:sqlite').Database;
 }
@@ -153,6 +155,8 @@ export class KPPipeline {
   private readonly enableGuardrail: boolean;
   private readonly summaryTriggerCount: number;
 
+  private readonly roomId?: string;
+
   /** 连续未介入的消息计数（用于沉默阈值判断） */
   private silentCount = 0;
 
@@ -173,6 +177,7 @@ export class KPPipeline {
     this.silenceThreshold = options.silenceThreshold ?? 5;
     this.enableGuardrail = options.enableGuardrail ?? true;
     this.summaryTriggerCount = options.summaryTriggerCount ?? 40;
+    this.roomId = options.roomId;
   }
 
   async process(input: KPInput, onThinking?: () => void): Promise<KPOutput> {
@@ -911,6 +916,13 @@ export class KPPipeline {
   // ─── 工具 ────────────────────────────────────────────────────────────────────
 
   private getSessionCharacters(groupId: number): Character[] {
+    // 优先使用房间绑定的角色卡
+    if (this.roomId) {
+      const roomChars = this.store.getRoomCharacters(this.roomId);
+      if (roomChars.length > 0) return roomChars;
+    }
+
+    // fallback: 无房间时按群/全局活跃卡
     const playerIds = this.state.getPlayerIds();
     const result: Character[] = [];
     const seen = new Set<string>();

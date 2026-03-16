@@ -167,7 +167,7 @@ export class CampaignHandler {
     );
 
     const state = new SessionState(this.db, sessionId, campaignId, groupId);
-    const pipeline = new KPPipeline(this.aiClient, state, this.store, this.knowledge, { templateId: tid, customPrompts, db: this.db });
+    const pipeline = new KPPipeline(this.aiClient, state, this.store, this.knowledge, { templateId: tid, customPrompts, db: this.db, roomId: roomId ?? undefined });
 
     this.sessions.set(groupId, {
       sessionId,
@@ -270,9 +270,10 @@ export class CampaignHandler {
     }
 
     const state = new SessionState(this.db, row.id, row.campaign_id, groupId);
+    const resumeRoomId = this.getRoomIdBySession(row.id);
     const pipeline = new KPPipeline(
       this.aiClient, state, this.store, this.knowledge,
-      { templateId: tid, customPrompts, db: this.db },
+      { templateId: tid, customPrompts, db: this.db, roomId: resumeRoomId ?? undefined },
     );
 
     this.sessions.set(groupId, {
@@ -280,7 +281,7 @@ export class CampaignHandler {
       campaignId: row.campaign_id,
       state,
       pipeline,
-      roomId: this.getRoomIdBySession(row.id),
+      roomId: resumeRoomId,
       effectiveCycle: this.getInitialEffectiveCycle(state),
       idleCycleStreak: 0,
     });

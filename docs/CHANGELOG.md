@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - **API 错误分类**：DashScope 客户端新增 `DashScopeApiError` 错误类，区分配额耗尽（403/AllocationQuota）和临时错误（429/5xx），KPPipeline 意图分类失败时按错误类型输出不同级别日志
 - **指令提取容错**：所有结构化指令（`[TIME_ADVANCE:]`、`[SET_SCENE:]` 等 9 种）的正则增加冒号后空格容忍，防止 AI 加空格时指令泄露到玩家输出
 - **开场推进过快**：OpeningDirector 骨架 prompt 限制 beat 数量（单人≤2、多人≤3），beat 文本 prompt 强制 100-250 字聚焦氛围、不推进调查，硬上限从 5 beat 降到 3
+- **跑团中读取错误角色卡**：`KPPipeline.getSessionCharacters()` 现在优先使用房间绑定的角色卡（`getRoomCharacters`），而非群/全局维度的"活跃卡"，避免 AI 引用了玩家的其他角色卡数据
 
 ### Changed
 - **AI KP 信息节奏控制**：system prompt 新增"每次回复最多推进 1 个调查节点"规则，避免开场一次性倾倒多段调查信息
