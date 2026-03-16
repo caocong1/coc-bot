@@ -11,6 +11,13 @@ function handlePlayerAuthExpired(): void {
   }
 }
 
+function handleAdminAuthExpired(): void {
+  localStorage.removeItem('admin_secret');
+  if (location.pathname.startsWith('/admin')) {
+    location.replace('/');
+  }
+}
+
 function getToken(): string | null {
   return localStorage.getItem('player_token') ?? new URLSearchParams(location.search).get('token');
 }
@@ -48,6 +55,10 @@ async function request<T>(
   if (auth === 'player' && res.status === 401) {
     handlePlayerAuthExpired();
     throw new Error('登录已过期');
+  }
+  if (auth === 'admin' && res.status === 401) {
+    handleAdminAuthExpired();
+    throw new Error('管理端认证已失效');
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText })) as { error: string };
@@ -159,6 +170,9 @@ export const playerApi = {
   updateRoomConstraints: (id: string, data: { scenarioName?: string; constraints: RoomConstraints }) =>
     request<{ ok: boolean }>(`/player/rooms/${id}/constraints`, { method: 'PATCH', body: JSON.stringify(data) }),
 
+  updateRoomModule: (id: string, data: { moduleId: string | null }) =>
+    request<{ ok: boolean }>(`/player/rooms/${id}/module`, { method: 'PATCH', body: JSON.stringify(data) }),
+
   listRoomRelationships: (id: string) =>
     request<RoomRelationship[]>(`/player/rooms/${id}/relationships`),
 
@@ -221,6 +235,10 @@ export const adminApi = {
     const headers: Record<string, string> = {};
     if (secret) headers['Authorization'] = `Bearer ${secret}`;
     const res = await fetch('/api/admin/knowledge/upload', { method: 'POST', body: formData, headers });
+    if (res.status === 401) {
+      handleAdminAuthExpired();
+      throw new Error('管理端认证已失效');
+    }
     if (!res.ok) throw new Error(await res.text());
     return res.json() as Promise<{ ok: boolean; filename: string; jobId: string }>;
   },
@@ -258,6 +276,8 @@ export const adminApi = {
   confirmRoom: (id: string) => request<{ ok: boolean }>(`/admin/rooms/${id}/confirm`, { method: 'POST' }, 'admin'),
   cancelReview: (id: string) => request<{ ok: boolean }>(`/admin/rooms/${id}/cancel-review`, { method: 'POST' }, 'admin'),
   deleteRoom: (id: string) => request<{ ok: boolean }>(`/admin/rooms/${id}`, { method: 'DELETE' }, 'admin'),
+  updateRoomModule: (id: string, data: { moduleId: string | null }) =>
+    request<{ ok: boolean }>(`/admin/rooms/${id}/module`, { method: 'PATCH', body: JSON.stringify(data) }, 'admin'),
   updateRoomKpSettings: (id: string, data: { templateId?: string; customPrompts?: string }) =>
     request<{ ok: boolean }>(`/admin/rooms/${id}/kp-settings`, { method: 'PATCH', body: JSON.stringify(data) }, 'admin'),
   listRoomRelationships: (id: string) =>
@@ -287,6 +307,10 @@ export const adminApi = {
     const headers: Record<string, string> = {};
     if (secret) headers['Authorization'] = `Bearer ${secret}`;
     const res = await fetch(`/api/admin/modules/${moduleId}/files`, { method: 'POST', body: formData, headers });
+    if (res.status === 401) {
+      handleAdminAuthExpired();
+      throw new Error('管理端认证已失效');
+    }
     if (!res.ok) throw new Error(await res.text());
     return res.json() as Promise<{ ok: boolean; id: string; fileType: string }>;
   },
@@ -643,6 +667,7 @@ export interface RoomSummary {
   groupId: number | null;
   creatorQqId: number;
   isCreator: boolean;
+  moduleId: string | null;
   scenarioName: string | null;
   constraints: RoomConstraints;
   status: 'waiting' | 'reviewing' | 'running' | 'ended';

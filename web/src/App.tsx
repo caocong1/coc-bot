@@ -6,8 +6,7 @@ const App: Component = () => {
   const path = location.pathname;
   const isAdmin = path.startsWith('/admin');
   const isPlayer = path.startsWith('/player') ||
-    new URLSearchParams(location.search).has('token') ||
-    !!localStorage.getItem('player_token');
+    new URLSearchParams(location.search).has('token');
 
   if (isAdmin) return <AdminApp />;
   if (isPlayer) return <PlayerApp />;

@@ -57,6 +57,7 @@ const Manual: Component = () => (
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room info &lt;房间ID&gt;</td><td class="px-3 py-1.5 border-b border-white/[0.04]">查看房间成员/状态</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room info f3a9c1b2</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room pc &lt;角色卡名或ID&gt;</td><td class="px-3 py-1.5 border-b border-white/[0.04]">在当前群为房间绑定自己的角色卡；若你只参与了一个待开团房间，会自动识别并绑定</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room pc 爱丽丝</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.room pc &lt;房间ID&gt; &lt;角色卡名或ID&gt;</td><td class="px-3 py-1.5 border-b border-white/[0.04]">同时参与多个房间时，显式给指定房间绑定角色卡</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.room pc f3a9c1b2 爱丽丝</td></tr>
+          <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">房间详情 → 修改模组</td><td class="px-3 py-1.5 border-b border-white/[0.04]">房主可在开团前直接切换房间模组，系统会自动覆盖为新模组默认筛卡条件</td><td class="px-3 py-1.5 border-b border-white/[0.04]">等待中房间 → 房间信息 → 模组设置</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">房间详情 → 人物关系</td><td class="px-3 py-1.5 border-b border-white/[0.04]">在 Web 房间详情页里多选当前已绑定的 PC 卡，填写中文关系名和备注</td><td class="px-3 py-1.5 border-b border-white/[0.04]">爱丽丝 / 鲍勃 / 陈 → 同学</td></tr>
         </tbody>
       </table>
@@ -64,7 +65,7 @@ const Manual: Component = () => (
         流程：<code>.room create</code> → 群友 <code>.room join</code>（点链接车卡）→ <code>.room start</code>
       </p>
       <p class="text-text-dim" style={{ 'font-size': '0.82rem', 'margin-top': '0.35rem' }}>
-        开团前如果想让 AI 更自然地安排开场，可以先用 <code>.room pc</code> 绑定角色卡，再到 Web 房间详情页里为当前房间的 PC 卡补充“同学 / 同事 / 亲戚 / 战友”等人物关系。
+        开团前如果想让 AI 更自然地安排开场，可以先用 <code>.room pc</code> 绑定角色卡；房主也可以直接在房间详情页切换模组，系统会自动刷新该房间的筛卡条件。
       </p>
     </section>
 
@@ -89,7 +90,7 @@ const Manual: Component = () => (
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.nn clr</td><td class="px-3 py-1.5 border-b border-white/[0.04]">清除所有称呼</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.kp [内容]</td><td class="px-3 py-1.5 border-b border-white/[0.04]">强制 KP 介入推进剧情（跑团中发送，保底用）</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.gugu [玩家名]</td><td class="px-3 py-1.5 border-b border-white/[0.04]">随机生成鸽子理由（AI 创作，不填名字则用自己）</td></tr>
-          <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.jrrp</td><td class="px-3 py-1.5 border-b border-white/[0.04]">今日人品（每人每天固定，AI 生成评语）</td></tr>
+          <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.jrrp [话题]</td><td class="px-3 py-1.5 border-b border-white/[0.04]">今日人品（分数每天固定；可追加“工作 / 跑团 / 恋爱”等话题作评语参考）</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.ti</td><td class="px-3 py-1.5 border-b border-white/[0.04]">随机临时疯狂症状</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.li</td><td class="px-3 py-1.5 border-b border-white/[0.04]">随机总结性疯狂症状</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.help</td><td class="px-3 py-1.5 border-b border-white/[0.04]">查看全部指令帮助</td></tr>

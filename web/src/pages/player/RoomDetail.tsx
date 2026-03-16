@@ -6,11 +6,13 @@ import {
   type RoomDetail,
   type RoomRelationship,
   type RoomRelationshipParticipant,
+  type ScenarioSummary,
 } from '../../api';
 import {
   RoomHeaderHero,
   RoomMembersPanel,
   RoomMessagesPanel,
+  RoomModulePanel,
   RoomRelationshipsPanel,
   RoomTabsBar,
   type RoomTab,
@@ -21,6 +23,7 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
   const [room, { refetch }] = createResource(() => playerApi.getRoom(props.id).catch(() => null));
   const [chars] = createResource(() => playerApi.listCharacters().catch(() => []));
   const [me] = createResource(() => playerApi.getMe().catch(() => null));
+  const [modules] = createResource(() => playerApi.listModules().catch(() => [] as ScenarioSummary[]));
 
   const initialTab = () => {
     const queryTab = new URLSearchParams(location.search).get('tab');
@@ -34,10 +37,12 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
   const [joining, setJoining] = createSignal(false);
   const [savingRelation, setSavingRelation] = createSignal(false);
   const [savingConstraints, setSavingConstraints] = createSignal(false);
+  const [savingModule, setSavingModule] = createSignal(false);
   const [msg, setMsg] = createSignal('');
   const [err, setErr] = createSignal('');
   const [showDeleteConfirm, setShowDeleteConfirm] = createSignal(false);
   const [roomTotalPointsText, setRoomTotalPointsText] = createSignal('');
+  const [selectedModuleId, setSelectedModuleId] = createSignal('');
   const [relationParticipantIds, setRelationParticipantIds] = createSignal<string[]>([]);
   const [relationLabel, setRelationLabel] = createSignal('');
   const [relationNotes, setRelationNotes] = createSignal('');
@@ -53,6 +58,10 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
   createEffect(() => {
     const totalPoints = room()?.constraints?.totalPoints;
     setRoomTotalPointsText(totalPoints != null ? String(totalPoints) : '');
+  });
+
+  createEffect(() => {
+    setSelectedModuleId(room()?.moduleId ?? '');
   });
 
   const hasMessageHistory = createMemo(() => {
@@ -276,6 +285,23 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
     }
   };
 
+  const saveRoomModule = async () => {
+    setSavingModule(true);
+    setErr('');
+    setMsg('');
+    try {
+      await playerApi.updateRoomModule(props.id, {
+        moduleId: selectedModuleId().trim() || null,
+      });
+      setMsg('已更新房间模组');
+      await refetch();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSavingModule(false);
+    }
+  };
+
   return (
     <Show when={!room.loading} fallback={<p class="text-text-dim">加载中...</p>}>
       <Show when={room()} fallback={<p class="text-danger text-[0.88rem] my-2">房间不存在或无权访问</p>}>
@@ -359,7 +385,18 @@ const RoomDetailPage: Component<{ id: string }> = (props) => {
                   readOnlyReason="跑团开始后人物关系只读；如需调整，请在开团前完成。"
                   helperText="开场与中途推进会优先参考这里的已确认人物关系。玩家与房主都可以在房间内维护这些关系。"
                 />
-                <RoomConceptPanel room={r()} />
+                <RoomModulePanel
+                  currentModuleId={r().moduleId}
+                  currentScenarioName={r().scenarioName}
+                  availableModules={modules() ?? []}
+                  selectedModuleId={selectedModuleId()}
+                  onSelectedModuleIdChange={setSelectedModuleId}
+                  onSave={saveRoomModule}
+                  saving={savingModule()}
+                  canEdit={r().isCreator && r().status === 'waiting'}
+                  modulesLoading={modules.loading}
+                  readOnlyReason={r().isCreator ? '房间进入审卡或跑团后不可再切换模组。' : '只有房主可以在开团前切换模组。'}
+                />
               </div>
             </Show>
 
@@ -511,7 +548,7 @@ const PlayerCharacterPanel: Component<{
               );
             }}
           </For>
-          <button class="text-left bg-white/[0.04] border border-border rounded-xl px-4 py-3 cursor-pointer text-text w-full hover:border-accent transition-colors" style={{ color: 'var(--text-dim)' }} onClick={() => props.onSelectCharacter(null)}>
+          <button class="text-left bg-white/[0.04] border border-border rounded-xl px-4 py-3 cursor-pointer text-text w-full hover:border-accent transition-colors" style={{ color: 'var(--color-text-dim)' }} onClick={() => props.onSelectCharacter(null)}>
             取消选择
           </button>
         </div>
@@ -560,38 +597,6 @@ const PlayerCharacterPanel: Component<{
     </div>
   );
 };
-
-const RoomConceptPanel: Component<{ room: RoomDetail }> = (props) => (
-  <div class="rounded-[1.5rem] border border-border bg-surface px-5 py-5 shadow-sm shadow-black/10">
-    <div class="flex items-center justify-between gap-3 mb-4">
-      <div>
-        <h3 style={{ margin: '0 0 0.2rem' }}>跑团说明</h3>
-        <div class="text-[0.78rem] text-text-dim">统一说明这个房间承载哪些信息，避免“房间”和“团记录”分成两个对象。</div>
-      </div>
-    </div>
-    <div class="flex flex-col gap-3 text-[0.86rem] leading-7 text-text-dim">
-      <div class="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-4">
-        <strong class="text-text">一个房间就是一场跑团。</strong>
-        <div class="mt-2">从成员组队、选卡、审卡、开场、进行中到最终消息历史，都应在这个房间里完成，不需要再跳到“我的团”之类的第二个对象里查看。</div>
-      </div>
-      <div class="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-4">
-        <strong class="text-text">当前运行态</strong>
-        <div class="mt-2">
-          <Show when={props.room.runtime} fallback={<span>这间房还没有开始跑团，因此暂时没有运行中的 session 记录。</span>}>
-            {(runtime) => (
-              <>
-                当前状态：{runtime().status}，消息 {runtime().messageCount} 条，分段 {runtime().segmentCount} 个。
-                <Show when={runtime().startedAt}>
-                  <span> 开始于 {new Date(runtime().startedAt).toLocaleString('zh-CN')}。</span>
-                </Show>
-              </>
-            )}
-          </Show>
-        </div>
-      </div>
-    </div>
-  </div>
-);
 
 function getCharacterFitIssues(char: CharacterSummary, constraints?: RoomConstraints): string[] {
   return getFitIssuesFromSummary(char.occupation, char.primaryAttributeTotal, constraints);

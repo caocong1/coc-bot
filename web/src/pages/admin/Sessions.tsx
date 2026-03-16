@@ -112,10 +112,10 @@ const SessionDetail: Component<{ groupId: number }> = (props) => {
                   return (
                     <div
                       style={{
-                        border: `1px solid ${isCurrent() ? 'var(--accent)' : 'var(--border)'}`,
+                        border: `1px solid ${isCurrent() ? 'var(--color-accent)' : 'var(--color-border)'}`,
                         'border-radius': '8px',
                         padding: '0.75rem 1rem',
-                        background: isCurrent() ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'var(--surface)',
+                        background: isCurrent() ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)' : 'var(--color-surface)',
                       }}
                     >
                       <div style={{ display: 'flex', 'align-items': 'center', gap: '0.5rem', 'margin-bottom': '0.25rem' }}>
@@ -136,7 +136,7 @@ const SessionDetail: Component<{ groupId: number }> = (props) => {
                       <Show when={isExpanded()}>
                         <pre style={{
                           'font-size': '0.78rem', 'white-space': 'pre-wrap', 'word-break': 'break-all',
-                          background: 'var(--bg)', padding: '0.75rem', 'border-radius': '6px',
+                          background: 'var(--color-bg)', padding: '0.75rem', 'border-radius': '6px',
                           'max-height': '300px', 'overflow-y': 'auto', margin: 0,
                         }}>{seg.fullText}</pre>
                       </Show>
@@ -242,7 +242,7 @@ const SessionDetail: Component<{ groupId: number }> = (props) => {
                     padding: '0.35rem 0', 'border-bottom': '1px solid rgba(255,255,255,0.05)',
                     'font-size': '0.85rem', display: 'flex', gap: '0.75rem',
                   }}>
-                    <span class="font-mono" style={{ 'min-width': '140px', color: 'var(--accent)' }}>{ev.ingameTime}</span>
+                    <span class="font-mono" style={{ 'min-width': '140px', color: 'var(--color-accent)' }}>{ev.ingameTime}</span>
                     <span style={{ flex: 1 }}>{ev.description}</span>
                     <span class="text-text-dim text-[0.9rem]" style={{ 'font-size': '0.72rem' }}>
                       {ev.trigger} · {new Date(ev.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}

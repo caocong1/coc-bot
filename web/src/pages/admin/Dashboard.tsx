@@ -16,9 +16,9 @@ const Dashboard: Component = () => {
   return (
     <div>
       <div class="flex gap-4 mb-8 flex-wrap">
-        <Stat label="进行中的团" value={running().length} color="var(--success)" />
-        <Stat label="暂停中的团" value={paused().length} color="var(--warn)" />
-        <Stat label="总团数" value={(sessions() ?? []).length} color="var(--accent)" />
+        <Stat label="进行中的团" value={running().length} color="var(--color-success)" />
+        <Stat label="暂停中的团" value={paused().length} color="var(--color-warn)" />
+        <Stat label="总团数" value={(sessions() ?? []).length} color="var(--color-accent)" />
       </div>
 
       <div class="mb-8">

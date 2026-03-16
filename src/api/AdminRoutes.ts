@@ -224,6 +224,7 @@ export class AdminRoutes {
       if (method === 'GET' && segments[1] && segments[2] === 'time') return this.getAdminRoomTime(segments[1]);
       if (method === 'POST' && segments[1] && segments[2] === 'confirm') return this.adminConfirmRoom(segments[1]);
       if (method === 'POST' && segments[1] && segments[2] === 'cancel-review') return this.adminCancelReview(segments[1]);
+      if (method === 'PATCH' && segments[1] && segments[2] === 'module') return this.updateRoomModule(segments[1], req);
       if (method === 'PATCH' && segments[1] && segments[2] === 'kp-settings') return this.updateRoomKpSettings(segments[1], req);
       if (method === 'GET' && segments[1] && segments[2] === 'relationships') return this.getAdminRoomRelationships(segments[1]);
       if (method === 'POST' && segments[1] && segments[2] === 'relationships') return this.createAdminRoomRelationship(segments[1], req);
@@ -1309,6 +1310,35 @@ export class AdminRoutes {
     params.push(roomId);
 
     this.db.run(`UPDATE campaign_rooms SET ${updates.join(', ')} WHERE id = ?`, params);
+    return Response.json({ ok: true });
+  }
+
+  private async updateRoomModule(roomId: string, req: Request): Promise<Response> {
+    const room = this.db.query<{ status: string }, string>(
+      'SELECT status FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    if (room.status !== 'waiting') return Response.json({ error: '跑团已开始，不可修改模组' }, { status: 409 });
+
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json() as Record<string, unknown>;
+    } catch {
+      return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
+
+    const rawModuleId = body.moduleId;
+    const moduleId = typeof rawModuleId === 'string' && rawModuleId.trim() ? rawModuleId.trim() : null;
+    const next = this.resolveAdminRoomModuleDefaults(moduleId);
+    if (moduleId && !next) {
+      return Response.json({ error: '模组不存在' }, { status: 404 });
+    }
+
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE campaign_rooms SET module_id = ?, scenario_name = ?, constraints_json = ?, updated_at = ? WHERE id = ?',
+      [moduleId, next?.scenarioName ?? null, JSON.stringify(next?.constraints ?? {}), now, roomId],
+    );
     return Response.json({ ok: true });
   }
 
@@ -2604,6 +2634,27 @@ export class AdminRoutes {
     if (!chunkPath) return null;
     if (!chunkPath.endsWith('.chunks.json')) return null;
     return chunkPath.replace(/\.chunks\.json$/, '.keeper.chunks.json');
+  }
+
+  private resolveAdminRoomModuleDefaults(moduleId: string | null): { scenarioName: string; constraints: RoomConstraintShape } | null {
+    if (!moduleId) return null;
+    const module = this.db.query<{
+      name: string;
+      era: string | null;
+      allowed_occupations: string;
+      total_points: number | null;
+    }, string>(
+      'SELECT name, era, allowed_occupations, total_points FROM scenario_modules WHERE id = ?',
+    ).get(moduleId);
+    if (!module) return null;
+    return {
+      scenarioName: module.name,
+      constraints: {
+        era: module.era ?? undefined,
+        allowedOccupations: JSON.parse(module.allowed_occupations) as string[],
+        totalPoints: normalizeOptionalTotalPoints(module.total_points),
+      },
+    };
   }
 }
 

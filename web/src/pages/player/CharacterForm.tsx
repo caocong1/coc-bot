@@ -621,7 +621,7 @@ const CharacterForm: Component<Props> = (props) => {
               <div class="mt-3 p-4 bg-surface border border-border rounded-lg">
                 <div style={{ display: 'flex', 'align-items': 'center', gap: '0.75rem', 'margin-bottom': '0.75rem', 'flex-wrap': 'wrap' }}>
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '0.4rem' }}>
-                    <label style={{ 'font-size': '0.82rem', color: 'var(--text-dim)', 'white-space': 'nowrap' }}>目标总点（不含幸运）</label>
+                    <label style={{ 'font-size': '0.82rem', color: 'var(--color-text-dim)', 'white-space': 'nowrap' }}>目标总点（不含幸运）</label>
                     <input
                       type="number"
                       class="w-full bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent"
@@ -645,7 +645,7 @@ const CharacterForm: Component<Props> = (props) => {
                       <span>#</span>
                       <span>力量</span><span>体质</span><span>体型</span><span>敏捷</span>
                       <span>外貌</span><span>智力</span><span>意志</span><span>教育</span>
-                      <span>幸运</span><span style={{ color: 'var(--accent)' }}>总点</span>
+                      <span>幸运</span><span style={{ color: 'var(--color-accent)' }}>总点</span>
                     </div>
                     <For each={rollSets()}>
                       {(s, i) => (
@@ -658,7 +658,7 @@ const CharacterForm: Component<Props> = (props) => {
                           <span>{s.str}</span><span>{s.con}</span><span>{s.siz}</span><span>{s.dex}</span>
                           <span>{s.app}</span><span>{s.int}</span><span>{s.pow}</span><span>{s.edu}</span>
                           <span>{s.luck}</span>
-                          <span style={{ 'font-weight': 700, color: 'var(--accent)' }}>{s.total}</span>
+                          <span style={{ 'font-weight': 700, color: 'var(--color-accent)' }}>{s.total}</span>
                         </div>
                       )}
                     </For>
@@ -785,7 +785,7 @@ const CharacterForm: Component<Props> = (props) => {
                       </Show>
                       <Show when={cr()}>
                         <span style={{
-                          'font-size': '0.72rem', color: outOfRange() ? 'var(--danger)' : 'var(--text-dim)',
+                          'font-size': '0.72rem', color: outOfRange() ? 'var(--color-danger)' : 'var(--color-text-dim)',
                           'margin-left': '0.25rem',
                         }}>({cr()!.min}–{cr()!.max})</span>
                       </Show>
@@ -823,11 +823,11 @@ const CharacterForm: Component<Props> = (props) => {
               { key: '资产规模', val: livingStandard().assets },
             ]).map(({ key, val }) => (
               <div style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
+                background: 'var(--color-surface)', border: '1px solid var(--color-border)',
                 'border-radius': '8px', padding: '0.6rem 0.9rem',
               }}>
-                <div style={{ 'font-size': '0.75rem', color: 'var(--text-dim)', 'margin-bottom': '0.2rem' }}>{key}</div>
-                <div style={{ 'font-weight': 600, color: creditValue() === 0 && key === '生活水平' ? 'var(--text-dim)' : 'var(--text)' }}>{val}</div>
+                <div style={{ 'font-size': '0.75rem', color: 'var(--color-text-dim)', 'margin-bottom': '0.2rem' }}>{key}</div>
+                <div style={{ 'font-weight': 600, color: creditValue() === 0 && key === '生活水平' ? 'var(--color-text-dim)' : 'var(--color-text)' }}>{val}</div>
               </div>
             ))}
           </div>

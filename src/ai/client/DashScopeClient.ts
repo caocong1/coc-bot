@@ -14,6 +14,19 @@ const DASHSCOPE_IMAGE_SYNC = 'https://dashscope.aliyuncs.com/api/v1/services/aig
 const EMBED_BATCH_SIZE = 25;
 const DEFAULT_EMBED_MODEL = 'text-embedding-v4';
 const DEFAULT_EMBED_DIM = 1024;
+const DEFAULT_STREAM_CHAT_TIMEOUT_MS = 120_000;
+
+function normalizeTimeoutMs(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.max(10_000, Math.floor(parsed));
+}
+
+function formatTimeoutLabel(timeoutMs: number): string {
+  if (timeoutMs % 60_000 === 0) return `${timeoutMs / 60_000}分钟`;
+  if (timeoutMs % 1_000 === 0) return `${timeoutMs / 1_000}秒`;
+  return `${timeoutMs}毫秒`;
+}
 
 /**
  * Embedding 选项
@@ -48,9 +61,14 @@ export interface VisionMessage {
  */
 export class DashScopeClient {
   private apiKey: string;
+  private readonly streamChatTimeoutMs: number;
   
   constructor(apiKey: string) {
     this.apiKey = apiKey;
+    this.streamChatTimeoutMs = normalizeTimeoutMs(
+      process.env.DASHSCOPE_STREAM_TIMEOUT_MS,
+      DEFAULT_STREAM_CHAT_TIMEOUT_MS,
+    );
   }
   
   /**
@@ -249,7 +267,7 @@ export class DashScopeClient {
     callbacks: StreamCallbacks
   ): Promise<void> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
+    const timeout = setTimeout(() => controller.abort(), this.streamChatTimeoutMs);
 
     let response: Response;
     try {
@@ -269,7 +287,7 @@ export class DashScopeClient {
     } catch (err) {
       clearTimeout(timeout);
       const msg = err instanceof Error && err.name === 'AbortError'
-        ? '模型调用超时（60秒）'
+        ? `模型调用超时（${formatTimeoutLabel(this.streamChatTimeoutMs)}）`
         : `模型调用失败: ${err instanceof Error ? err.message : String(err)}`;
       callbacks.onError(msg);
       return;
@@ -319,7 +337,7 @@ export class DashScopeClient {
       }
     } catch (err) {
       const msg = err instanceof Error && err.name === 'AbortError'
-        ? '模型响应超时（60秒）'
+        ? `模型响应超时（${formatTimeoutLabel(this.streamChatTimeoutMs)}）`
         : `读取响应流失败: ${err instanceof Error ? err.message : String(err)}`;
       callbacks.onError(msg);
       return;

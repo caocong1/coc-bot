@@ -32,7 +32,7 @@ const ModuleCard: Component<{ module: ScenarioSummary }> = (props) => {
       </Show>
       <div class="text-text-dim" style={{ 'font-size': '0.85rem' }}>{m.description || '暂无简介'}</div>
       <Show when={m.allowedOccupations.length > 0 || m.totalPoints != null}>
-        <div style={{ 'margin-top': '0.5rem', 'font-size': '0.78rem', color: 'var(--text-dim)' }}>
+        <div style={{ 'margin-top': '0.5rem', 'font-size': '0.78rem', color: 'var(--color-text-dim)' }}>
           <Show when={m.allowedOccupations.length > 0}>
             <div>职业限制：{m.allowedOccupations.join('、')}</div>
           </Show>

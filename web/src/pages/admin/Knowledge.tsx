@@ -42,15 +42,15 @@ const Knowledge: Component = () => {
             background: 'rgba(124,106,247,0.08)', border: '1px solid rgba(124,106,247,0.2)',
             'border-radius': '6px', padding: '0.75rem', 'font-size': '0.8rem', 'font-family': 'monospace',
           }}>
-            <div style={{ color: 'var(--text-dim)', 'margin-bottom': '0.35rem' }}># 初次导入规则书（只需运行一次）</div>
-            <div style={{ color: 'var(--accent)' }}>
+            <div style={{ color: 'var(--color-text-dim)', 'margin-bottom': '0.35rem' }}># 初次导入规则书（只需运行一次）</div>
+            <div style={{ color: 'var(--color-accent)' }}>
               bun scripts/import-pdfs.ts --file="[规则书]守秘人规则书.pdf" --category=rules
             </div>
-            <div style={{ color: 'var(--accent)', 'margin-top': '0.25rem' }}>
+            <div style={{ color: 'var(--color-accent)', 'margin-top': '0.25rem' }}>
               bun scripts/import-pdfs.ts --file="[调查员手册].pdf" --category=rules
             </div>
-            <div style={{ color: 'var(--text-dim)', 'margin-top': '0.5rem' }}># 构建向量索引</div>
-            <div style={{ color: 'var(--accent)' }}>bun scripts/build-indexes.ts --type=rules</div>
+            <div style={{ color: 'var(--color-text-dim)', 'margin-top': '0.5rem' }}># 构建向量索引</div>
+            <div style={{ color: 'var(--color-accent)' }}>bun scripts/build-indexes.ts --type=rules</div>
           </div>
           <p class="text-text-dim text-[0.9rem]" style={{ 'font-size': '0.78rem', 'margin-top': '0.75rem' }}>
             剧本和模组文件请前往 <strong>模组管理</strong> 页面上传。
@@ -84,7 +84,7 @@ const Knowledge: Component = () => {
                     </span>
                     <button
                       class="px-2.5 py-1 bg-white/[0.07] text-text border border-border rounded-md text-sm cursor-pointer no-underline inline-block hover:bg-white/[0.12] transition-all duration-200"
-                      style={{ color: 'var(--error, #f87171)', 'border-color': 'var(--error, #f87171)', padding: '0.1rem 0.4rem' }}
+                      style={{ color: 'var(--color-danger)', 'border-color': 'var(--color-danger)', padding: '0.1rem 0.4rem' }}
                       disabled={deleting() === f.name}
                       onClick={() => deleteFile(f.name)}
                     >

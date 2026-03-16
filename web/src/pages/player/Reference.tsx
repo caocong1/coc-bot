@@ -163,10 +163,10 @@ const Reference: Component = () => {
           <For each={insanity()?.immediate ?? []}>
             {(s) => (
               <div style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
+                background: 'var(--color-surface)', border: '1px solid var(--color-border)',
                 'border-radius': '8px', padding: '0.75rem 1rem',
               }}>
-                <span style={{ 'font-weight': 700, color: 'var(--accent)', 'margin-right': '0.5rem' }}>{s.id}.</span>
+                <span style={{ 'font-weight': 700, color: 'var(--color-accent)', 'margin-right': '0.5rem' }}>{s.id}.</span>
                 <span style={{ 'white-space': 'pre-wrap' }}>{s.description}</span>
               </div>
             )}
@@ -179,11 +179,11 @@ const Reference: Component = () => {
           <button class={`px-4 py-2 text-sm font-semibold bg-transparent border-0 border-b-2 cursor-pointer transition-all duration-150 hover:text-text ${phobiaPage() === 'manias' ? 'text-accent border-b-accent' : 'text-text-dim border-b-transparent'}`}
             onClick={() => setPhobiaPage('manias')}>狂躁症（D100）</button>
         </h3>
-        <div style={{ 'max-height': '400px', 'overflow-y': 'auto', background: 'var(--surface)', border: '1px solid var(--border)', 'border-radius': '8px', padding: '0.5rem' }}>
+        <div style={{ 'max-height': '400px', 'overflow-y': 'auto', background: 'var(--color-surface)', border: '1px solid var(--color-border)', 'border-radius': '8px', padding: '0.5rem' }}>
           <For each={phobiaPage() === 'phobias' ? (phobias() ?? []) : (manias() ?? [])}>
             {(p) => (
               <div style={{ padding: '0.25rem 0.5rem', 'border-bottom': '1px solid rgba(255,255,255,0.04)', 'font-size': '0.85rem' }}>
-                <span style={{ color: 'var(--accent)', 'font-weight': 600, 'margin-right': '0.5rem', 'min-width': '2rem', display: 'inline-block' }}>{p.id}.</span>
+                <span style={{ color: 'var(--color-accent)', 'font-weight': 600, 'margin-right': '0.5rem', 'min-width': '2rem', display: 'inline-block' }}>{p.id}.</span>
                 {p.description}
               </div>
             )}
@@ -195,9 +195,9 @@ const Reference: Component = () => {
           <div style={{ display: 'flex', 'flex-direction': 'column', gap: '0.5rem' }}>
             <For each={insanity()?.rules ?? []}>
               {(r) => (
-                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', 'border-radius': '8px', padding: '0.75rem 1rem' }}>
+                <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', 'border-radius': '8px', padding: '0.75rem 1rem' }}>
                   <div style={{ 'font-weight': 700, 'margin-bottom': '0.25rem' }}>{r.title}</div>
-                  <div style={{ 'white-space': 'pre-wrap', 'font-size': '0.85rem', color: 'var(--text-dim)' }}>{r.description}</div>
+                  <div style={{ 'white-space': 'pre-wrap', 'font-size': '0.85rem', color: 'var(--color-text-dim)' }}>{r.description}</div>
                 </div>
               )}
             </For>

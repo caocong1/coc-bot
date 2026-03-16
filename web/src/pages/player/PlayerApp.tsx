@@ -34,7 +34,7 @@ const PlayerApp: Component = () => {
       <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'min-height': '100vh', 'text-align': 'center', padding: '2rem' }}>
         <div>
           <p style={{ 'font-size': '1.5rem', 'margin-bottom': '1rem' }}>🔑 需要登录</p>
-          <p style={{ color: 'var(--text-dim)' }}>请<strong>私聊机器人</strong>发送 <code style={{ background: 'var(--surface)', padding: '0.1em 0.4em', 'border-radius': '4px' }}>.web login</code> 获取专属链接</p>
+          <p style={{ color: 'var(--color-text-dim)' }}>请<strong>私聊机器人</strong>发送 <code style={{ background: 'var(--color-surface)', padding: '0.1em 0.4em', 'border-radius': '4px' }}>.web login</code> 获取专属链接</p>
         </div>
       </div>
     );

@@ -29,7 +29,7 @@ const AdminApp: Component = () => {
       when={authed()}
       fallback={
         <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'min-height': '100vh' }}>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', 'border-radius': '12px', padding: '2rem', width: '320px' }}>
+          <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', 'border-radius': '12px', padding: '2rem', width: '320px' }}>
             <h2 style={{ 'margin-bottom': '1rem' }}>🔧 管理端登录</h2>
             <input
               type="password"
@@ -37,11 +37,11 @@ const AdminApp: Component = () => {
               value={secretInput()}
               onInput={(e) => setSecretInput(e.currentTarget.value)}
               onKeyDown={(e) => e.key === 'Enter' && login()}
-              style={{ width: '100%', padding: '0.6rem', background: 'var(--bg)', border: '1px solid var(--border)', 'border-radius': '6px', color: 'var(--text)', 'margin-bottom': '0.75rem' }}
+              style={{ width: '100%', padding: '0.6rem', background: 'var(--color-bg)', border: '1px solid var(--color-border)', 'border-radius': '6px', color: 'var(--color-text)', 'margin-bottom': '0.75rem' }}
             />
             <button
               onClick={login}
-              style={{ width: '100%', padding: '0.6rem', background: 'var(--accent)', border: 'none', 'border-radius': '6px', color: 'white', cursor: 'pointer', 'font-weight': '600' }}
+              style={{ width: '100%', padding: '0.6rem', background: 'var(--color-accent)', border: 'none', 'border-radius': '6px', color: 'white', cursor: 'pointer', 'font-weight': '600' }}
             >
               进入
             </button>

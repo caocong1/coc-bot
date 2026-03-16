@@ -27,7 +27,22 @@ import {
 
 const WEB_BASE_URL = process.env.WEB_BASE_URL ?? 'http://localhost:5173';
 const SHORT_ID_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉 I/O/0/1 避免混淆
-const REVIEW_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟审卡超时
+const DEFAULT_REVIEW_TIMEOUT_MS = 20 * 60 * 1000;
+
+function normalizeTimeoutMs(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.max(60_000, Math.floor(parsed));
+}
+
+function formatTimeoutLabel(timeoutMs: number): string {
+  if (timeoutMs % 60_000 === 0) return `${timeoutMs / 60_000}分钟`;
+  if (timeoutMs % 1_000 === 0) return `${timeoutMs / 1_000}秒`;
+  return `${timeoutMs}毫秒`;
+}
+
+const REVIEW_TIMEOUT_MS = normalizeTimeoutMs(process.env.ROOM_REVIEW_TIMEOUT_MS, DEFAULT_REVIEW_TIMEOUT_MS);
+const REVIEW_TIMEOUT_LABEL = formatTimeoutLabel(REVIEW_TIMEOUT_MS);
 
 function generateShortId(): string {
   let id = '';
@@ -248,7 +263,7 @@ export class RoomCommand {
       const now = new Date().toISOString();
       this.db.run("UPDATE campaign_rooms SET status = 'waiting', updated_at = ? WHERE id = ?", [now, roomId]);
       this.resetReadyStatus(roomId);
-      this.actionClient?.sendGroupMessage(groupId, `⏰ 房间「${room.name}」审卡超时（10分钟），已自动取消。重新开始请发 .room start ${roomId}`).catch(() => {});
+      this.actionClient?.sendGroupMessage(groupId, `⏰ 房间「${room.name}」审卡超时（${REVIEW_TIMEOUT_LABEL}），已自动取消。重新开始请发 .room start ${roomId}`).catch(() => {});
     }, REVIEW_TIMEOUT_MS);
     this.reviewTimers.set(roomId, timer);
   }

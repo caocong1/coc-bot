@@ -1,5 +1,5 @@
-import { createEffect, createResource, For, Show, type Component, type JSX } from 'solid-js';
-import { type Message, type RoomConstraints, type RoomMemberView, type RoomRelationship, type RoomRelationshipParticipant } from '../../api';
+import { createEffect, createMemo, createResource, For, Show, type Component, type JSX } from 'solid-js';
+import { type Message, type RoomConstraints, type RoomMemberView, type RoomRelationship, type RoomRelationshipParticipant, type ScenarioSummary } from '../../api';
 
 export type RoomTab = 'overview' | 'messages' | 'manage';
 
@@ -434,7 +434,7 @@ export const RoomRelationshipsPanel: Component<{
                     }`}>
                       <input
                         type="checkbox"
-                        class="accent-[var(--accent)]"
+                        class="accent-[var(--color-accent)]"
                         checked={selectedIds().has(participant.characterId)}
                         onChange={() => toggleParticipant(participant.characterId)}
                       />
@@ -479,6 +479,120 @@ export const RoomRelationshipsPanel: Component<{
             </Show>
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
+
+export const RoomModulePanel: Component<{
+  currentModuleId: string | null;
+  currentScenarioName: string | null;
+  availableModules: ScenarioSummary[];
+  selectedModuleId: string;
+  onSelectedModuleIdChange: (value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  canEdit: boolean;
+  modulesLoading?: boolean;
+  readOnlyReason?: string;
+}> = (props) => {
+  const currentModule = createMemo(() =>
+    (props.availableModules ?? []).find((module) => module.id === props.currentModuleId) ?? null,
+  );
+  const selectedModule = createMemo(() =>
+    (props.availableModules ?? []).find((module) => module.id === props.selectedModuleId) ?? null,
+  );
+  const hasPendingChange = () => props.selectedModuleId !== (props.currentModuleId ?? '');
+
+  return (
+    <div class="rounded-[1.5rem] border border-border bg-surface px-5 py-5 shadow-sm shadow-black/10">
+      <div class="flex items-center justify-between gap-3 mb-4">
+        <div>
+          <h3 style={{ margin: '0 0 0.2rem' }}>模组设置</h3>
+          <div class="text-[0.78rem] text-text-dim">在开团前可以直接切换房间模组；切换后会自动覆盖房间筛卡条件。</div>
+        </div>
+        <Show when={props.currentScenarioName}>
+          <span class="inline-flex items-center rounded-full border border-accent/20 bg-accent/[0.08] px-3 py-1 text-[0.72rem] font-semibold text-accent">
+            当前：{props.currentScenarioName}
+          </span>
+        </Show>
+      </div>
+
+      <div class="bg-white/[0.03] border border-white/[0.08] rounded-2xl px-4 py-4 flex flex-col gap-3">
+        <div class="rounded-2xl border border-white/[0.08] bg-white/[0.02] px-4 py-4 text-sm text-text-dim">
+          <div class="text-[0.72rem] uppercase tracking-[0.14em] text-text-dim">当前模组</div>
+          <div class="mt-2 text-base font-semibold text-text">{props.currentScenarioName ?? '未指定模组'}</div>
+          <Show when={currentModule()}>
+            {(module) => (
+              <div class="mt-2 text-[0.84rem] leading-6 text-text-dim">
+                {module().description || '暂无简介'}
+              </div>
+            )}
+          </Show>
+          <Show when={!currentModule() && props.currentScenarioName}>
+            <div class="mt-2 text-[0.84rem] leading-6 text-text-dim">当前房间绑定的模组不在可选列表中，但不会影响已有房间数据。</div>
+          </Show>
+        </div>
+
+        <Show when={props.canEdit} fallback={<p class="text-text-dim text-sm">{props.readOnlyReason ?? '跑团开始后不可再切换模组。'}</p>}>
+          <Show when={!props.modulesLoading} fallback={<p class="text-text-dim text-sm">模组列表加载中...</p>}>
+            <Show when={(props.availableModules ?? []).length > 0} fallback={<p class="text-text-dim text-sm">暂无可选模组。</p>}>
+              <div class="flex flex-col gap-3">
+                <select
+                  value={props.selectedModuleId}
+                  onChange={(e) => props.onSelectedModuleIdChange(e.currentTarget.value)}
+                  class="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text"
+                >
+                  <option value="">— 不指定模组 —</option>
+                  <For each={props.availableModules}>
+                    {(module) => (
+                      <option value={module.id}>
+                        {module.name}{module.era ? ` [${module.era}]` : ''}
+                      </option>
+                    )}
+                  </For>
+                </select>
+
+                <div class="rounded-2xl border border-accent/18 bg-accent/[0.06] px-4 py-4 text-[0.84rem] leading-6 text-text-dim">
+                  <div class="font-semibold text-text">切换后的房间效果</div>
+                  <Show
+                    when={selectedModule()}
+                    fallback={<div class="mt-2">将清空当前房间的模组绑定，并恢复为空筛卡条件；成员、人物关系和已绑定角色卡会保留。</div>}
+                  >
+                    {(module) => (
+                      <div class="mt-2 flex flex-col gap-2">
+                        <div>{module().description || '暂无简介'}</div>
+                        <div class="flex flex-wrap gap-2">
+                          <Show when={module().era}>
+                            <span class="rounded-full border border-white/[0.08] bg-white/[0.05] px-2.5 py-0.5 text-[0.72rem] text-text">时代：{module().era}</span>
+                          </Show>
+                          <Show when={module().allowedOccupations.length > 0} fallback={<span class="rounded-full border border-white/[0.08] bg-white/[0.05] px-2.5 py-0.5 text-[0.72rem] text-text">职业限制：不限</span>}>
+                            <span class="rounded-full border border-white/[0.08] bg-white/[0.05] px-2.5 py-0.5 text-[0.72rem] text-text">职业限制：{module().allowedOccupations.join('、')}</span>
+                          </Show>
+                          <Show when={module().totalPoints != null} fallback={<span class="rounded-full border border-white/[0.08] bg-white/[0.05] px-2.5 py-0.5 text-[0.72rem] text-text">总点要求：不校验</span>}>
+                            <span class="rounded-full border border-white/[0.08] bg-white/[0.05] px-2.5 py-0.5 text-[0.72rem] text-text">总点要求：{module().totalPoints}</span>
+                          </Show>
+                        </div>
+                      </div>
+                    )}
+                  </Show>
+                </div>
+
+                <div class="text-[0.78rem] text-text-dim">
+                  只允许在开团前切换模组。切换后会覆盖房间筛卡条件，但不会自动清除成员、已绑定角色卡或人物关系。
+                </div>
+
+                <button
+                  class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95 self-start"
+                  onClick={props.onSave}
+                  disabled={props.saving || !hasPendingChange()}
+                >
+                  {props.saving ? '保存中...' : '保存模组设置'}
+                </button>
+              </div>
+            </Show>
+          </Show>
+        </Show>
       </div>
     </div>
   );

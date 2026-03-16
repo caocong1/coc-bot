@@ -114,6 +114,7 @@ export class PlayerRoutes {
       if (method === 'POST' && resourceId && sub2 === 'start') return this.startRoom(qqId, resourceId, req);
       if (method === 'POST' && resourceId && sub2 === 'ready') return this.readyRoom(qqId, resourceId);
       if (method === 'POST' && resourceId && sub2 === 'cancel-review') return this.cancelReview(qqId, resourceId);
+      if (method === 'PATCH' && resourceId && sub2 === 'module') return this.updateRoomModule(qqId, resourceId, req);
       if (method === 'PATCH' && resourceId && sub2 === 'constraints') return this.updateConstraints(qqId, resourceId, req);
       if (method === 'GET' && resourceId && sub2 === 'relationships') return this.listRoomRelationships(qqId, resourceId);
       if (method === 'POST' && resourceId && sub2 === 'relationships') return this.createRoomRelationship(qqId, resourceId, req);
@@ -450,10 +451,10 @@ export class PlayerRoutes {
     // 返回：该玩家创建的 + 该玩家加入的
     const rooms = this.db.query<{
       id: string; name: string; group_id: number | null; creator_qq_id: number;
-      scenario_name: string | null; constraints_json: string; status: string;
+      module_id: string | null; scenario_name: string | null; constraints_json: string; status: string;
       kp_session_id: string | null; created_at: string; updated_at: string;
     }, [number, number]>(`
-      SELECT DISTINCT r.id, r.name, r.group_id, r.creator_qq_id, r.scenario_name,
+      SELECT DISTINCT r.id, r.name, r.group_id, r.creator_qq_id, r.module_id, r.scenario_name,
              r.constraints_json, r.status, r.kp_session_id, r.created_at, r.updated_at
       FROM campaign_rooms r
       LEFT JOIN campaign_room_members m ON m.room_id = r.id AND m.qq_id = ?
@@ -520,10 +521,10 @@ export class PlayerRoutes {
   private getRoom(qqId: number, roomId: string): Response {
     const room = this.db.query<{
       id: string; name: string; group_id: number | null; creator_qq_id: number;
-      scenario_name: string | null; constraints_json: string; status: string;
+      module_id: string | null; scenario_name: string | null; constraints_json: string; status: string;
       kp_session_id: string | null; created_at: string; updated_at: string;
     }, string>(
-      'SELECT id, name, group_id, creator_qq_id, scenario_name, constraints_json, status, kp_session_id, created_at, updated_at FROM campaign_rooms WHERE id = ?',
+      'SELECT id, name, group_id, creator_qq_id, module_id, scenario_name, constraints_json, status, kp_session_id, created_at, updated_at FROM campaign_rooms WHERE id = ?',
     ).get(roomId);
 
     if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
@@ -773,6 +774,36 @@ export class PlayerRoutes {
     return Response.json({ ok: true });
   }
 
+  private async updateRoomModule(qqId: number, roomId: string, req: Request): Promise<Response> {
+    const room = this.db.query<{ creator_qq_id: number; status: string }, string>(
+      'SELECT creator_qq_id, status FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (!room) return Response.json({ error: '房间不存在' }, { status: 404 });
+    if (room.creator_qq_id !== qqId) return Response.json({ error: '只有创建者可以修改模组' }, { status: 403 });
+    if (room.status !== 'waiting') return Response.json({ error: '跑团已开始，不可修改模组' }, { status: 409 });
+
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json() as Record<string, unknown>;
+    } catch {
+      return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
+
+    const rawModuleId = body.moduleId;
+    const moduleId = typeof rawModuleId === 'string' && rawModuleId.trim() ? rawModuleId.trim() : null;
+    const next = this.resolvePlayerRoomModuleDefaults(moduleId);
+    if (moduleId && !next) {
+      return Response.json({ error: '模组不存在或尚未对玩家可用' }, { status: 404 });
+    }
+
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE campaign_rooms SET module_id = ?, scenario_name = ?, constraints_json = ?, updated_at = ? WHERE id = ?',
+      [moduleId, next?.scenarioName ?? null, JSON.stringify(next?.constraints ?? {}), now, roomId],
+    );
+    return Response.json({ ok: true });
+  }
+
   private listRoomRelationships(qqId: number, roomId: string): Response {
     if (!this.isRoomMember(roomId, qqId)) {
       return Response.json({ error: '不是该房间成员' }, { status: 403 });
@@ -905,7 +936,7 @@ export class PlayerRoutes {
 
   private formatRoom(r: {
     id: string; name: string; group_id: number | null; creator_qq_id: number;
-    scenario_name: string | null; constraints_json: string; status: string;
+    module_id: string | null; scenario_name: string | null; constraints_json: string; status: string;
     kp_session_id: string | null; created_at: string; updated_at?: string;
   }, viewerQqId: number) {
     return {
@@ -914,6 +945,7 @@ export class PlayerRoutes {
       groupId: r.group_id,
       creatorQqId: r.creator_qq_id,
       isCreator: r.creator_qq_id === viewerQqId,
+      moduleId: r.module_id,
       scenarioName: r.scenario_name,
       constraints: normalizeRoomConstraints(JSON.parse(r.constraints_json)),
       status: r.status,
@@ -960,6 +992,36 @@ export class PlayerRoutes {
       'SELECT COUNT(*) as cnt FROM campaign_room_members WHERE room_id = ?',
     ).get(roomId);
     return row?.cnt ?? 0;
+  }
+
+  private resolvePlayerRoomModuleDefaults(moduleId: string | null): { scenarioName: string; constraints: RoomConstraints } | null {
+    if (!moduleId) return null;
+    const module = this.db.query<{
+      name: string;
+      era: string | null;
+      allowed_occupations: string;
+      total_points: number | null;
+    }, string>(`
+      SELECT m.name, m.era, m.allowed_occupations, m.total_points
+      FROM scenario_modules m
+      WHERE m.id = ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM scenario_module_files f
+          WHERE f.module_id = m.id
+            AND f.file_type = 'document'
+            AND f.import_status = 'pending'
+        )
+    `).get(moduleId);
+    if (!module) return null;
+    return {
+      scenarioName: module.name,
+      constraints: {
+        era: module.era ?? undefined,
+        allowedOccupations: JSON.parse(module.allowed_occupations) as string[],
+        totalPoints: normalizeOptionalTotalPoints(module.total_points),
+      },
+    };
   }
 
   private deleteRoomRelationshipData(roomId: string): void {

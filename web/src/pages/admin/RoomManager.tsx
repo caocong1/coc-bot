@@ -6,6 +6,7 @@ import {
   type KpTemplate,
   type RoomRelationship,
   type RoomRelationshipParticipant,
+  type ScenarioModule,
   type Segment,
   type Clue,
 } from '../../api';
@@ -13,6 +14,7 @@ import {
   RoomHeaderHero,
   RoomMembersPanel,
   RoomMessagesPanel,
+  RoomModulePanel,
   RoomRelationshipsPanel,
   RoomTabsBar,
   STATUS_LABEL,
@@ -79,7 +81,7 @@ const RoomManager: Component = () => {
                           event.stopPropagation();
                           deleteRoom(room);
                         }}
-                        style={{ color: 'var(--error, #f87171)' }}
+                        style={{ color: 'var(--color-danger)' }}
                       >
                         删除
                       </button>
@@ -98,6 +100,7 @@ const RoomManager: Component = () => {
 const AdminRoomDetailView: Component<{ id: string; onBack: () => void; onRefreshList: () => void }> = (props) => {
   const [detail, { refetch }] = createResource(() => adminApi.getRoomDetail(props.id).catch(() => null));
   const [templates] = createResource(() => adminApi.listKpTemplates().catch(() => []));
+  const [modules] = createResource(() => adminApi.listModules().catch(() => [] as ScenarioModule[]));
   const [activeTab, setActiveTab] = createSignal<RoomTab>('overview');
   const [msg, setMsg] = createSignal('');
   const [err, setErr] = createSignal('');
@@ -109,6 +112,8 @@ const AdminRoomDetailView: Component<{ id: string; onBack: () => void; onRefresh
   const [relationLabel, setRelationLabel] = createSignal('');
   const [relationNotes, setRelationNotes] = createSignal('');
   const [editingRelationId, setEditingRelationId] = createSignal<string | null>(null);
+  const [savingModule, setSavingModule] = createSignal(false);
+  const [selectedModuleId, setSelectedModuleId] = createSignal('');
 
   const readyCount = () => detail()?.members.filter((member) => member.readyAt).length ?? 0;
   const boundParticipants = createMemo<RoomRelationshipParticipant[]>(() =>
@@ -123,6 +128,10 @@ const AdminRoomDetailView: Component<{ id: string; onBack: () => void; onRefresh
   const canEditRelationships = createMemo(() => {
     const status = detail()?.status;
     return status === 'waiting' || status === 'reviewing';
+  });
+
+  createEffect(() => {
+    setSelectedModuleId(detail()?.moduleId ?? '');
   });
 
   const refreshAll = async () => {
@@ -229,6 +238,22 @@ const AdminRoomDetailView: Component<{ id: string; onBack: () => void; onRefresh
     }
   };
 
+  const saveRoomModule = async () => {
+    setSavingModule(true);
+    setErr('');
+    try {
+      await adminApi.updateRoomModule(props.id, {
+        moduleId: selectedModuleId().trim() || null,
+      });
+      setMsg('已更新房间模组');
+      await refreshAll();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSavingModule(false);
+    }
+  };
+
   return (
     <div>
       <button class="px-3 py-1.5 bg-transparent text-text-dim border border-border rounded-md text-sm cursor-pointer hover:text-text hover:border-text-dim transition-all duration-200 active:scale-95 mb-4" onClick={props.onBack}>
@@ -249,7 +274,7 @@ const AdminRoomDetailView: Component<{ id: string; onBack: () => void; onRefresh
                 groupId={room().groupId}
                 identityLabel="管理端"
                 actions={room().status === 'reviewing' ? (
-                  <button class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" style={{ background: 'var(--success)' }} onClick={confirmRoom} disabled={confirming()}>
+                  <button class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" style={{ background: 'var(--color-success)' }} onClick={confirmRoom} disabled={confirming()}>
                     {confirming() ? '处理中...' : '强制开团'}
                   </button>
                 ) : undefined}
@@ -276,7 +301,7 @@ const AdminRoomDetailView: Component<{ id: string; onBack: () => void; onRefresh
                 <div class="grid grid-cols-1 gap-6 mt-4">
                   <RoomMembersPanel members={room().members} constraints={room().constraints} readyCount={readyCount()} />
                 </div>
-                <div class="grid grid-cols-1 gap-6 mt-6">
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
                   <RoomRelationshipsPanel
                     relationships={room().relationships}
                     availableParticipants={boundParticipants()}
@@ -295,6 +320,18 @@ const AdminRoomDetailView: Component<{ id: string; onBack: () => void; onRefresh
                     canEdit={canEditRelationships()}
                     readOnlyReason="跑团开始后人物关系只读；如需干预，请在开团前完成。"
                     helperText="管理员也可以直接维护人物关系。这里的关系与玩家端使用同一份数据，改动会同步反映到开场与推进导演。"
+                  />
+                  <RoomModulePanel
+                    currentModuleId={room().moduleId}
+                    currentScenarioName={room().scenarioName}
+                    availableModules={modules() ?? []}
+                    selectedModuleId={selectedModuleId()}
+                    onSelectedModuleIdChange={setSelectedModuleId}
+                    onSave={saveRoomModule}
+                    saving={savingModule()}
+                    canEdit={room().status === 'waiting'}
+                    modulesLoading={modules.loading}
+                    readOnlyReason="房间进入审卡或跑团后不可再切换模组。"
                   />
                 </div>
               </Show>
