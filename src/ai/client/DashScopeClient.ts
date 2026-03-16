@@ -29,6 +29,36 @@ function formatTimeoutLabel(timeoutMs: number): string {
 }
 
 /**
+ * DashScope API 错误（带错误分类）
+ */
+export class DashScopeApiError extends Error {
+  readonly statusCode: number;
+  readonly errorCode: string;
+  readonly isQuotaError: boolean;
+  readonly isTransient: boolean;
+
+  constructor(statusCode: number, body: string) {
+    super(`DashScope API error (${statusCode}): ${body}`);
+    this.name = 'DashScopeApiError';
+    this.statusCode = statusCode;
+    this.errorCode = DashScopeApiError.parseErrorCode(body);
+    this.isQuotaError = statusCode === 403
+      || this.errorCode.includes('AllocationQuota')
+      || this.errorCode.includes('Throttling');
+    this.isTransient = statusCode === 429 || statusCode >= 500;
+  }
+
+  private static parseErrorCode(body: string): string {
+    try {
+      const json = JSON.parse(body);
+      return json?.error?.code ?? json?.error?.type ?? json?.code ?? 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+}
+
+/**
  * Embedding 选项
  */
 export interface EmbedOptions {
@@ -152,7 +182,7 @@ export class DashScopeClient {
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      throw new Error(`chat 调用失败 (${response.status}): ${body}`);
+      throw new DashScopeApiError(response.status, body);
     }
 
     const json = await response.json() as {

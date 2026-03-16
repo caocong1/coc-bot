@@ -14,7 +14,7 @@
  *     → 返回最终文本供发送到 QQ
  */
 
-import { DashScopeClient } from '../client/DashScopeClient';
+import { DashScopeClient, DashScopeApiError } from '../client/DashScopeClient';
 import { ContextBuilder } from '../context/ContextBuilder';
 import { KPTemplateRegistry } from '../config/KPTemplateRegistry';
 import { KnowledgeService, type KnowledgeCategory } from '../../knowledge/retrieval/KnowledgeService';
@@ -431,8 +431,18 @@ export class KPPipeline {
       console.log(`[KPPipeline] AI 意图分类: text="${text.slice(0, 30)}" → ${result.intent} (${result.shouldIntervene ? '介入' : '观望'})`);
       return { shouldIntervene: result.shouldIntervene, reason: result.intent };
     } catch (err) {
-      console.error('[KPPipeline] AI 意图分类失败，降级为介入:', err);
-      // 分类失败 → 保守策略：介入（宁可多回复也别漏）
+      // 分类失败 → 保守策略：介入（宁可多回复也别漏），但按错误类型记录日志
+      if (err instanceof DashScopeApiError) {
+        if (err.isQuotaError) {
+          console.error(`[KPPipeline] ⚠️ 意图分类失败：API 配额已用尽 (${err.errorCode})，降级为直接介入`);
+        } else if (err.isTransient) {
+          console.warn(`[KPPipeline] 意图分类暂时不可用 (HTTP ${err.statusCode})，降级为介入`);
+        } else {
+          console.error(`[KPPipeline] 意图分类 API 错误 (${err.statusCode}, ${err.errorCode})，降级为介入`);
+        }
+      } else {
+        console.error('[KPPipeline] AI 意图分类失败（未知错误），降级为介入:', err);
+      }
       return { shouldIntervene: true, reason: 'classify_fallback' };
     }
   }

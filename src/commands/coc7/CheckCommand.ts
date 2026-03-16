@@ -15,6 +15,7 @@ import type { CommandHandler, CommandContext, CommandResult } from '../CommandRe
 import type { ParsedCommand } from '../CommandParser';
 import { CheckResolver, type HouseRule } from '../../rules/coc7/CheckResolver';
 import type { CharacterStore } from '../sheet/CharacterStore';
+import type { Character } from '../../shared/types/Character';
 
 export class CheckCommand implements CommandHandler {
   name = 'ra';
@@ -33,9 +34,15 @@ export class CheckCommand implements CommandHandler {
     const isHidden = cmd.name === 'rah' || cmd.name === 'rch';
 
     // 解析技能名和目标值
-    const { skillName, targetValue } = this.parseSkillAndValue(ctx, cmd);
+    const { skillName, targetValue, errorReason } = this.parseSkillAndValue(ctx, cmd);
 
     if (!skillName || targetValue === undefined) {
+      if (errorReason === 'no_character') {
+        return { text: '未找到角色卡，请先用 .st 或 .pc new 创建角色', error: true };
+      }
+      if (errorReason === 'skill_not_found' && skillName) {
+        return { text: `角色卡中未找到「${skillName}」，请用 .st ${skillName}=数值 设置，或直接 .ra ${skillName} 数值`, error: true };
+      }
       return { text: '格式错误。用法：.ra 技能名 [技能值]', error: true };
     }
 
@@ -81,9 +88,9 @@ export class CheckCommand implements CommandHandler {
   private parseSkillAndValue(
     ctx: CommandContext,
     cmd: ParsedCommand,
-  ): { skillName?: string; targetValue?: number } {
+  ): { skillName?: string; targetValue?: number; errorReason?: 'no_args' | 'no_character' | 'skill_not_found' } {
     const args = [...cmd.args];
-    if (args.length === 0) return {};
+    if (args.length === 0) return { errorReason: 'no_args' };
 
     // 尝试从最后一个参数提取数值
     const lastArg = args[args.length - 1];
@@ -97,20 +104,26 @@ export class CheckCommand implements CommandHandler {
     // 带运算的技能值: 侦查+10, 敏捷*5
     const withMathMatch = args.join('').match(/^(.+?)([+\-*/]\d+)$/);
     if (withMathMatch) {
-      const skillName = withMathMatch[1];
+      const mathSkillName = withMathMatch[1];
       const modifier = withMathMatch[2];
-      const baseValue = this.lookupSkill(ctx, skillName);
-      if (baseValue !== undefined) {
-        const finalValue = eval(`${baseValue}${modifier}`) as number;
-        return { skillName: skillName + modifier, targetValue: Math.max(1, Math.min(finalValue, 999)) };
+      const mathChar = this.characterStore.getActiveCharacter(ctx.userId, ctx.groupId);
+      if (mathChar) {
+        const baseValue = this.lookupSkillFromCharacter(mathChar, mathSkillName);
+        if (baseValue !== undefined) {
+          const finalValue = eval(`${baseValue}${modifier}`) as number;
+          return { skillName: mathSkillName + modifier, targetValue: Math.max(1, Math.min(finalValue, 999)) };
+        }
       }
     }
 
     // 从角色卡查找
     const skillName = args.join('');
-    const fromCard = this.lookupSkill(ctx, skillName);
-    if (fromCard !== undefined) {
-      return { skillName, targetValue: fromCard };
+    const character = this.characterStore.getActiveCharacter(ctx.userId, ctx.groupId);
+    if (character) {
+      const fromCard = this.lookupSkillFromCharacter(character, skillName);
+      if (fromCard !== undefined) {
+        return { skillName, targetValue: fromCard };
+      }
     }
 
     // 如果只有一个纯数字参数
@@ -118,7 +131,11 @@ export class CheckCommand implements CommandHandler {
       return { skillName: '检定', targetValue: parseInt(args[0]) };
     }
 
-    return { skillName, targetValue: undefined };
+    return {
+      skillName,
+      targetValue: undefined,
+      errorReason: character ? 'skill_not_found' : 'no_character',
+    };
   }
 
   private static readonly ATTR_MAP: Record<string, string> = {
@@ -139,10 +156,7 @@ export class CheckCommand implements CommandHandler {
     '幸运': 'luck', 'luck': 'luck', 'LUCK': 'luck',
   };
 
-  private lookupSkill(ctx: CommandContext, skillName: string): number | undefined {
-    const character = this.characterStore.getActiveCharacter(ctx.userId, ctx.groupId);
-    if (!character) return undefined;
-
+  private lookupSkillFromCharacter(character: Character, skillName: string): number | undefined {
     // 1. 基础属性（力量、体质等）
     const attrKey = CheckCommand.ATTR_MAP[skillName];
     if (attrKey) return (character.attributes as Record<string, number>)[attrKey];
