@@ -1011,7 +1011,7 @@ export class KPPipeline {
  */
 function extractShowImageMarkers(text: string): { cleanText: string; imageIds: string[] } {
   const imageIds: string[] = [];
-  const cleanText = text.replace(/\[SHOW_IMAGE:([^\]]+)\]/g, (_, id: string) => {
+  const cleanText = text.replace(/\[SHOW_IMAGE:\s*([^\]]+?)\s*\]/g, (_, id: string) => {
     imageIds.push(id.trim());
     return '';
   }).trim();
@@ -1027,11 +1027,11 @@ interface TimeMarker {
 /** 从 AI 回复中提取 [TIME_ADVANCE:Xm] 和 [SET_TIME:...] 标记 */
 function extractTimeMarkers(text: string): { cleanText: string; timeMarkers: TimeMarker[] } {
   const markers: TimeMarker[] = [];
-  let clean = text.replace(/\[TIME_ADVANCE:(\d+)m\]/g, (_, mins: string) => {
+  let clean = text.replace(/\[TIME_ADVANCE:\s*(\d+)m\]/g, (_, mins: string) => {
     markers.push({ type: 'advance', value: mins });
     return '';
   });
-  clean = clean.replace(/\[SET_TIME:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})\]/g, (_, time: string) => {
+  clean = clean.replace(/\[SET_TIME:\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})\]/g, (_, time: string) => {
     markers.push({ type: 'set', value: time });
     return '';
   });
@@ -1040,7 +1040,7 @@ function extractTimeMarkers(text: string): { cleanText: string; timeMarkers: Tim
 
 function extractPrivateDirectives(text: string): { cleanText: string; directives: PrivateDirective[] } {
   const directives: PrivateDirective[] = [];
-  const cleanText = text.replace(/\[PRIVATE_TO:([^\]]+)\]([\s\S]*?)\[\/PRIVATE_TO\]/g, (_, rawTargets: string, rawContent: string) => {
+  const cleanText = text.replace(/\[PRIVATE_TO:\s*([^\]]+)\]([\s\S]*?)\[\/PRIVATE_TO\]/g, (_, rawTargets: string, rawContent: string) => {
     directives.push({
       targets: rawTargets.split(',').map((item) => item.trim()).filter(Boolean),
       content: rawContent.trim(),
@@ -1052,7 +1052,7 @@ function extractPrivateDirectives(text: string): { cleanText: string; directives
 
 function extractSceneDirectives(text: string): { cleanText: string; directives: SceneDirective[] } {
   const directives: SceneDirective[] = [];
-  const cleanText = text.replace(/\[SET_SCENE:([^|\]]+)\|([^|\]]*)\|([^\]]*)\]/g, (_, name: string, description: string, rawNpcs: string) => {
+  const cleanText = text.replace(/\[SET_SCENE:\s*([^|\]]+)\|([^|\]]*)\|([^\]]*)\]/g, (_, name: string, description: string, rawNpcs: string) => {
     directives.push({
       scene: {
         name: name.trim(),
@@ -1067,7 +1067,7 @@ function extractSceneDirectives(text: string): { cleanText: string; directives: 
 
 function extractClueDirectives(text: string): { cleanText: string; directives: ClueDirective[] } {
   const directives: ClueDirective[] = [];
-  const cleanText = text.replace(/\[DISCOVER_CLUE:([^|\]]+)\|([^\]]+)\]/g, (_, title: string, description: string) => {
+  const cleanText = text.replace(/\[DISCOVER_CLUE:\s*([^|\]]+)\|([^\]]+)\]/g, (_, title: string, description: string) => {
     directives.push({
       title: title.trim(),
       playerDescription: description.trim(),
@@ -1079,7 +1079,7 @@ function extractClueDirectives(text: string): { cleanText: string; directives: C
 
 function extractEntityDirectives(text: string): { cleanText: string; directives: EntityDirective[] } {
   const directives: EntityDirective[] = [];
-  const cleanText = text.replace(/\[REGISTER_ENTITY:([^|\]]+)\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]/g, (_, name: string, type: string, identity: string, dangerLevel: string) => {
+  const cleanText = text.replace(/\[REGISTER_ENTITY:\s*([^|\]]+)\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]/g, (_, name: string, type: string, identity: string, dangerLevel: string) => {
     directives.push({
       name: name.trim(),
       type: type.trim().toLowerCase() === 'creature' ? 'creature' : 'npc',
@@ -1093,7 +1093,7 @@ function extractEntityDirectives(text: string): { cleanText: string; directives:
 
 function extractItemDirectives(text: string): { cleanText: string; directives: ItemDirective[] } {
   const directives: ItemDirective[] = [];
-  const cleanText = text.replace(/\[REGISTER_ITEM:([^|\]]+)\|([^|\]]*)\|([^|\]]*)\|([^\]]*)\]/g, (_, name: string, category: string, description: string, owner: string) => {
+  const cleanText = text.replace(/\[REGISTER_ITEM:\s*([^|\]]+)\|([^|\]]*)\|([^|\]]*)\|([^\]]*)\]/g, (_, name: string, category: string, description: string, owner: string) => {
     directives.push({
       name: name.trim(),
       category: category.trim(),
@@ -1107,7 +1107,7 @@ function extractItemDirectives(text: string): { cleanText: string; directives: I
 
 function extractItemChangeDirectives(text: string): { cleanText: string; directives: ItemChangeDirective[] } {
   const directives: ItemChangeDirective[] = [];
-  const cleanText = text.replace(/\[ITEM_CHANGE:([^|\]]+)\|([^|\]]*)\|([^|\]]*)\|([^\]]*)\]/g, (_, itemName: string, owner: string, location: string, stateNotes: string) => {
+  const cleanText = text.replace(/\[ITEM_CHANGE:\s*([^|\]]+)\|([^|\]]*)\|([^|\]]*)\|([^\]]*)\]/g, (_, itemName: string, owner: string, location: string, stateNotes: string) => {
     directives.push({
       itemName: itemName.trim(),
       owner: owner.trim(),
