@@ -115,8 +115,9 @@ export class OpeningDirector {
         ? '这是秘密团，可以在内部调度上安排不同调查员分线开场，并在需要时设置 privateTargets。'
         : '这是公开团，所有剧情默认在群内公开推进。不要依赖私聊或玩家可见分镜；initialAssignments 应全部为 main，privateTargets 应为空数组。',
       '如果系统导演策略允许，可以把不同调查员安排为不同时间和地点进场，并给出自然汇合目标。',
+      '开场只建立"初始情境"和"钩子"，不推进实际调查。beat 1 是场景建立（环境+氛围），beat 2 最多到委托/事件触发——玩家尚未行动前，不要安排任何调查行为、证据分析或 NPC 深入对话。',
       '严格返回 JSON 对象，字段必须符合约定：startTime, randomSeed, assumedLinks, initialAssignments, beats, mergeGoal, directorSeeds。',
-      'beats 数量控制在 2 到 5 个；initialAssignments 必须覆盖所有调查员；directorSeeds 至少包含 2 个 seed。',
+      `beats 数量：单人团最多 2 个，多人团最多 3 个；initialAssignments 必须覆盖所有调查员；directorSeeds 至少包含 2 个 seed。`,
     ].join('\n');
 
     const userPrompt = [
@@ -190,7 +191,8 @@ export class OpeningDirector {
     const systemPrompt = [
       '你是一位克苏鲁跑团守秘人，负责为一个开场 beat 生成文本。',
       '只返回 JSON 对象，不要输出解释、Markdown 或代码块。',
-      'publicText 可以略长一些，但必须自然、沉浸、克制，不泄露 KP ONLY 内容。',
+      'publicText 控制在 100-250 字以内，聚焦场景氛围和感官描写。不推进调查——不分析证据、不揭示线索、不深入 NPC 对话。在一个自然的"等待玩家回应"点结束。不泄露 KP ONLY 内容。',
+      '开场的职责是建立情境和氛围，把"接下来该怎么办"的选择权交给玩家。结尾应该让玩家自然地想要回应——而不是把故事向前推了好几步。',
       '允许补充合理的连接内容和轻量原创细节，但不要改写模组核心真相、幕后身份、终局条件或关键解法。',
       privacyMode === 'secret'
         ? 'privateTexts 只给 beat.privateTargets 中的角色写私密引子；没有则返回空数组。'
@@ -557,7 +559,7 @@ function normalizeBeats(
     })
     .filter((beat): beat is OpeningBeatSkeleton => Boolean(beat));
 
-  if (beats.length >= 2) return beats.slice(0, 5);
+  if (beats.length >= 2) return beats.slice(0, 3);
 
   const mainParticipants = cast.length > 0 ? cast : ['调查员'];
   return [
