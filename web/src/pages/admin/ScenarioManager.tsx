@@ -377,11 +377,11 @@ export const ModuleFiles: Component<{
       <Show when={previewImage()}>
         {(image) => (
           <div
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 md:p-6 backdrop-blur-sm"
             onClick={() => setPreviewImage(null)}
           >
             <div
-              class="relative flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-surface shadow-2xl shadow-black/40"
+              class="relative flex max-h-full w-full max-w-[98vw] md:max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-surface shadow-2xl shadow-black/40"
               onClick={(event) => event.stopPropagation()}
             >
               <button
@@ -596,7 +596,7 @@ export const ModuleForm: Component<{
         </div>
       </Show>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label class="text-[0.82rem] text-text-dim block mb-1">模组名称 *</label>
           <input class="flex-1 p-2 bg-bg border border-border rounded-md text-text text-[0.88rem] w-full" value={name()} onInput={(e) => setName(e.currentTarget.value)} placeholder="例：与苏珊共进晚餐" />

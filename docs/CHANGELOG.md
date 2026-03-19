@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-03-19
+
+### Added
+- **百炼 Coding Plan 集成**：新增 `OpenCodeClient`（通过 OpenCode serve HTTP API 调用模型）和 `HybridAiClient`（OpenCode 优先、DashScope 自动回退），所有 `chat()`/`streamChat()` 请求默认走 Coding Plan，`embed()`/`generateImage()` 仍走 DashScope
+- **AI 路由可配置**：`server/index.ts` 读取 `OPENCODE_SERVER_URL`/`USERNAME`/`PASSWORD` 环境变量，有值时自动使用 `HybridAiClient`，否则退回纯 DashScope 模式；启动日志明确显示当前路由策略
+- **`scripts/build.ts`**：新增构建脚本（type-check → web build），对应 `bun run build`
+- **`scripts/start-bot.bat`**：纯净的本地启动脚本（无凭据），方便开发调试
+- **.env.example**：补充 `OPENCODE_SERVER_URL`、`OPENCODE_SERVER_USERNAME`、`OPENCODE_SERVER_PASSWORD` 示例字段
+
+### Changed
+- **`.jrrp` 评价策略重构**：切换为"数字本位"提示词（`buildNumberCentricPrompt`），要求把具体数字当独立号码理解，挖掘谐音/节奏/文化联想，替代原有高低档位评价思路；精简了风格类型代码结构
+- **`.room` 命令增强**：补充房间生命周期子命令及错误提示细化
+- **Web 前端**：布局组件（`Layout.tsx`）重构导航逻辑；管理端各页面（Dashboard、KPStudio、Knowledge、RoomManager、ScenarioDetail/Manager、Sessions）细节修复；玩家端（CharacterForm、Characters、Manual、Reference）UI 优化
+- **PlayerRoutes**：调整玩家 API 路由若干细节
+
+### Fixed
+- **敏感脚本防泄漏**：将含硬编码凭据的 `start-opencode.bat`、`start-all.bat`、`start-service.bat` 及 `bailian-opencode.md` 加入 `.gitignore`，防止意外提交
+
 ## [0.11.1] - 2026-03-16
 
 ### Fixed

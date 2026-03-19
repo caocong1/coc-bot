@@ -2,22 +2,18 @@
  * 今日人品命令：.jrrp [话题]
  *
  * - 基于 userId + 日期哈希出当日固定的 1-100 数字
- * - 无后缀时：每人每天最多调用 AI 生成 5 条不同评价（每次随机不同风格）
- * - 无后缀超过 5 次后从已有 5 条中随机返回一条
- * - 带后缀话题时：把后缀作为评语参考主题，不进入当天缓存
+ * - 每次调用都生成新评价（随机风格），无次数限制
+ * - 带后缀话题时：把后缀作为评语参考主题
  * - 兜底文案默认从项目内 jrrp.fallback.json 读取（可用 JRRP_GUGU_FILE 覆盖）
  */
 
 import { readFileSync } from 'fs';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
-import type { Database } from 'bun:sqlite';
 import type { CommandHandler, CommandContext, CommandResult } from '../CommandRegistry';
 import type { ParsedCommand } from '../CommandParser';
 import { DashScopeClient } from '../../ai/client/DashScopeClient';
-import { migrateCoreSchema, openDatabase } from '../../storage/Database';
 
-const MAX_GENERATIONS_PER_DAY = 5;
 const PROJECT_JRRP_FALLBACK_FILE = new URL('./jrrp.fallback.json', import.meta.url);
 
 /* ─── 兜底文案加载 ─── */
@@ -129,51 +125,47 @@ interface CommentStyle {
 const STYLES: CommentStyle[] = [
   {
     name: 'coc',
-    instruction: '用 CoC/克苏鲁跑团梗（SAN值、大成功、大失败、调查员、KP、深潜者、奈亚等）来评价。',
+    instruction: '用 CoC/克苏鲁跑团梗（SAN值、大成功、调查员、KP、图书馆一把过、灵感闪现、奈亚等）来评价。',
   },
   {
     name: 'game',
-    instruction: '用电子游戏梗（RPG、暴击、Miss、装备掉落、隐藏关卡、存档读档、Boss战等）来评价。',
+    instruction: '用电子游戏梗（RPG、暴击、装备掉落、隐藏关卡、满血复活、通关、成就解锁、Boss战等）来评价。',
   },
   {
     name: 'anime',
-    instruction: '用动漫/二次元梗（主角光环、flag、便当、死亡凝视、羁绊、觉醒、中二等）来评价。',
+    instruction: '用动漫/二次元梗（主角光环、前方高能、羁绊、觉醒、友情爆发、变身、中二等）来评价。',
   },
   {
     name: 'food',
-    instruction: '用美食/做饭比喻来评价（满汉全席、黑暗料理、米其林、路边摊、翻车、完美火候等）。',
+    instruction: '用美食/做饭比喻来评价（满汉全席、深夜食堂、米其林、完美火候、加个蛋、干饭人、神仙味道等）。',
   },
   {
     name: 'office',
-    instruction: '用打工人/职场梗来评价（摸鱼、甲方、加班、周报、绩效、带薪拉屎、年终奖等）。',
+    instruction: '用打工人/职场梗来评价（不想上班、摸鱼成功、准时下班、年终奖、带薪摸鱼、周五心态、团建自由、涨薪等）。',
   },
   {
     name: 'cat',
-    instruction: '用猫猫视角来评价（猫主子、铲屎官、纸箱、小鱼干、zoomies、打翻杯子、假装看不见等）。',
+    instruction: '用猫猫视角来评价（猫主子、纸箱、小鱼干、晒太阳、咕噜咕噜、蹭蹭、踩奶、窗台观鸟等）。',
+  },
+  {
+    name: 'dog',
+    instruction: '用狗狗视角来评价（摇尾巴、飞盘接住、遛弯、汪汪队、撒娇打滚、零食到手、被摸头、开心转圈等）。语气憨憨的。',
   },
   {
     name: 'xuanxue',
-    instruction: '用玄学/算命风格来评价（水逆、锦鲤、转运、太岁、紫微斗数、上上签、下下签等）。',
+    instruction: '用玄学/算命风格来评价（锦鲤附体、转运、紫微斗数、上上签、财神眷顾、桃花运、贵人相助等）。',
   },
   {
-    name: 'history',
-    instruction: '用历史典故风格来评价（诸葛亮、项羽、韩信、草船借箭、背水一战、卧薪尝胆等）。',
+    name: 'daily',
+    instruction: '用日常生活梗来评价（快递到了、外卖准时、WiFi满格、手机满电、空调续命、周末补觉、绿灯一路、车位秒到等）。语气像朋友聊天。',
   },
   {
-    name: 'scifi',
-    instruction: '用科幻风格来评价（平行宇宙、时间线、量子叠加、虫洞、三体人、曲率引擎等）。',
+    name: 'sleep',
+    instruction: '用睡觉/熬夜梗来评价（困、熬夜冠军、一觉到天亮、美梦成真、秒睡体质、午觉刚刚好、周末睡到自然醒、被窝舒服、早睡早起等）。',
   },
   {
-    name: 'romance',
-    instruction: '用恋爱/偶像剧梗来评价（心动值、告白、暗恋、发好人卡、命中注定、错过末班车等）。',
-  },
-  {
-    name: 'sport',
-    instruction: '用体育/竞技梗来评价（绝杀、翻盘、MVP、板凳席、红牌、帽子戏法、逆风局等）。',
-  },
-  {
-    name: 'survival',
-    instruction: '用荒野求生/末日生存梗来评价（捡到补给、踩雷、信号弹、安全屋、僵尸围城等）。',
+    name: 'weather',
+    instruction: '用天气/出门梗来评价（完美晴天、微风刚好、出门带伞果然下了、樱花季、秋高气爽、雪景拍照、适合散步等）。语气轻松日常。',
   },
 ];
 
@@ -241,18 +233,6 @@ ${style.instruction}${topicPrompt}
 - 只输出最终短评，不要解释`;
 }
 
-/* ─── 每人每天的缓存结构 ─── */
-
-interface UserDayCache {
-  value: number;
-  comments: string[];
-}
-
-interface JrrpCacheRow {
-  value: number;
-  comments_json: string;
-}
-
 /* ─── 命令实现 ─── */
 
 export class JrrpCommand implements CommandHandler {
@@ -260,87 +240,31 @@ export class JrrpCommand implements CommandHandler {
   description = '今日人品：.jrrp [话题]';
 
   private aiClient: DashScopeClient | null;
-  private cache: Map<string, UserDayCache> = new Map();
-  private cacheLocks: Map<string, Promise<void>> = new Map();
   private guguEval: ((value: number) => string) | null = null;
-  private db?: Database;
 
   constructor(aiClient: DashScopeClient | null) {
     this.aiClient = aiClient;
     this.guguEval = loadGuguFallback();
-    try {
-      this.db = openDatabase();
-      migrateCoreSchema(this.db);
-    } catch (err) {
-      console.error('[JRRP] SQLite unavailable, fallback to in-memory cache:', err);
-      this.db = undefined;
-    }
   }
 
   async handle(ctx: CommandContext, cmd: ParsedCommand): Promise<CommandResult> {
     const today = this.getDateKey();
     const topic = this.normalizeTopic(cmd.rawArgs);
-    const cacheKey = `${ctx.userId}:${today}`;
+    const value = this.calcJrrp(ctx.userId, today);
+    const style = topic
+      ? this.pickTopicStyle(ctx.userId, today, topic)
+      : this.pickRandomStyle();
+    let comment = this.fallbackComment(value);
 
-    if (topic) {
-      const value = this.calcJrrp(ctx.userId, today);
-      const style = this.pickTopicStyle(ctx.userId, today, topic);
-      let comment = this.fallbackComment(value);
-
-      if (this.aiClient) {
-        try {
-          comment = await this.generateComment(value, style, topic);
-        } catch (err) {
-          console.error('[JRRP] AI 生成失败，使用默认评价:', err);
-        }
+    if (this.aiClient) {
+      try {
+        comment = await this.generateComment(value, style, topic || undefined);
+      } catch (err) {
+        console.error('[JRRP] AI 生成失败，使用默认评价:', err);
       }
-
-      return { text: this.formatResult(ctx, value, comment) };
     }
 
-    return this.withCacheLock(cacheKey, async () => {
-      let entry = this.cache.get(cacheKey);
-
-      // 首次：优先加载持久化缓存；没有则计算固定人品值
-      if (!entry) {
-        entry = this.loadPersistedCache(ctx.userId, today) ?? {
-          value: this.calcJrrp(ctx.userId, today),
-          comments: [],
-        };
-        this.cache.set(cacheKey, entry);
-        this.cleanExpiredCache(today);
-      }
-
-      // 防御性修正：历史并发导致超过 5 条时，收敛到前 5 条。
-      if (entry.comments.length > MAX_GENERATIONS_PER_DAY) {
-        entry.comments = entry.comments.slice(0, MAX_GENERATIONS_PER_DAY);
-        this.persistCache(ctx.userId, today, entry);
-      }
-
-      const { value } = entry;
-
-      // 已有 5 条 -> 随机返回一条
-      if (entry.comments.length >= MAX_GENERATIONS_PER_DAY) {
-        const picked = entry.comments[Math.floor(Math.random() * entry.comments.length)];
-        return { text: this.formatResult(ctx, value, picked) };
-      }
-
-      // 还没到 5 条 -> 生成新的一条
-      const style = this.pickStyle(ctx.userId, today, entry.comments.length);
-      let comment = this.fallbackComment(value);
-
-      if (this.aiClient) {
-        try {
-          comment = await this.generateComment(value, style);
-        } catch (err) {
-          console.error('[JRRP] AI 生成失败，使用默认评价:', err);
-        }
-      }
-
-      entry.comments.push(comment);
-      this.persistCache(ctx.userId, today, entry);
-      return { text: this.formatResult(ctx, value, comment) };
-    });
+    return { text: this.formatResult(ctx, value, comment) };
   }
 
   /* ─── 确定性哈希 ─── */
@@ -349,13 +273,12 @@ export class JrrpCommand implements CommandHandler {
     return (Math.abs(this.hash(`jrrp:${userId}:${dateKey}:val`)) % 100) + 1;
   }
 
-  /** 每次调用用不同的 seed 选风格，确保 5 次尽量不重复 */
-  private pickStyle(userId: number, dateKey: string, callIndex: number): CommentStyle {
-    const idx = Math.abs(this.hash(`jrrp:${userId}:${dateKey}:style:${callIndex}`)) % STYLES.length;
-    return STYLES[idx];
+  /** 每次调用随机选一个风格 */
+  private pickRandomStyle(): CommentStyle {
+    return STYLES[Math.floor(Math.random() * STYLES.length)];
   }
 
-  /** 带后缀话题时走独立生成，不进入缓存 */
+  /** 带话题时基于哈希选风格 */
   private pickTopicStyle(userId: number, dateKey: string, topic: string): CommentStyle {
     const idx = Math.abs(this.hash(`jrrp:${userId}:${dateKey}:topic:${topic}`)) % STYLES.length;
     return STYLES[idx];
@@ -445,72 +368,4 @@ export class JrrpCommand implements CommandHandler {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
-  private loadPersistedCache(userId: number, dateKey: string): UserDayCache | null {
-    if (!this.db) return null;
-
-    const row = this.db.query(`
-      SELECT value, comments_json
-      FROM jrrp_daily_cache
-      WHERE user_id = ? AND date_key = ?
-    `).get(userId, dateKey) as JrrpCacheRow | null;
-
-    if (!row) return null;
-
-    try {
-      const parsed = JSON.parse(row.comments_json) as unknown;
-      const comments = Array.isArray(parsed)
-        ? parsed.filter((x): x is string => typeof x === 'string').slice(0, MAX_GENERATIONS_PER_DAY)
-        : [];
-
-      return { value: row.value, comments };
-    } catch (err) {
-      console.error(`[JRRP] failed to parse cache row: user=${userId} date=${dateKey}`, err);
-      return { value: row.value, comments: [] };
-    }
-  }
-
-  private persistCache(userId: number, dateKey: string, entry: UserDayCache): void {
-    if (!this.db) return;
-    this.db.query(`
-      INSERT INTO jrrp_daily_cache (user_id, date_key, value, comments_json, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(user_id, date_key) DO UPDATE SET
-        value = excluded.value,
-        comments_json = excluded.comments_json,
-        updated_at = excluded.updated_at
-    `).run(
-      userId,
-      dateKey,
-      entry.value,
-      JSON.stringify(entry.comments.slice(0, MAX_GENERATIONS_PER_DAY)),
-      new Date().toISOString(),
-    );
-  }
-
-  private async withCacheLock<T>(cacheKey: string, task: () => Promise<T>): Promise<T> {
-    const prev = this.cacheLocks.get(cacheKey) ?? Promise.resolve();
-
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
-    const queueTail = prev.then(() => current);
-    this.cacheLocks.set(cacheKey, queueTail);
-
-    await prev;
-    try {
-      return await task();
-    } finally {
-      release();
-      if (this.cacheLocks.get(cacheKey) === queueTail) {
-        this.cacheLocks.delete(cacheKey);
-      }
-    }
-  }
-
-  private cleanExpiredCache(today: string): void {
-    for (const key of this.cache.keys()) {
-      if (!key.endsWith(`:${today}`)) {
-        this.cache.delete(key);
-      }
-    }
-  }
 }

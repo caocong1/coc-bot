@@ -51,6 +51,8 @@ coc-bot/
 │   │
 │   ├── ai/                      # AI 客户端、Prompt、KP 流水线
 │   │   ├── client/DashScopeClient.ts
+│   │   ├── client/OpenCodeClient.ts   # OpenCode serve HTTP 客户端（百炼 Coding Plan）
+│   │   ├── client/HybridAiClient.ts   # OpenCode 优先 + DashScope 回退混合客户端
 │   │   ├── config/
 │   │   │   ├── KPTemplateRegistry.ts    # 内置 + 自定义模板管理（DB 集成）
 │   │   │   ├── DimensionDescriptors.ts  # 五维行为描述表（基调/灵活度/引导度/致命度/节奏 × 5 档位）

@@ -28,8 +28,8 @@ const Dashboard: Component = () => {
         </div>
         <Show when={!sessions.loading} fallback={<p class="text-text-dim text-[0.9rem]">加载中...</p>}>
           <Show when={(sessions() ?? []).length > 0} fallback={<p class="text-text-dim text-[0.9rem]">暂无跑团记录</p>}>
-            <div class="bg-surface border border-border rounded-lg overflow-hidden shadow-sm shadow-black/10">
-              <div class="grid gap-2 px-4 py-2.5 items-center text-xs bg-white/[0.03] text-text-dim uppercase tracking-wider border-b border-border" style={{ 'grid-template-columns': '1fr 1fr 1.5fr 1fr 0.7fr 0.7fr 1.2fr' }}>
+            <div class="bg-surface border border-border rounded-lg overflow-x-auto shadow-sm shadow-black/10">
+              <div class="grid gap-2 px-4 py-2.5 items-center text-xs bg-white/[0.03] text-text-dim uppercase tracking-wider border-b border-border min-w-[700px]" style={{ 'grid-template-columns': '1fr 1fr 1.5fr 1fr 0.7fr 0.7fr 1.2fr' }}>
                 <span>群组</span>
                 <span>状态</span>
                 <span>当前场景</span>
@@ -50,7 +50,7 @@ const Dashboard: Component = () => {
 };
 
 const Stat: Component<{ label: string; value: number; color: string }> = (props) => (
-  <div class="bg-surface border border-border border-l-4 rounded-lg px-6 py-4 min-w-[140px] shadow-sm shadow-black/10 hover:-translate-y-0.5 transition-all duration-200" style={{ 'border-left-color': props.color }}>
+  <div class="bg-surface border border-border border-l-4 rounded-lg px-4 py-3 md:px-6 md:py-4 min-w-[140px] shadow-sm shadow-black/10 hover:-translate-y-0.5 transition-all duration-200" style={{ 'border-left-color': props.color }}>
     <div class="text-4xl font-bold" style={{ color: props.color }}>{props.value}</div>
     <div class="text-text-dim text-sm mt-1">{props.label}</div>
   </div>
@@ -63,7 +63,7 @@ const SessionRow: Component<{ session: SessionInfo; onAction: () => void }> = (p
   };
 
   return (
-    <div class="grid gap-2 px-4 py-2.5 items-center text-sm border-t border-border/50 hover:bg-white/[0.02] transition-colors" style={{ 'grid-template-columns': '1fr 1fr 1.5fr 1fr 0.7fr 0.7fr 1.2fr' }}>
+    <div class="grid gap-2 px-4 py-2.5 items-center text-sm border-t border-border/50 hover:bg-white/[0.02] transition-colors min-w-[700px]" style={{ 'grid-template-columns': '1fr 1fr 1.5fr 1fr 0.7fr 0.7fr 1.2fr' }}>
       <span class="font-mono">#{s.groupId}</span>
       <span>{STATUS_LABEL[s.status] ?? s.status}</span>
       <span>{s.currentScene ?? '—'}</span>

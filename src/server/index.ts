@@ -36,6 +36,7 @@ import { SetCommand } from '../commands/sheet/SetCommand';
 import { NnCommand } from '../commands/sheet/NnCommand';
 import { UserSettingsStore } from '../storage/UserSettingsStore';
 import { DashScopeClient } from '../ai/client/DashScopeClient';
+import { HybridAiClient } from '../ai/client/HybridAiClient';
 import { CheckResolver } from '../rules/coc7/CheckResolver';
 import { SanityResolver } from '../rules/coc7/SanityResolver';
 import { ModeResolver } from '../runtime/ModeResolver';
@@ -87,6 +88,9 @@ process.on('SIGTERM', () => { cleanupPid(); process.exit(0); });
 /* ─── config ─── */
 
 const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY ?? '';
+const OPENCODE_SERVER_URL = process.env.OPENCODE_SERVER_URL ?? '';
+const OPENCODE_SERVER_USERNAME = process.env.OPENCODE_SERVER_USERNAME ?? 'cocbot';
+const OPENCODE_SERVER_PASSWORD = process.env.OPENCODE_SERVER_PASSWORD ?? '';
 const NAPCAT_WS_URL = process.env.NAPCAT_WS_URL ?? 'ws://127.0.0.1:3003';
 const NAPCAT_HTTP_URL = process.env.NAPCAT_HTTP_URL ?? 'http://127.0.0.1:3002';
 const NAPCAT_TOKEN = process.env.NAPCAT_TOKEN ?? '';
@@ -104,8 +108,14 @@ const normalizer = new NapCatEventNormalizer();
 const actionClient = new NapCatActionClient(NAPCAT_HTTP_URL, NAPCAT_TOKEN);
 
 // AI client
-const aiClient = DASHSCOPE_API_KEY ? new DashScopeClient(DASHSCOPE_API_KEY) : null;
+const aiClient = DASHSCOPE_API_KEY
+  ? (OPENCODE_SERVER_URL && OPENCODE_SERVER_PASSWORD
+      ? new HybridAiClient(DASHSCOPE_API_KEY, OPENCODE_SERVER_URL, OPENCODE_SERVER_USERNAME, OPENCODE_SERVER_PASSWORD)
+      : new DashScopeClient(DASHSCOPE_API_KEY))
+  : null;
 if (!aiClient) console.log('[Bot] DASHSCOPE_API_KEY 未配置，AI 功能（jrrp 等）将使用默认文案');
+else if (OPENCODE_SERVER_URL) console.log(`[Bot] AI 路由：OpenCode serve (${OPENCODE_SERVER_URL}) → DashScope 回退`);
+else console.log('[Bot] AI 路由：直接 DashScope');
 
 // rules
 const checkResolver = new CheckResolver();

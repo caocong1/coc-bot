@@ -69,7 +69,7 @@ const Reference: Component = () => {
       {/* 武器表 */}
       <Show when={tab() === 'weapons'}>
         <div style={{ 'margin-bottom': '0.75rem' }}>
-          <input class="w-full bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent" style={{ width: '300px' }} placeholder="搜索武器名/技能/类型..."
+          <input class="w-full md:w-[300px] bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent" placeholder="搜索武器名/技能/类型..."
             value={weaponFilter()} onInput={(e) => setWeaponFilter(e.currentTarget.value)} />
           <span class="text-text-dim" style={{ 'margin-left': '0.75rem', 'font-size': '0.82rem' }}>
             共 {filteredWeapons().length} 件
@@ -102,7 +102,7 @@ const Reference: Component = () => {
       {/* 防具表 */}
       <Show when={tab() === 'armor'}>
         <div style={{ 'margin-bottom': '0.75rem' }}>
-          <input class="w-full bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent" style={{ width: '300px' }} placeholder="搜索防具名/覆盖位置..."
+          <input class="w-full md:w-[300px] bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent" placeholder="搜索防具名/覆盖位置..."
             value={armorFilter()} onInput={(e) => setArmorFilter(e.currentTarget.value)} />
           <span class="text-text-dim" style={{ 'margin-left': '0.75rem', 'font-size': '0.82rem' }}>
             共 {filteredArmor().length} 件

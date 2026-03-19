@@ -43,7 +43,7 @@ const RoomManager: Component = () => {
     <Show when={!selectedId()} fallback={<AdminRoomDetailView id={selectedId()!} onBack={() => setSelectedId(null)} onRefreshList={refetch} />}>
       <div>
         <div class="flex items-center justify-between mb-4">
-          <div class="flex gap-2">
+          <div class="flex gap-2 flex-wrap">
             {(['all', 'waiting', 'reviewing', 'running', 'ended'] as StatusFilter[]).map((value) => (
               <button
                 class={filter() === value

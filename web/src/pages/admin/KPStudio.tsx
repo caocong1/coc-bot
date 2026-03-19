@@ -153,11 +153,11 @@ const KPStudio: Component = () => {
         </div>
       </div>
 
-      <div class="min-h-[680px] overflow-hidden rounded-lg border border-border bg-surface shadow-sm shadow-black/10">
+      <div class="min-h-[400px] md:min-h-[680px] overflow-hidden rounded-lg border border-border bg-surface shadow-sm shadow-black/10">
         <Show
           when={selected() || editing()}
           fallback={
-            <div class="flex h-full min-h-[680px] items-center justify-center p-8 lg:p-10">
+            <div class="flex h-full min-h-[400px] md:min-h-[680px] items-center justify-center p-8 lg:p-10">
               <div class="max-w-md rounded-2xl border border-dashed border-border bg-white/[0.02] px-8 py-10 text-center">
                 <div class="mb-3 text-sm font-semibold uppercase tracking-[0.24em] text-accent/80">KP Studio</div>
                 <h3 class="text-2xl font-semibold text-text">从左侧选择一个模板开始</h3>

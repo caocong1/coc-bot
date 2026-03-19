@@ -44,7 +44,7 @@ const Characters: Component = () => {
 
   return (
     <div>
-      <div class="flex justify-end mb-6 gap-3">
+      <div class="flex flex-wrap justify-end mb-6 gap-2 md:gap-3">
         <a href="/player/characters/new" class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95">＋ 新建角色卡</a>
         <button class="inline-block px-5 py-2 bg-transparent text-text-dim border border-border rounded-md text-[0.9rem] cursor-pointer no-underline hover:text-text hover:border-text-dim transition-all duration-200 active:scale-95" onClick={() => fileInput.click()} disabled={importing()}>
           {importing() ? '导入中...' : '导入 Excel'}
@@ -66,7 +66,7 @@ const Characters: Component = () => {
             <a href="/player/characters/new" class="inline-block px-5 py-2 bg-accent text-white border-none rounded-md text-[0.9rem] font-semibold cursor-pointer no-underline hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95" style={{ 'margin-top': '1rem' }}>新建第一张角色卡</a>
           </div>
         }>
-          <div class="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
             <For each={chars()}>
               {(c) => <CharCard char={c} onDelete={del} />}
             </For>

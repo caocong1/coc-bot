@@ -6,7 +6,7 @@ const Manual: Component = () => (
 
     <section class="mb-8">
       <h3 class="text-[0.9rem] text-text-dim mb-3">掷骰指令</h3>
-      <table class="w-full border-collapse text-sm">
+      <div class="overflow-x-auto"><table class="w-full border-collapse text-sm min-w-[500px]">
         <thead><tr><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">指令</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">说明</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">示例</th></tr></thead>
         <tbody>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.r</td><td class="px-3 py-1.5 border-b border-white/[0.04]">通用掷骰（无参数用 .set 设置的默认骰，默认 D100）</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.r 3d6 .r 1d100</td></tr>
@@ -21,12 +21,12 @@ const Manual: Component = () => (
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.init clr</td><td class="px-3 py-1.5 border-b border-white/[0.04]">清空先攻列表</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.init clr</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.set [面数]</td><td class="px-3 py-1.5 border-b border-white/[0.04]">设置个人默认骰子面数（.set 重置为D100）</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.set 20</td></tr>
         </tbody>
-      </table>
+      </table></div>
     </section>
 
     <section class="mb-8">
       <h3 class="text-[0.9rem] text-text-dim mb-3">角色卡指令</h3>
-      <table class="w-full border-collapse text-sm">
+      <div class="overflow-x-auto"><table class="w-full border-collapse text-sm min-w-[500px]">
         <thead><tr><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">指令</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">说明</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">示例</th></tr></thead>
         <tbody>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.pc</td><td class="px-3 py-1.5 border-b border-white/[0.04]">查看/切换角色卡</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.pc .pc 爱丽丝</td></tr>
@@ -38,12 +38,12 @@ const Manual: Component = () => (
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.en 技能</td><td class="px-3 py-1.5 border-b border-white/[0.04]">技能成长检定</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.en 侦查</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.setcoc</td><td class="px-3 py-1.5 border-b border-white/[0.04]">查看/设置房规</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.setcoc 1</td></tr>
         </tbody>
-      </table>
+      </table></div>
     </section>
 
     <section class="mb-8">
       <h3 class="text-[0.9rem] text-text-dim mb-3">房间指令</h3>
-      <table class="w-full border-collapse text-sm">
+      <div class="overflow-x-auto"><table class="w-full border-collapse text-sm min-w-[500px]">
         <thead><tr><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">指令</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">说明</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">示例</th></tr></thead>
         <tbody>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.mod list</td><td class="px-3 py-1.5 border-b border-white/[0.04]">查看可用模组列表（含模组 ID）</td><td class="px-3 py-1.5 border-b border-white/[0.04]">.mod list</td></tr>
@@ -60,7 +60,7 @@ const Manual: Component = () => (
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">房间详情 → 修改模组</td><td class="px-3 py-1.5 border-b border-white/[0.04]">房主可在开团前直接切换房间模组，系统会自动覆盖为新模组默认筛卡条件</td><td class="px-3 py-1.5 border-b border-white/[0.04]">等待中房间 → 房间信息 → 模组设置</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">房间详情 → 人物关系</td><td class="px-3 py-1.5 border-b border-white/[0.04]">在 Web 房间详情页里多选当前已绑定的 PC 卡，填写中文关系名和备注</td><td class="px-3 py-1.5 border-b border-white/[0.04]">爱丽丝 / 鲍勃 / 陈 → 同学</td></tr>
         </tbody>
-      </table>
+      </table></div>
       <p class="text-text-dim" style={{ 'font-size': '0.82rem', 'margin-top': '0.5rem' }}>
         流程：<code>.room create</code> → 群友 <code>.room join</code>（点链接车卡）→ <code>.room start</code>
       </p>
@@ -71,17 +71,17 @@ const Manual: Component = () => (
 
     <section class="mb-8">
       <h3 class="text-[0.9rem] text-text-dim mb-3">Web 控制台</h3>
-      <table class="w-full border-collapse text-sm">
+      <div class="overflow-x-auto"><table class="w-full border-collapse text-sm min-w-[500px]">
         <thead><tr><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">指令</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">说明</th></tr></thead>
         <tbody>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.web login（私聊机器人）</td><td class="px-3 py-1.5 border-b border-white/[0.04]">获取 Web 控制台个人登录链接（仅私聊有效）</td></tr>
         </tbody>
-      </table>
+      </table></div>
     </section>
 
     <section class="mb-8">
       <h3 class="text-[0.9rem] text-text-dim mb-3">其他指令</h3>
-      <table class="w-full border-collapse text-sm">
+      <div class="overflow-x-auto"><table class="w-full border-collapse text-sm min-w-[500px]">
         <thead><tr><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">指令</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">说明</th></tr></thead>
         <tbody>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.name (cn/jp/en) [数量]</td><td class="px-3 py-1.5 border-b border-white/[0.04]">随机生成中文/日文/英文姓名（默认中文，最多10个）</td></tr>
@@ -95,14 +95,14 @@ const Manual: Component = () => (
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.li</td><td class="px-3 py-1.5 border-b border-white/[0.04]">随机总结性疯狂症状</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">.help</td><td class="px-3 py-1.5 border-b border-white/[0.04]">查看全部指令帮助</td></tr>
         </tbody>
-      </table>
+      </table></div>
     </section>
 
     <h2 class="text-lg font-bold mb-5 pb-2 border-b border-border" style={{ 'margin-top': '2.5rem' }}>CoC7 快速规则参考</h2>
 
     <section class="mb-8">
       <h3 class="text-[0.9rem] text-text-dim mb-3">检定等级</h3>
-      <table class="w-full border-collapse text-sm">
+      <div class="overflow-x-auto"><table class="w-full border-collapse text-sm min-w-[500px]">
         <thead><tr><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">等级</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">成功条件</th><th class="text-left px-3 py-1.5 bg-white/[0.03] text-text-dim text-xs uppercase border-b border-border">说明</th></tr></thead>
         <tbody>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">普通成功</td><td class="px-3 py-1.5 border-b border-white/[0.04]">&le; 技能值</td><td class="px-3 py-1.5 border-b border-white/[0.04]">基本成功</td></tr>
@@ -111,7 +111,7 @@ const Manual: Component = () => (
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">大成功</td><td class="px-3 py-1.5 border-b border-white/[0.04]">骰出 01–05</td><td class="px-3 py-1.5 border-b border-white/[0.04]">最佳结果</td></tr>
           <tr><td class="px-3 py-1.5 border-b border-white/[0.04] font-mono text-accent">大失败</td><td class="px-3 py-1.5 border-b border-white/[0.04]">骰出 96–100（技能≤50：96+失败；技能&gt;50：100失败）</td><td class="px-3 py-1.5 border-b border-white/[0.04]">最糟结果</td></tr>
         </tbody>
-      </table>
+      </table></div>
     </section>
 
     <section class="mb-8">

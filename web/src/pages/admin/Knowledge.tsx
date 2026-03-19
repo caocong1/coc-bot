@@ -65,8 +65,8 @@ const Knowledge: Component = () => {
         </div>
         <Show when={!files.loading} fallback={<p class="text-text-dim text-[0.9rem]">加载中...</p>}>
           <Show when={(files() ?? []).length > 0} fallback={<p class="text-text-dim text-[0.9rem]">暂无规则书，请按上方说明通过命令行导入</p>}>
-            <div class="bg-surface border border-border rounded-lg overflow-hidden">
-              <div class="grid gap-2 px-4 py-2.5 items-center text-xs bg-white/[0.03] text-text-dim uppercase tracking-wider border-b border-border" style={{ 'grid-template-columns': '2.5fr 0.7fr 0.7fr 1fr 2rem' }}>
+            <div class="bg-surface border border-border rounded-lg overflow-x-auto">
+              <div class="grid gap-2 px-4 py-2.5 items-center text-xs bg-white/[0.03] text-text-dim uppercase tracking-wider border-b border-border min-w-[500px]" style={{ 'grid-template-columns': '2.5fr 0.7fr 0.7fr 1fr 2rem' }}>
                 <span>文件名</span>
                 <span>字符数</span>
                 <span>分块数</span>
@@ -75,7 +75,7 @@ const Knowledge: Component = () => {
               </div>
               <For each={files()}>
                 {(f) => (
-                  <div class="grid gap-2 px-4 py-2.5 items-center text-sm border-t border-border/50 hover:bg-white/[0.02] transition-colors" style={{ 'grid-template-columns': '2.5fr 0.7fr 0.7fr 1fr 2rem' }}>
+                  <div class="grid gap-2 px-4 py-2.5 items-center text-sm border-t border-border/50 hover:bg-white/[0.02] transition-colors min-w-[500px]" style={{ 'grid-template-columns': '2.5fr 0.7fr 0.7fr 1fr 2rem' }}>
                     <span style={{ 'font-size': '0.82rem' }}>📗 {f.name}</span>
                     <span class="text-text-dim text-[0.9rem]">{f.charCount > 0 ? `${(f.charCount / 1000).toFixed(0)}K` : '—'}</span>
                     <span class="text-text-dim text-[0.9rem]">{f.chunkCount || '—'}</span>

@@ -88,6 +88,7 @@ export class RoomCommand {
     private readonly actionClient: NapCatActionClient | null = null,
   ) {
     this.modCommand = new ModCommand(db);
+    this.restoreReviewTimers();
   }
 
   async handle(ctx: CommandContext, cmd: ParsedCommand): Promise<CommandResult> {
@@ -242,14 +243,16 @@ export class RoomCommand {
       await deliverCampaignOutput(this.actionClient!, groupId, output);
     }).catch((err) => {
       console.error('[RoomCommand] 开团失败:', err);
-      this.actionClient!.sendGroupMessage(groupId, `⚠️ 开团失败：${String(err)}`).catch(() => {});
-      // 失败回滚到 reviewing
+      this.actionClient!.sendGroupMessage(groupId, `⚠️ 开团失败：${String(err)}\n请全员重新 .room ready 再试`).catch(() => {});
+      // 失败回滚到 reviewing，重置 ready 状态并恢复超时定时器
       this.db.run("UPDATE campaign_rooms SET status = 'reviewing', updated_at = ? WHERE id = ?", [new Date().toISOString(), roomId]);
+      this.resetReadyStatus(roomId);
+      this.setReviewTimer(roomId, groupId);
     });
   }
 
   /** 设置审卡超时定时器 */
-  private setReviewTimer(roomId: string, groupId: number): void {
+  private setReviewTimer(roomId: string, groupId: number, timeoutMs: number = REVIEW_TIMEOUT_MS): void {
     this.clearReviewTimer(roomId);
     const timer = setTimeout(() => {
       this.reviewTimers.delete(roomId);
@@ -264,7 +267,7 @@ export class RoomCommand {
       this.db.run("UPDATE campaign_rooms SET status = 'waiting', updated_at = ? WHERE id = ?", [now, roomId]);
       this.resetReadyStatus(roomId);
       this.actionClient?.sendGroupMessage(groupId, `⏰ 房间「${room.name}」审卡超时（${REVIEW_TIMEOUT_LABEL}），已自动取消。重新开始请发 .room start ${roomId}`).catch(() => {});
-    }, REVIEW_TIMEOUT_MS);
+    }, timeoutMs);
     this.reviewTimers.set(roomId, timer);
   }
 
@@ -279,6 +282,36 @@ export class RoomCommand {
   /** 重置房间所有成员的 ready 状态 */
   private resetReadyStatus(roomId: string): void {
     this.db.run('UPDATE campaign_room_members SET ready_at = NULL WHERE room_id = ?', [roomId]);
+  }
+
+  /** 启动时恢复 reviewing 房间的超时定时器，并修复同群多 reviewing 的脏数据 */
+  private restoreReviewTimers(): void {
+    const reviewing = this.db.query<{ id: string; group_id: number; updated_at: string }, []>(
+      "SELECT id, group_id, updated_at FROM campaign_rooms WHERE status = 'reviewing' AND group_id IS NOT NULL ORDER BY updated_at DESC",
+    ).all();
+
+    // 同群只保留最新的一个 reviewing 房间，其余重置为 waiting
+    const seenGroups = new Set<number>();
+    const now = Date.now();
+    const nowIso = new Date().toISOString();
+
+    for (const room of reviewing) {
+      if (seenGroups.has(room.group_id)) {
+        // 同群重复 reviewing → 重置为 waiting
+        this.db.run("UPDATE campaign_rooms SET status = 'waiting', updated_at = ? WHERE id = ?", [nowIso, room.id]);
+        this.resetReadyStatus(room.id);
+        continue;
+      }
+      seenGroups.add(room.group_id);
+
+      const elapsed = now - new Date(room.updated_at).getTime();
+      if (elapsed >= REVIEW_TIMEOUT_MS) {
+        this.db.run("UPDATE campaign_rooms SET status = 'waiting', updated_at = ? WHERE id = ?", [nowIso, room.id]);
+        this.resetReadyStatus(room.id);
+      } else {
+        this.setReviewTimer(room.id, room.group_id, REVIEW_TIMEOUT_MS - elapsed);
+      }
+    }
   }
 
   // ─── 子命令 ────────────────────────────────────────────────────────────────
@@ -387,11 +420,22 @@ export class RoomCommand {
     let room = this.findActiveRoomForMember(ctx.groupId, ctx.userId);
     const explicitRoomId = cmd.args[1]?.trim();
     const explicitCharacter = cmd.args.slice(2).join(' ').trim();
-    if (!room && explicitRoomId && explicitCharacter) {
+    if (explicitRoomId && explicitCharacter) {
       const explicitRoom = this.findRoomForMember(explicitRoomId, ctx.userId);
       if (explicitRoom) {
         room = explicitRoom;
         raw = explicitCharacter;
+      }
+    }
+    // 多房间歧义：自动匹配到房间但用户未显式指定 roomId，且该群有多个活跃房间
+    if (room && !explicitCharacter) {
+      const activeCount = this.db.query<{ cnt: number }, [number, number]>(
+        `SELECT COUNT(*) as cnt FROM campaign_rooms r
+         JOIN campaign_room_members m ON m.room_id = r.id
+         WHERE r.group_id = ? AND m.qq_id = ? AND r.status IN ('waiting', 'reviewing', 'running')`,
+      ).get(ctx.groupId, ctx.userId);
+      if (activeCount && activeCount.cnt > 1) {
+        return { text: `你在该群有多个活跃房间，请指定房间ID：.room pc <房间ID> <角色卡名>\n示例：.room pc ${room.id} ${raw}` };
       }
     }
     if (!room) {
@@ -460,6 +504,18 @@ export class RoomCommand {
       };
     }
 
+    // 检查该群是否有正在审卡的房间
+    const existingReview = this.db.query<{ id: string; name: string }, [number]>(
+      "SELECT id, name FROM campaign_rooms WHERE group_id = ? AND status = 'reviewing' LIMIT 1",
+    ).get(ctx.groupId);
+    if (existingReview) {
+      return {
+        text: `⚠️ 该群已有房间「${existingReview.name}」正在审卡中。\n` +
+          `• 发送 .room ready 确认准备\n` +
+          `• 或 .room cancel ${existingReview.id} 取消后再开新团`,
+      };
+    }
+
     const now = new Date().toISOString();
     this.db.run("UPDATE campaign_rooms SET status = 'reviewing', group_id = ?, updated_at = ? WHERE id = ?", [ctx.groupId, now, roomId]);
     this.resetReadyStatus(roomId);
@@ -520,8 +576,12 @@ export class RoomCommand {
       id: string; name: string; status: string; creator_qq_id: number;
     }, string>('SELECT id, name, status, creator_qq_id FROM campaign_rooms WHERE id = ?').get(roomId);
     if (!room) return { text: `找不到房间「${roomId}」` };
-    if (room.creator_qq_id !== ctx.userId) return { text: '只有房间创建者才能取消审卡' };
     if (room.status !== 'reviewing') return { text: '该房间不在审卡阶段' };
+    // 任何房间成员都可以取消审卡（与 start 权限一致）
+    const cancelMember = this.db.query<{ qq_id: number }, [string, number]>(
+      'SELECT qq_id FROM campaign_room_members WHERE room_id = ? AND qq_id = ?',
+    ).get(roomId, ctx.userId);
+    if (!cancelMember) return { text: '只有房间成员才能取消审卡' };
 
     this.clearReviewTimer(roomId);
     const now = new Date().toISOString();

@@ -12,11 +12,11 @@ const Sessions: Component = () => {
     <div>
       <p class="text-text-dim text-[0.9rem]">从 URL 参数 <code>?group=&lt;群号&gt;</code> 进入详情，或在总览页点击「详情」。</p>
       <Show when={!sessions.loading}>
-        <div class="bg-surface border border-border rounded-lg overflow-hidden shadow-sm shadow-black/10" style={{ 'margin-top': '1.5rem' }}>
-          <div class="grid gap-2 px-4 py-2.5 items-center text-xs bg-white/[0.03] text-text-dim uppercase tracking-wider border-b border-border" style={{ 'grid-template-columns': '1fr 1fr 1fr auto' }}><span>群号</span><span>状态</span><span>场景</span><span></span></div>
+        <div class="bg-surface border border-border rounded-lg overflow-x-auto shadow-sm shadow-black/10" style={{ 'margin-top': '1.5rem' }}>
+          <div class="grid gap-2 px-4 py-2.5 items-center text-xs bg-white/[0.03] text-text-dim uppercase tracking-wider border-b border-border min-w-[400px]" style={{ 'grid-template-columns': '1fr 1fr 1fr auto' }}><span>群号</span><span>状态</span><span>场景</span><span></span></div>
           <For each={sessions()}>
             {(s) => (
-              <div class="grid gap-2 px-4 py-2.5 items-center text-sm border-t border-border/50 hover:bg-white/[0.02] transition-colors" style={{ 'grid-template-columns': '1fr 1fr 1fr auto' }}>
+              <div class="grid gap-2 px-4 py-2.5 items-center text-sm border-t border-border/50 hover:bg-white/[0.02] transition-colors min-w-[400px]" style={{ 'grid-template-columns': '1fr 1fr 1fr auto' }}>
                 <span class="font-mono">#{s.groupId}</span>
                 <span>{s.status}</span>
                 <span>{s.currentScene ?? '—'}</span>
@@ -89,7 +89,7 @@ const SessionDetail: Component<{ groupId: number }> = (props) => {
   };
 
   return (
-    <div class="grid grid-cols-[1fr_340px] gap-6 h-[calc(100vh-130px)]">
+    <div class="grid grid-cols-1 md:grid-cols-[1fr_340px] gap-4 md:gap-6 min-h-[50vh] md:h-[calc(100vh-130px)]">
       {/* 分段预览 */}
       <div class="bg-surface border border-border rounded-lg overflow-hidden flex flex-col shadow-sm shadow-black/10" style={{ 'grid-column': '1 / -1' }}>
         <div class="flex justify-between items-center px-4 py-3 border-b border-border bg-white/[0.02]">
@@ -217,7 +217,7 @@ const SessionDetail: Component<{ groupId: number }> = (props) => {
           <div style={{ display: 'flex', gap: '0.5rem', 'flex-wrap': 'wrap', 'margin-bottom': '1rem' }}>
             <input
               class="flex-1 p-2 bg-bg border border-border rounded-md text-text text-[0.88rem]"
-              style={{ width: '200px' }}
+              style={{ 'min-width': '160px' }}
               placeholder="YYYY-MM-DDTHH:MM"
               value={timeInput()}
               onInput={(e) => setTimeInput(e.currentTarget.value)}

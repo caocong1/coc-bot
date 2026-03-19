@@ -172,7 +172,7 @@ export const RoomHeaderHero: Component<{
   <div class="relative overflow-hidden rounded-[1.75rem] border border-border bg-surface px-5 py-5 mb-5 shadow-lg shadow-black/15">
     <div class="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top_left,rgba(124,106,247,0.24),transparent_58%)]" />
     <div class="relative flex justify-between items-start flex-wrap gap-5">
-      <div class={`min-w-[280px] ${hasActions() ? 'flex-1' : 'w-full'}`}>
+      <div class={`min-w-0 md:min-w-[280px] ${hasActions() ? 'flex-1' : 'w-full'}`}>
         <div class="flex items-center gap-2 flex-wrap mb-3">
           <span class={`inline-flex items-center rounded-full border px-3 py-1 text-[0.78rem] font-semibold ${STATUS_BADGE_CLASS[props.status] ?? STATUS_BADGE_CLASS.waiting}`}>
             {STATUS_LABEL[props.status] ?? props.status}
@@ -200,7 +200,7 @@ export const RoomHeaderHero: Component<{
         </div>
       </div>
       <Show when={hasActions()}>
-        <div class="w-full max-w-[320px] rounded-3xl border border-white/[0.08] bg-black/10 backdrop-blur-sm px-4 py-4 shadow-sm shadow-black/10">
+        <div class="w-full max-w-none md:max-w-[320px] rounded-3xl border border-white/[0.08] bg-black/10 backdrop-blur-sm px-4 py-4 shadow-sm shadow-black/10">
           <div class="flex gap-2 items-center flex-wrap">{props.actions}</div>
           <Show when={props.footerNote?.trim().length}>
             <div class="mt-3 text-[0.76rem] leading-6 text-text-dim">{props.footerNote}</div>
@@ -648,7 +648,7 @@ export const RoomMessagesPanel: Component<{
         <Show when={(messages() ?? []).length > 0} fallback={<p class="text-text-dim">暂无消息记录</p>}>
           <div
             ref={scrollContainer}
-            class="relative bg-gradient-to-b from-bg to-surface/80 border border-border rounded-2xl px-4 py-5 max-h-[72vh] min-h-[60vh] overflow-y-auto"
+            class="relative bg-gradient-to-b from-bg to-surface/80 border border-border rounded-2xl px-3 py-3 md:px-4 md:py-5 max-h-[72vh] min-h-[40vh] md:min-h-[60vh] overflow-y-auto"
           >
             <For each={messages()}>
               {(m: Message, index) => {
@@ -701,7 +701,7 @@ export const RoomMessagesPanel: Component<{
                       )}
                     >
                       <div class={`flex mb-4 ${isKp ? 'justify-start' : 'justify-end'}`}>
-                        <div class={`max-w-[90%] flex items-end gap-3 ${isKp ? 'flex-row' : 'flex-row-reverse'}`}>
+                        <div class={`max-w-[95%] md:max-w-[90%] flex items-end gap-2 md:gap-3 ${isKp ? 'flex-row' : 'flex-row-reverse'}`}>
                           <div
                             class={`shrink-0 w-10 h-10 rounded-2xl flex items-center justify-center text-[0.72rem] font-bold shadow-sm ${
                               isKp

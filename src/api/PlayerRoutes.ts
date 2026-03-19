@@ -669,7 +669,6 @@ export class PlayerRoutes {
   }
 
   /** Web 端开始审卡（waiting → reviewing） */
-  /** Web 端开始审卡（waiting → reviewing） */
   private async startRoom(qqId: number, roomId: string, _req: Request): Promise<Response> {
     const room = this.db.query<{
       status: string;
@@ -684,6 +683,21 @@ export class PlayerRoutes {
 
     if (room.status === 'reviewing') return Response.json({ ok: true, status: 'reviewing', message: '已在审卡阶段' });
     if (room.status !== 'waiting') return Response.json({ error: '该房间已开始或已结束' }, { status: 409 });
+
+    // 检查该房间绑定的群（若有）是否已有正在审卡的房间
+    const roomFull = this.db.query<{ group_id: number | null }, string>(
+      'SELECT group_id FROM campaign_rooms WHERE id = ?',
+    ).get(roomId);
+    if (roomFull?.group_id) {
+      const existingReview = this.db.query<{ id: string; name: string }, [number, string]>(
+        "SELECT id, name FROM campaign_rooms WHERE group_id = ? AND status = 'reviewing' AND id != ? LIMIT 1",
+      ).get(roomFull.group_id, roomId);
+      if (existingReview) {
+        return Response.json({
+          error: `该群已有房间「${existingReview.name}」正在审卡中，请先取消再开新团`,
+        }, { status: 409 });
+      }
+    }
 
     const now = new Date().toISOString();
     this.db.run("UPDATE campaign_rooms SET status = 'reviewing', updated_at = ? WHERE id = ?", [now, roomId]);

@@ -1356,7 +1356,7 @@ export class CampaignHandler {
       if (seg.seq === 0) continue;
 
       const summary = await this.streamToString(
-        'qwen-plus',
+        'qwen3.5-plus',
         `你是一个克苏鲁跑团模组编辑。请将以下模组片段压缩为简洁摘要（150字以内），` +
         `保留：场景名称、关键NPC及其态度、可获得的线索、可能触发的遭遇或检定。` +
         `不要添加任何评论，直接输出摘要文字。`,

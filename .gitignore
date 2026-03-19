@@ -37,6 +37,15 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+query
+
+# 本地运行脚本（含硬编码凭据，仅本机使用）
+scripts/start-opencode.bat
+scripts/start-all.bat
+scripts/start-service.bat
+
+# OpenCode 配置文档（含 Coding Plan API key）
+bailian-opencode.md
 
 # PDFs — 版权材料 + 体积大，不纳入 git
 *.pdf

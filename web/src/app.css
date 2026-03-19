@@ -66,4 +66,14 @@
   input::placeholder, textarea::placeholder {
     @apply text-text-dim/50;
   }
+
+  /* 触摸设备最小点击区域 */
+  @media (pointer: coarse) {
+    button,
+    [role="button"],
+    a[href],
+    select {
+      min-height: 2.75rem; /* 44px */
+    }
+  }
 }

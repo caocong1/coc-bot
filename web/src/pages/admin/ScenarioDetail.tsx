@@ -128,7 +128,7 @@ const ScenarioDetail: Component = () => {
               <div class="space-y-6">
                 <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm shadow-black/10">
                   <h2 class="text-lg font-semibold text-text">模组资产概览</h2>
-                  <div class="mt-4 grid grid-cols-3 gap-3 text-center">
+                  <div class="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3 text-center">
                     <div class="rounded-xl border border-border bg-white/[0.03] p-4">
                       <div class="text-2xl font-bold text-text">{mod().entities.length}</div>
                       <div class="mt-1 text-xs text-text-dim">实体</div>

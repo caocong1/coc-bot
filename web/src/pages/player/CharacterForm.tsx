@@ -561,7 +561,7 @@ const CharacterForm: Component<Props> = (props) => {
       {/* ── Tab: 基本信息 ── */}
       <Show when={tab() === 'basic'}>
         <section class="mb-10">
-          <div class="grid grid-cols-3 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
             <Field label="角色姓名 *">
               <div class="flex items-center gap-1.5">
                 <input class="w-full bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent" style={{ flex: 1 }} value={name()} onInput={(e) => setName(e.currentTarget.value)} placeholder="输入或随机生成" />
@@ -640,8 +640,8 @@ const CharacterForm: Component<Props> = (props) => {
                 </p>
 
                 <Show when={rollSets().length > 0}>
-                  <div class="bg-surface border border-border rounded-lg overflow-auto">
-                    <div class="grid gap-1.5 px-3 py-2 text-[0.72rem] items-center bg-white/[0.03] text-text-dim uppercase font-semibold border-b border-border" style={{ 'grid-template-columns': '0.4fr repeat(9, 1fr) 1fr' }}>
+                  <div class="bg-surface border border-border rounded-lg overflow-x-auto">
+                    <div class="grid gap-1.5 px-3 py-2 text-[0.72rem] items-center bg-white/[0.03] text-text-dim uppercase font-semibold border-b border-border min-w-[600px]" style={{ 'grid-template-columns': '0.4fr repeat(9, 1fr) 1fr' }}>
                       <span>#</span>
                       <span>力量</span><span>体质</span><span>体型</span><span>敏捷</span>
                       <span>外貌</span><span>智力</span><span>意志</span><span>教育</span>
@@ -650,7 +650,7 @@ const CharacterForm: Component<Props> = (props) => {
                     <For each={rollSets()}>
                       {(s, i) => (
                         <div
-                          class={`grid gap-1.5 px-3 py-2 text-[0.82rem] items-center cursor-pointer border-t border-white/[0.04] transition-colors hover:bg-white/[0.04] ${pickedIdx() === i() ? '!bg-accent/[0.12] outline outline-1 outline-accent' : ''}`}
+                          class={`grid gap-1.5 px-3 py-2 text-[0.82rem] items-center cursor-pointer border-t border-white/[0.04] transition-colors hover:bg-white/[0.04] min-w-[600px] ${pickedIdx() === i() ? '!bg-accent/[0.12] outline outline-1 outline-accent' : ''}`}
                           style={{ 'grid-template-columns': '0.4fr repeat(9, 1fr) 1fr' }}
                           onClick={() => setPickedIdx(i())}
                         >
@@ -686,7 +686,7 @@ const CharacterForm: Component<Props> = (props) => {
           </div>
 
           {/* 属性网格（始终可见可编辑） */}
-          <div class="grid grid-cols-5 gap-3 mb-2">
+          <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3 mb-2">
             <For each={[
               { key: 'str', label: '力量 STR', min: 15, max: 90 }, { key: 'con', label: '体质 CON', min: 15, max: 90 },
               { key: 'siz', label: '体型 SIZ', min: 40, max: 90 }, { key: 'dex', label: '敏捷 DEX', min: 15, max: 90 },
@@ -756,8 +756,8 @@ const CharacterForm: Component<Props> = (props) => {
             <BudgetChip label="职业技能点" used={usedOcc()} total={occPoints()} warn={remainOcc() < 0} />
             <BudgetChip label="兴趣技能点" used={usedHobby()} total={hobbyPoints()} warn={remainHobby() < 0} />
           </div>
-          <div class="bg-surface border border-border rounded-lg overflow-auto">
-            <div class="grid gap-1.5 px-3 py-1.5 items-center text-[0.72rem] bg-white/[0.03] text-text-dim uppercase border-b border-border sticky top-0" style={{ 'grid-template-columns': '2fr 0.6fr 0.7fr 0.7fr 0.6fr 0.6fr 0.6fr' }}>
+          <div class="bg-surface border border-border rounded-lg overflow-x-auto">
+            <div class="grid gap-1.5 px-3 py-1.5 items-center text-[0.72rem] bg-white/[0.03] text-text-dim uppercase border-b border-border sticky top-0 min-w-[540px]" style={{ 'grid-template-columns': '2fr 0.6fr 0.7fr 0.7fr 0.6fr 0.6fr 0.6fr' }}>
               <span>技能</span><span>初始</span><span>职业点</span><span>兴趣点</span>
               <span>普通</span><span>困难</span><span>极限</span>
             </div>
@@ -775,7 +775,7 @@ const CharacterForm: Component<Props> = (props) => {
                   return v < r.min || v > r.max;
                 };
                 return (
-                  <div class={`grid gap-1.5 px-3 py-1.5 items-center text-[0.82rem] border-t border-white/[0.04] ${isCore() ? 'bg-accent/[0.05]' : ''}`} style={{ 'grid-template-columns': '2fr 0.6fr 0.7fr 0.7fr 0.6fr 0.6fr 0.6fr' }}>
+                  <div class={`grid gap-1.5 px-3 py-1.5 items-center text-[0.82rem] border-t border-white/[0.04] min-w-[540px] ${isCore() ? 'bg-accent/[0.05]' : ''}`} style={{ 'grid-template-columns': '2fr 0.6fr 0.7fr 0.7fr 0.6fr 0.6fr 0.6fr' }}>
                     <span class="flex items-center gap-1">
                       {isCore() && <span class="text-accent mr-1">★</span>}
                       {s.name}
@@ -836,7 +836,7 @@ const CharacterForm: Component<Props> = (props) => {
           </p>
 
           {/* 资产详情 */}
-          <div class="grid grid-cols-3 gap-4" style={{ 'margin-top': '1.25rem' }}>
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4" style={{ 'margin-top': '1.25rem' }}>
             <Field label="交通工具"><input class="w-full bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent" value={assetTransport()} onInput={(e) => setAssetTransport(e.currentTarget.value)} placeholder="例：福特T型车" /></Field>
             <Field label="住所"><input class="w-full bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent" value={assetResidence()} onInput={(e) => setAssetResidence(e.currentTarget.value)} placeholder="例：波士顿市区公寓" /></Field>
             <Field label="奢侈品"><input class="w-full bg-bg border border-border rounded-md text-text px-3 py-2 text-[0.9rem] focus:outline-none focus:border-accent" value={assetLuxuries()} onInput={(e) => setAssetLuxuries(e.currentTarget.value)} /></Field>
@@ -934,7 +934,7 @@ const CharacterForm: Component<Props> = (props) => {
           {/* 武器库搜索弹窗 */}
           <Show when={showWeaponPicker()}>
             <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowWeaponPicker(false); }}>
-              <div class="bg-surface border border-border rounded-xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col">
+              <div class="bg-surface border border-border rounded-xl shadow-2xl w-full max-w-[95vw] md:max-w-3xl max-h-[90vh] md:max-h-[80vh] flex flex-col">
                 <div class="flex items-center justify-between px-5 py-3 border-b border-border">
                   <h3 class="text-base font-semibold">武器库</h3>
                   <button class="text-text-dim hover:text-text text-xl cursor-pointer bg-transparent border-none" onClick={() => setShowWeaponPicker(false)}>×</button>
@@ -997,7 +997,7 @@ const CharacterForm: Component<Props> = (props) => {
       {/* ── Tab: 背景故事 ── */}
       <Show when={tab() === 'backstory'}>
         <section class="mb-10">
-          <div class="grid grid-cols-3 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
             {([
               ['appearance', '个人描述/外貌'],
               ['ideology', '思想与信念'],
