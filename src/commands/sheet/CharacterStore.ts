@@ -125,7 +125,21 @@ export class CharacterStore {
   }
 
   getActiveCharacter(userId: number, groupId?: number): Character | undefined {
-    // 先找群绑定，再找全局绑定
+    // 1. 尝试从当前群的活跃房间中查找角色绑定
+    if (groupId && this.db) {
+      const row = this.db.query<{ character_id: string | null }, [number, number]>(
+        `SELECT m.character_id FROM campaign_room_members m
+         JOIN campaign_rooms r ON r.id = m.room_id
+         WHERE r.group_id = ? AND m.qq_id = ? AND r.status IN ('running', 'reviewing')
+         LIMIT 1`,
+      ).get(groupId, userId);
+      if (row?.character_id) {
+        const char = this.characters.get(row.character_id);
+        if (char) return char;
+      }
+    }
+
+    // 2. 回退：先找群绑定，再找全局绑定
     const groupKey = this.cardKey(userId, groupId ? String(groupId) : undefined);
     const globalKey = this.cardKey(userId);
 

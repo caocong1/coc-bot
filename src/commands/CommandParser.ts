@@ -49,8 +49,8 @@ export class CommandParser {
     const body = trimmed.replace(PREFIX_RE, '');
     if (!body) return null;
 
-    // 提取命令名 —— 命令名仅由字母组成
-    const nameMatch = body.match(/^([a-zA-Z]+)/);
+    // 提取命令名 —— 首字母必须是字母，后续可含数字（如 v50、coc7）
+    const nameMatch = body.match(/^([a-zA-Z][a-zA-Z0-9]*)/);
     if (!nameMatch) return null;
 
     const name = nameMatch[1].toLowerCase();

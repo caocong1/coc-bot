@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-03-24
+
+### Added
+- **`.rd` 叙事掷骰命令**：`.rd 偷吃零食` 使用默认骰投掷并附带描述文案，支持自定义骰子表达式如 `.rd 2d6 潜入仓库`
+
+### Fixed
+- **`.ra` 角色卡查找**：跑团房间内使用 `.ra` 现在会优先从当前群的活跃房间成员绑定中查找角色卡，解决了通过房间绑定角色卡后 `.ra` 报"未找到角色卡"的问题
+
 ## [0.12.0] - 2026-03-19
 
 ### Added

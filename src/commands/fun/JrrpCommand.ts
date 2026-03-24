@@ -257,11 +257,15 @@ export class JrrpCommand implements CommandHandler {
     let comment = this.fallbackComment(value);
 
     if (this.aiClient) {
+      console.log(`[JRRP] aiClient 存在，开始 AI 生成 (value=${value}, style=${style.name})`);
       try {
         comment = await this.generateComment(value, style, topic || undefined);
+        console.log(`[JRRP] AI 生成完成: "${comment.slice(0, 50)}"`);
       } catch (err) {
         console.error('[JRRP] AI 生成失败，使用默认评价:', err);
       }
+    } else {
+      console.log('[JRRP] aiClient 为 null，使用 fallback');
     }
 
     return { text: this.formatResult(ctx, value, comment) };
@@ -316,7 +320,7 @@ export class JrrpCommand implements CommandHandler {
       };
 
       void this.aiClient!.streamChat(
-        'qwen3.5-flash',
+        'qwen3.5-plus',
         [
           { role: 'system', content: buildNumberCentricPrompt(style, value, topic) },
           { role: 'user', content: topic ? `我掷出了 ${value} 分，这次想看和「${topic}」相关的评价` : `我掷出了 ${value} 分` },

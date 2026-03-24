@@ -37,10 +37,10 @@ coc-bot/
 │   │   ├── CommandRegistry.ts
 │   │   ├── CommandParser.ts
 │   │   ├── HelpCommand.ts
-│   │   ├── dice/               # .r .ri .init 等
+│   │   ├── dice/               # .r .rd .ri .init 等
 │   │   ├── sheet/              # .pc .st .set .nn
 │   │   ├── coc7/               # .ra .rc .sc .coc .setcoc .en .ti .li
-│   │   ├── fun/                # .jrrp .regen .name .gugu
+│   │   ├── fun/                # .jrrp .regen .name .gugu .v50
 │   │   ├── room/               # .room（跑团房间生命周期）
 │   │   ├── module/             # .mod（模组列表/详情）
 │   │   └── web/                # .web（登录/房间链接）

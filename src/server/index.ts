@@ -28,9 +28,11 @@ import { JrrpCommand } from '../commands/fun/JrrpCommand';
 import { RegenCommand } from '../commands/fun/RegenCommand';
 import { NameCommand } from '../commands/fun/NameCommand';
 import { GuguCommand } from '../commands/fun/GuguCommand';
+import { V50Command } from '../commands/fun/V50Command';
 import { WebCommand } from '../commands/web/WebCommand';
 import { RoomCommand } from '../commands/room/RoomCommand';
 import { ModCommand } from '../commands/module/ModCommand';
+import { RdCommand } from '../commands/dice/RdCommand';
 import { InitCommand } from '../commands/dice/InitCommand';
 import { SetCommand } from '../commands/sheet/SetCommand';
 import { NnCommand } from '../commands/sheet/NnCommand';
@@ -167,6 +169,7 @@ const registry = new CommandRegistry();
 
 // 注册所有命令
 registry.register(new DiceCommand(userSettings));
+registry.register(new RdCommand(userSettings));
 registry.register(new CheckCommand(checkResolver, characterStore));
 registry.register(new SanCheckCommand(sanityResolver, characterStore));
 registry.register(new InsanityCommand(sanityResolver));
@@ -182,6 +185,7 @@ registry.register(new JrrpCommand(aiClient));
 registry.register(new RegenCommand(aiClient, actionClient));
 registry.register(new NameCommand());
 registry.register(new GuguCommand(aiClient));
+if (aiClient) registry.register(new V50Command(aiClient));
 registry.register(new InitCommand());
 registry.register(new SetCommand(userSettings));
 registry.register(new NnCommand(userSettings));
