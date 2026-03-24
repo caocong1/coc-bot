@@ -70,7 +70,7 @@ export class DiceCommand implements CommandHandler {
     for (const arg of args) {
       if (/[\dd+\-*/kKbBpP]/.test(arg)) return arg;
     }
-    return args[0] ?? '';
+    return '';
   }
 
   private extractReason(args: string[]): string {
