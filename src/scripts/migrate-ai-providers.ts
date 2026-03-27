@@ -14,8 +14,8 @@
  */
 
 import { openDatabase } from '../storage/Database';
-import { migrateProviderSchema, hasMigrated, createProvider, createModel, setFeatureBinding } from '../storage/ProviderStore';
-import { encryptCredentials } from '../ai/providers/Encryption';
+import { migrateProviderSchema, hasMigrated, createProvider, createModel, setFeatureBinding, getProvider } from '../storage/ProviderStore';
+import { initEncryption, encryptCredentials } from '../ai/providers/Encryption';
 import type { LegacyAISettings, FeatureId, FeatureModelConfig, SingleRoutingPolicy, FallbackRoutingPolicy } from '../ai/providers/types';
 
 // ─── Legacy 配置降级映射 ────────────────────────────────────────────────────
@@ -214,6 +214,7 @@ export function migrateLegacyToProviders(legacy: LegacyAISettings): {
 // ─── 主迁移流程 ──────────────────────────────────────────────────────────────
 
 export function runMigration(): void {
+  initEncryption();
   const db = openDatabase();
 
   // 初始化 schema
@@ -248,34 +249,46 @@ export function runMigration(): void {
   // 执行迁移
   const { providers, models, featureBindings } = migrateLegacyToProviders(legacy);
 
-  // 写入 providers
+  // 写入 providers（幂等：已存在则跳过）
   for (const p of providers) {
-    const cred = Object.keys(p.credentials).length > 0 ? p.credentials : undefined;
-    createProvider(db, {
-      id: p.id,
-      type: p.type,
-      name: p.name,
-      baseUrl: p.baseUrl,
-      credentials: cred,
-      authType: p.authType,
-      providerOptionsJson: p.providerOptionsJson,
-    });
-    console.log(`[Migration] 创建 Provider: ${p.id}`);
+    const existing = getProvider(db, p.id);
+    if (existing) {
+      console.log(`[Migration] Provider 已存在，跳过: ${p.id}`);
+    } else {
+      const cred = Object.keys(p.credentials).length > 0 ? p.credentials : undefined;
+      createProvider(db, {
+        id: p.id,
+        type: p.type,
+        name: p.name,
+        baseUrl: p.baseUrl,
+        credentials: cred,
+        authType: p.authType,
+        providerOptionsJson: p.providerOptionsJson,
+      });
+      console.log(`[Migration] 创建 Provider: ${p.id}`);
+    }
   }
 
-  // 写入 models
+  // 写入 models（幂等：已存在则跳过）
   for (const m of models) {
-    createModel(db, {
-      id: m.id,
-      providerId: m.providerId,
-      modelId: m.modelId,
-      name: m.name,
-      capabilities: m.capabilities,
-    });
-    console.log(`[Migration] 创建 Model: ${m.id}`);
+    const existing = db.query<{ id: string }, [string]>(
+      'SELECT id FROM ai_models WHERE id = ?',
+    ).get(m.id);
+    if (existing) {
+      console.log(`[Migration] Model 已存在，跳过: ${m.id}`);
+    } else {
+      createModel(db, {
+        id: m.id,
+        providerId: m.providerId,
+        modelId: m.modelId,
+        name: m.name,
+        capabilities: m.capabilities,
+      });
+      console.log(`[Migration] 创建 Model: ${m.id}`);
+    }
   }
 
-  // 写入 feature bindings
+  // 写入 feature bindings（幂等：覆盖写入）
   for (const [feature, binding] of Object.entries(featureBindings)) {
     setFeatureBinding(db, binding as FeatureModelConfig);
     console.log(`[Migration] 绑定 Feature: ${feature}`);
