@@ -257,6 +257,37 @@ export const adminApi = {
   deleteKpTemplate: (id: string) =>
     request<{ ok: boolean }>(`/admin/kp-templates/${id}`, { method: 'DELETE' }, 'admin'),
 
+  // AI 配置
+  getAIConfig: () => request<AIConfig>('/admin/ai-config', {}, 'admin'),
+  updateAIConfig: (patch: Partial<AIConfig>) =>
+    request<{ ok: boolean; config: AIConfig }>('/admin/ai-config', { method: 'PUT', body: JSON.stringify(patch) }, 'admin'),
+
+  // AI Provider 管理（新版）
+  aiProviders: {
+    list: () => request<{ data: AIProvider[] }>('/admin/ai/providers', {}, 'admin'),
+    get: (id: string) => request<{ data: AIProvider }>(`/admin/ai/providers/${id}`, {}, 'admin'),
+    create: (data: AIProviderPayload) =>
+      request<{ data: AIProvider }>('/admin/ai/providers', { method: 'POST', body: JSON.stringify(data) }, 'admin'),
+    update: (id: string, data: Partial<AIProviderPayload>) =>
+      request<{ data: AIProvider }>(`/admin/ai/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }, 'admin'),
+    delete: (id: string, force = false) =>
+      request<{ data: { deleted: boolean } }>(`/admin/ai/providers/${id}?force=${force}`, { method: 'DELETE' }, 'admin'),
+    listModels: (providerId: string) =>
+      request<{ data: AIModel[] }>(`/admin/ai/providers/${providerId}/models`, {}, 'admin'),
+    createModel: (providerId: string, data: AIModelPayload) =>
+      request<{ data: AIModel }>(`/admin/ai/providers/${providerId}/models`, { method: 'POST', body: JSON.stringify(data) }, 'admin'),
+    updateModel: (providerId: string, modelId: string, data: Partial<AIModelPayload>) =>
+      request<{ data: AIModel }>(`/admin/ai/providers/${providerId}/models/${modelId}`, { method: 'PUT', body: JSON.stringify(data) }, 'admin'),
+    deleteModel: (providerId: string, modelId: string, force = false) =>
+      request<{ data: { deleted: boolean } }>(`/admin/ai/providers/${providerId}/models/${modelId}?force=${force}`, { method: 'DELETE' }, 'admin'),
+    listFeatures: () => request<{ data: AIFeatureBinding[] }>('/admin/ai/features', {}, 'admin'),
+    updateFeature: (feature: string, data: AIFeatureBindingPayload) =>
+      request<{ data: AIFeatureBinding; warning?: string }>('/admin/ai/features', { method: 'PUT', body: JSON.stringify({ feature, ...data }) }, 'admin'),
+    getConfigSource: () => request<{ data: { configSource: string } }>('/admin/ai/config-source', {}, 'admin'),
+    setConfigSource: (source: 'legacy' | 'providers') =>
+      request<{ data: { configSource: string } }>('/admin/ai/config-source', { method: 'PUT', body: JSON.stringify({ source }) }, 'admin'),
+  },
+
   messagesStreamUrl: (groupId: number) => `/api/admin/sessions/${groupId}/messages/stream`,
   getSessionMessages: (groupId: number) => request<Message[]>(`/admin/sessions/${groupId}/messages`, {}, 'admin'),
 
@@ -794,4 +825,116 @@ export interface KpTemplatePayload {
   lethality?: number;
   pacing?: number;
   customPrompts?: string;
+}
+
+// ─── AI Config ────────────────────────────────────────────────────────────────
+
+export type AIProvider = 'dashscope' | 'openlimits';
+
+export interface AIConfig {
+  provider: AIProvider;
+  chatModel: string;
+  guardrailModel: string;
+  openingModel: string;
+  recapModel: string;
+  imagePromptModel: string;
+  embedModel: string;
+  capabilities: {
+    imageGeneration: boolean;
+    embedding: boolean;
+  };
+}
+
+// ─── AI Provider 配置系统（新版）─────────────────────────────────────────────
+
+export type AIProviderType = 'openai-compatible' | 'anthropic' | 'ollama' | 'dashscope' | 'opencode';
+export type AuthType = 'bearer' | 'basic' | 'none';
+
+export interface AIModelCapabilities {
+  supportsChat: boolean;
+  supportsVision: boolean;
+  supportsImageGeneration: boolean;
+  supportsStreaming: boolean;
+  supportsEmbeddings: boolean;
+  contextWindow?: number;
+}
+
+export interface AIProvider {
+  id: string;
+  type: AIProviderType;
+  name: string;
+  baseUrl?: string;
+  credentialsEncrypted: string | null;
+  authType: AuthType;
+  providerOptionsJson: string;
+  enabled: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AIModel {
+  id: string;
+  providerId: string;
+  modelId: string;
+  name: string;
+  capabilities: AIModelCapabilities;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type FeatureId =
+  | 'kp.chat' | 'kp.guardrail' | 'kp.opening' | 'kp.recap'
+  | 'image.prompt' | 'image.generate'
+  | 'knowledge.embedding'
+  | 'fun.jrrp' | 'fun.v50' | 'fun.gugu'
+  | 'module.extract';
+
+export interface SingleRoutingPolicy {
+  type: 'single';
+  providerId: string;
+  modelId: string;
+}
+
+export interface FallbackRoutingPolicy {
+  type: 'fallback';
+  primary: { providerId: string; modelId: string };
+  fallback: { providerId: string; modelId: string };
+  fallbackOnRateLimit: boolean;
+}
+
+export type RoutingPolicy = SingleRoutingPolicy | FallbackRoutingPolicy;
+
+export interface AIFeatureBinding {
+  feature: FeatureId;
+  routingPolicy: RoutingPolicy;
+  fallbackOnRateLimit: boolean;
+  updatedAt: number;
+}
+
+export interface ProviderCredentials {
+  apiKey?: string;
+  username?: string;
+  password?: string;
+}
+
+export interface AIProviderPayload {
+  type: AIProviderType;
+  name: string;
+  baseUrl?: string;
+  credentials?: ProviderCredentials;
+  authType?: AuthType;
+  providerOptionsJson?: string;
+}
+
+export interface AIModelPayload {
+  modelId: string;
+  name: string;
+  capabilities: AIModelCapabilities;
+}
+
+export interface AIFeatureBindingPayload {
+  routingPolicy: RoutingPolicy;
+  fallbackOnRateLimit?: boolean;
 }

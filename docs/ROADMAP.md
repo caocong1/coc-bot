@@ -86,6 +86,21 @@
 
 ### 10. AI KP 系统（核心，已完成）
 
+### 10b. AI Provider 配置系统
+
+- [x] **DB 表**：`ai_config`（config_source 开关）、`ai_providers`、`ai_models`、`ai_feature_models`
+- [x] **Provider Client**：DashScope / OpenCode / OpenAI-compatible / Anthropic / Ollama
+- [x] **ProviderRegistry**：Client 实例缓存 + 工厂
+- [x] **AIRouter**：Feature → Model 路由，支持 `single` 和 `fallback` 两种策略
+- [x] **Fallback 策略**：primary 失败（500/408/429）时自动切换 fallback，429 默认不走 fallback（`fallbackOnRateLimit` 开关）
+- [x] **AES-256-GCM 加密**：凭证始终加密存储，`ENCRYPTION_KEY` 缺失时拒绝启动
+- [x] **新旧并存**：`config_source='legacy'` 读旧 `bot_settings.ai_settings`，`config_source='providers'` 启用新配置
+- [x] **迁移脚本**：`src/scripts/migrate-ai-providers.ts` 一键迁移 legacy → providers
+- [x] **Admin API**：`/admin/ai/providers`、`/admin/ai/features`、`/admin/ai/config-source`
+- [x] **Capability 校验**：Feature 绑定时校验 Model capabilities，不兼容返回 400
+- [x] **引用完整性**：禁用/删除被引用 Provider/Model 时返回 409，支持 `?force=true` 强制删除
+- [x] **知识库 embedding 警告**：变更 `knowledge.embedding` 绑定时返回 warning 提示重建索引
+
 #### 数据库
 
 - [x] `kp_sessions` — 跑团会话表（含 `status`、`scenario_file_path`、`current_segment_id` 字段）

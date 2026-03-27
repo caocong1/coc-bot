@@ -37,8 +37,9 @@ import { InitCommand } from '../commands/dice/InitCommand';
 import { SetCommand } from '../commands/sheet/SetCommand';
 import { NnCommand } from '../commands/sheet/NnCommand';
 import { UserSettingsStore } from '../storage/UserSettingsStore';
-import { DashScopeClient } from '../ai/client/DashScopeClient';
-import { HybridAiClient } from '../ai/client/HybridAiClient';
+import { createAIRuntime, createCampaignAIConfig } from '../ai/client/createAIRuntime';
+import { initEncryption } from '../ai/providers/Encryption';
+import { migrateProviderSchema } from '../storage/ProviderStore';
 import { CheckResolver } from '../rules/coc7/CheckResolver';
 import { SanityResolver } from '../rules/coc7/SanityResolver';
 import { ModeResolver } from '../runtime/ModeResolver';
@@ -89,10 +90,6 @@ process.on('SIGTERM', () => { cleanupPid(); process.exit(0); });
 
 /* ─── config ─── */
 
-const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY ?? '';
-const OPENCODE_SERVER_URL = process.env.OPENCODE_SERVER_URL ?? '';
-const OPENCODE_SERVER_USERNAME = process.env.OPENCODE_SERVER_USERNAME ?? 'cocbot';
-const OPENCODE_SERVER_PASSWORD = process.env.OPENCODE_SERVER_PASSWORD ?? '';
 const NAPCAT_WS_URL = process.env.NAPCAT_WS_URL ?? 'ws://127.0.0.1:3003';
 const NAPCAT_HTTP_URL = process.env.NAPCAT_HTTP_URL ?? 'http://127.0.0.1:3002';
 const NAPCAT_TOKEN = process.env.NAPCAT_TOKEN ?? '';
@@ -109,23 +106,30 @@ const transport = new NapCatTransport({ wsUrl: NAPCAT_WS_URL, token: NAPCAT_TOKE
 const normalizer = new NapCatEventNormalizer();
 const actionClient = new NapCatActionClient(NAPCAT_HTTP_URL, NAPCAT_TOKEN);
 
-// AI client
-const aiClient = DASHSCOPE_API_KEY
-  ? (OPENCODE_SERVER_URL && OPENCODE_SERVER_PASSWORD
-      ? new HybridAiClient(DASHSCOPE_API_KEY, OPENCODE_SERVER_URL, OPENCODE_SERVER_USERNAME, OPENCODE_SERVER_PASSWORD)
-      : new DashScopeClient(DASHSCOPE_API_KEY))
-  : null;
-if (!aiClient) console.log('[Bot] DASHSCOPE_API_KEY 未配置，AI 功能（jrrp 等）将使用默认文案');
-else if (OPENCODE_SERVER_URL) console.log(`[Bot] AI 路由：OpenCode serve (${OPENCODE_SERVER_URL}) → DashScope 回退`);
-else console.log('[Bot] AI 路由：直接 DashScope');
+// database（唯一实例，所有子系统共享）
+const db = openDatabase();
+migrateCoreSchema(db);
+
+// AI Provider schema（如果存在 ENCRYPTION_KEY 则初始化加密）
+if (process.env.ENCRYPTION_KEY) {
+  initEncryption();
+  migrateProviderSchema(db);
+}
+
+// AI runtime（依赖 db）
+const aiRuntime = createAIRuntime(db);
+const aiClient = aiRuntime?.chatClient ?? null;
+if (!aiRuntime || !aiClient) {
+  console.log('[Bot] AI 客户端未配置，AI 功能（jrrp 等）将使用默认文案');
+} else if (aiRuntime.routerClient) {
+  console.log(`[Bot] AI 配置：providers 模式（AIRouter）`);
+} else {
+  console.log(`[Bot] AI 配置：legacy 模式（${aiRuntime.settings.provider} / ${aiRuntime.settings.chatModel}）`);
+}
 
 // rules
 const checkResolver = new CheckResolver();
 const sanityResolver = new SanityResolver(checkResolver);
-
-// database（唯一实例，所有子系统共享）
-const db = openDatabase();
-migrateCoreSchema(db);
 
 // 启动时把上次意外中断（status='running'）的 session 改为 'paused'，
 // 让玩家可以用 .room resume 接回，而不是永久卡住
@@ -147,8 +151,14 @@ tokenStore.cleanup(); // 清理过期 token
 const modeResolver = new ModeResolver();
 
 // campaign handler（仅在有 AI 客户端时启用）
-const campaignHandler = aiClient
-  ? new CampaignHandler({ db, aiClient, store: characterStore, modeResolver })
+const campaignHandler = aiClient && aiRuntime
+  ? new CampaignHandler({
+      db,
+      aiClient,
+      aiConfig: createCampaignAIConfig(aiRuntime.settings),
+      store: characterStore,
+      modeResolver,
+    })
   : null;
 if (!campaignHandler) console.log('[Bot] AI 客户端未配置，Campaign 模式不可用');
 
@@ -161,6 +171,7 @@ const apiRouter = new ApiRouter({
   adminSecret: ADMIN_SECRET,
   aiClient: aiClient ?? undefined,
   napcat: actionClient,
+  imagePromptModel: aiRuntime?.settings.imagePromptModel,
 });
 
 // commands

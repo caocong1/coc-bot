@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **AI Provider 配置系统**：完整的可配置 AI Provider 抽象层，支持多 Provider（DashScope、OpenCode、OpenLimits、Anthropic、Ollama）、多模型、以及 Feature → Model 路由策略
+- **Provider Types**：DashScope、OpenCode、OpenAI-compatible、Anthropic、Ollama 五种 Provider Client
+- **AES-256-GCM 加密存储**：API 密钥等凭证使用 `ENCRYPTION_KEY` 环境变量加密存储，拒绝无密钥启动
+- **Fallback 路由策略**：支持 `single` 和 `fallback` 两种路由策略，`fallback` 在 primary 失败（500/408/429 等）时自动切换
+- **Capability 校验**：Feature 绑定时会校验 Model capabilities（`supportsChat`/`supportsEmbeddings`/`supportsImageGeneration` 等），不兼容时返回 400
+- **新旧配置并存**：`config_source='legacy'` 继续读旧 `bot_settings.ai_settings`，`config_source='providers'` 启用新配置体系
+- **迁移脚本**：`src/scripts/migrate-ai-providers.ts` 将旧配置一键迁移到新 Provider/Model 表
+- **Admin API**：新增 `/admin/ai/*` 路由（Provider CRUD、Model CRUD、Feature 绑定、配置源切换）
+
+### Changed
+- **`createAIRuntime`**：重构为同时支持 legacy 和 providers 两种配置模式，通过 `config_source` 开关自动选择
+- **`AIRouterClient`**：新增统一客户端，实现旧 `AIClient` 接口（向后兼容），内部通过 `AIRouter` 按 Feature 路由
+
 ## [0.12.1] - 2026-03-24
 
 ### Added

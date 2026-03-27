@@ -12,10 +12,11 @@ import type { Database } from 'bun:sqlite';
 import type { TokenStore } from '../storage/TokenStore';
 import type { CharacterStore } from '../commands/sheet/CharacterStore';
 import type { CampaignHandler } from '../runtime/CampaignHandler';
-import type { DashScopeClient } from '../ai/client/DashScopeClient';
+import type { AIClient } from '../ai/client/AIClient';
 import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
 import { PlayerRoutes } from './PlayerRoutes';
 import { AdminRoutes } from './AdminRoutes';
+import { AIProviderRoutes } from './AIProviderRoutes';
 
 export interface ApiRouterOptions {
   db: Database;
@@ -23,17 +24,20 @@ export interface ApiRouterOptions {
   characterStore: CharacterStore;
   campaignHandler: CampaignHandler | null;
   adminSecret: string;
-  aiClient?: DashScopeClient;
+  aiClient?: AIClient;
   napcat?: NapCatActionClient;
+  imagePromptModel?: string;
 }
 
 export class ApiRouter {
   private player: PlayerRoutes;
   private admin: AdminRoutes;
+  private aiProviders: AIProviderRoutes;
 
   constructor(private readonly opts: ApiRouterOptions) {
     this.player = new PlayerRoutes(opts.db, opts.tokenStore, opts.characterStore, opts.campaignHandler, opts.napcat);
-    this.admin = new AdminRoutes(opts.db, opts.campaignHandler, opts.adminSecret, opts.aiClient, opts.napcat);
+    this.admin = new AdminRoutes(opts.db, opts.campaignHandler, opts.adminSecret, opts.aiClient, opts.napcat, opts.imagePromptModel);
+    this.aiProviders = new AIProviderRoutes(opts.db);
   }
 
   async handle(req: Request): Promise<Response | null> {
@@ -53,6 +57,17 @@ export class ApiRouter {
     // 玩家路由
     if (path.startsWith('/api/player')) {
       const res = await this.player.handle(req, path.slice('/api/player'.length) || '/');
+      return res ? this.cors(res) : null;
+    }
+
+    // AI Provider 管理路由（/api/admin/ai/*）
+    if (path.startsWith('/api/admin/ai')) {
+      // auth check
+      const secret = req.headers.get('authorization')?.replace('Bearer ', '');
+      if (!secret || secret !== this.opts.adminSecret) {
+        return this.cors(Response.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+      const res = await this.aiProviders.handle(req, path.slice('/api/admin/ai'.length) || '/');
       return res ? this.cors(res) : null;
     }
 
