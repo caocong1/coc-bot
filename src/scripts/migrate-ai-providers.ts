@@ -105,6 +105,17 @@ export function migrateLegacyToProviders(legacy: LegacyAISettings): {
       authType: 'bearer',
       providerOptionsJson: '{}',
     });
+
+    // openai-responses provider for Codex models
+    providers.push({
+      id: 'openresponses-default',
+      type: 'openai-responses',
+      name: 'OpenLimits Responses',
+      baseUrl: 'https://openlimits.app',
+      credentials: olCred,
+      authType: 'bearer',
+      providerOptionsJson: '{}',
+    });
   }
 
   // ── 2. 创建 Model ────────────────────────────────────────────────────────
@@ -173,6 +184,47 @@ export function migrateLegacyToProviders(legacy: LegacyAISettings): {
       feature: mapping.feature,
       routingPolicy: policy,
       fallbackOnRateLimit: policy.type === 'fallback' ? policy.fallbackOnRateLimit : false,
+      updatedAt: Date.now(),
+    };
+  }
+
+  // fun.jrrp / fun.gugu — 优先用 openresponses provider（gpt-5-codex），否则用 primary
+  const hasOpenResponses = providers.some(p => p.id === 'openresponses-default');
+  const funProviderId = hasOpenResponses ? 'openresponses-default' : primaryProvider;
+  // fun.jrrp/gugu 默认用 legacy.chatModel（fallback gpt-5.4），用户后续可在 UI 中自行修改绑定
+  const funModelId = hasOpenResponses
+    ? (legacy.chatModel || 'gpt-5.4')
+    : (legacy.chatModel ?? 'qwen3.5-plus');
+
+  if (funProviderId) {
+    const funModelFullId = `${funProviderId}:${funModelId}`;
+    if (!models.some(m => m.id === funModelFullId)) {
+      models.push({
+        id: funModelFullId,
+        providerId: funProviderId,
+        modelId: funModelId,
+        name: funModelId,
+        capabilities: {
+          supportsChat: true,
+          supportsVision: false,
+          supportsImageGeneration: false,
+          supportsStreaming: true,
+          supportsEmbeddings: false,
+        },
+      });
+    }
+
+    featureBindings['fun.jrrp'] = {
+      feature: 'fun.jrrp',
+      routingPolicy: { type: 'single', providerId: funProviderId, modelId: funModelFullId },
+      fallbackOnRateLimit: false,
+      updatedAt: Date.now(),
+    };
+
+    featureBindings['fun.gugu'] = {
+      feature: 'fun.gugu',
+      routingPolicy: { type: 'single', providerId: funProviderId, modelId: funModelFullId },
+      fallbackOnRateLimit: false,
       updatedAt: Date.now(),
     };
   }

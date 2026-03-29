@@ -1,5 +1,6 @@
 import { createResource, For, Show, type Component } from 'solid-js';
-import { adminApi, type SessionInfo } from '../../api';
+import { adminApi } from '../../api';
+import type { AIProvider, AIFeatureBinding, RoutingPolicy } from '../../api';
 
 const STATUS_LABEL: Record<string, string> = {
   running: '🟢 进行中',
@@ -7,8 +8,47 @@ const STATUS_LABEL: Record<string, string> = {
   ended: '⚫ 已结束',
 };
 
+const FEATURE_LABELS: Record<string, string> = {
+  'kp.chat': 'KP 对话',
+  'kp.guardrail': '护栏检查',
+  'kp.opening': '开场生成',
+  'kp.recap': '回顾摘要',
+  'image.prompt': '图片提示词',
+  'image.generate': '图片生成',
+  'knowledge.embedding': '向量索引',
+  'fun.jrrp': '人品',
+  'fun.gugu': '占卜',
+  'module.extract': '模组提取',
+};
+
+function unwrap<T>(res: { data: T } | T[] | undefined): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res as T[];
+  return (res as { data: T }).data;
+}
+
+function featureRouteLabel(policy: RoutingPolicy, provMap: Map<string, AIProvider>): string {
+  const fmt = (providerId: string, modelId: string) => {
+    const prov = provMap.get(providerId);
+    const provName = prov?.name.split(' ')[0] ?? providerId;
+    const modelName = modelId.split(':')[1];
+    return `${provName} / ${modelName}`;
+  };
+  if (policy.type === 'fallback') {
+    return `${fmt(policy.primary.providerId, policy.primary.modelId)} → ${fmt(policy.fallback.providerId, policy.fallback.modelId)}`;
+  }
+  return fmt(policy.providerId, policy.modelId);
+}
+
 const Dashboard: Component = () => {
   const [sessions, { refetch }] = createResource(() => adminApi.listSessions().catch(() => []));
+
+  const [rawProviders] = createResource(() =>
+    adminApi.aiProviders.list().catch(() => ({ data: [] as AIProvider[] })),
+  );
+  const [rawFeatures] = createResource(() =>
+    adminApi.aiProviders.listFeatures().catch(() => ({ data: [] as AIFeatureBinding[] })),
+  );
 
   const running = () => (sessions() ?? []).filter((s) => s.status === 'running');
   const paused = () => (sessions() ?? []).filter((s) => s.status === 'paused');
@@ -20,6 +60,50 @@ const Dashboard: Component = () => {
         <Stat label="暂停中的团" value={paused().length} color="var(--color-warn)" />
         <Stat label="总团数" value={(sessions() ?? []).length} color="var(--color-accent)" />
       </div>
+
+      {/* AI 配置区块 */}
+      <Show when={!rawProviders.loading && !rawFeatures.loading}>
+        {() => {
+          const provs = unwrap<AIProvider>(rawProviders());
+          const feats = unwrap<AIFeatureBinding>(rawFeatures());
+          const provMap = new Map(provs.map(p => [p.id, p]));
+          return (
+          <div class="mb-8 bg-surface border border-border rounded-lg p-5 shadow-sm shadow-black/10">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-base font-semibold">AI 配置</h2>
+              <a href="/admin/ai-providers"
+                class="px-3 py-1.5 text-sm bg-accent/10 text-accent border border-accent/20 rounded hover:bg-accent/20 transition-all">
+                管理 AI Provider →
+              </a>
+            </div>
+
+            {/* Feature → Provider / Model 路由 */}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <For each={feats}>
+                {(b) => (
+                  <div class="flex justify-between items-center px-3 py-2 rounded bg-white/[0.02] border border-border/50">
+                    <span class="text-xs text-text-dim">{FEATURE_LABELS[b.feature] ?? b.feature}</span>
+                    <span class="text-xs font-mono text-accent">{featureRouteLabel(b.routingPolicy, provMap)}</span>
+                  </div>
+                )}
+              </For>
+            </div>
+
+            {/* Providers */}
+            <div class="flex flex-wrap gap-2">
+              <For each={provs}>
+                {(p) => (
+                  <span class="px-2.5 py-1 text-xs rounded border border-border bg-white/[0.02]">
+                    {p.name}
+                    {p.enabled === false && <span class="text-red-400 ml-1">[已禁用]</span>}
+                  </span>
+                )}
+              </For>
+            </div>
+          </div>
+          );
+        }}
+      </Show>
 
       <div class="mb-8">
         <div class="flex items-center justify-between mb-4">

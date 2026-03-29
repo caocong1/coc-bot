@@ -48,7 +48,7 @@ export interface ModelCapabilities {
 
 // ─── Provider Types ───────────────────────────────────────────────────────────
 
-export type ProviderType = 'openai-compatible' | 'anthropic' | 'ollama' | 'dashscope' | 'opencode';
+export type ProviderType = 'openai-compatible' | 'openai-responses' | 'anthropic' | 'ollama' | 'dashscope' | 'opencode';
 
 export type AuthType = 'bearer' | 'basic' | 'none';
 

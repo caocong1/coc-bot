@@ -17,7 +17,7 @@ import {
   getModel,
 } from '../../storage/ProviderStore';
 import type { ProviderConfig, ModelConfig, ProviderWithCredentials } from './types';
-import { OpenAICompatibleClient, OllamaClient, AnthropicClient, DashScopeClient, OpenCodeClient } from './clients';
+import { OpenAICompatibleClient, OpenResponsesClient, OllamaClient, AnthropicClient, DashScopeClient, OpenCodeClient } from './clients';
 import type { BaseProviderClient } from './clients/BaseProviderClient';
 import type { ProviderOptions } from './types';
 
@@ -37,6 +37,8 @@ export class ProviderRegistry {
     switch (provider.type) {
       case 'openai-compatible':
         return new OpenAICompatibleClient(provider, baseUrl, opts);
+      case 'openai-responses':
+        return new OpenResponsesClient(provider, baseUrl, opts);
       case 'ollama':
         return new OllamaClient(provider, baseUrl, opts);
       case 'anthropic':

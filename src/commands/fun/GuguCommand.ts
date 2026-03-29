@@ -11,7 +11,10 @@
 import { readFileSync, existsSync } from 'fs';
 import type { CommandHandler, CommandContext, CommandResult } from '../CommandRegistry';
 import type { ParsedCommand } from '../CommandParser';
-import type { DashScopeClient } from '../../ai/client/DashScopeClient';
+import type { AIClient } from '../../ai/client/AIClient';
+import type { AIRouterClient } from '../../ai/client/AIRouterClient';
+
+type AiClientForFun = AIRouterClient | AIClient | null;
 
 const FALLBACK_FILE = new URL('./gugu.fallback.json', import.meta.url);
 
@@ -72,7 +75,7 @@ export class GuguCommand implements CommandHandler {
   aliases = [];
   description = '随机鸽子理由：.gugu [玩家名]';
 
-  constructor(private readonly aiClient: DashScopeClient | null) {}
+  constructor(private readonly aiClient: AiClientForFun) {}
 
   async handle(ctx: CommandContext, cmd: ParsedCommand): Promise<CommandResult> {
     const player = cmd.args.join(' ').trim() || ctx.senderName || '某人';
@@ -108,13 +111,14 @@ export class GuguCommand implements CommandHandler {
         reject(err);
       };
 
-      void this.aiClient!.streamChat(
-        'qwen3.5-flash',
-        [
-          { role: 'system', content: buildPrompt(player, style) },
-          { role: 'user', content: `帮我生成一条关于"${player}"的鸽子理由` },
-        ],
-        {
+      const messages = [
+        { role: 'system', content: buildPrompt(player, style) },
+        { role: 'user', content: `帮我生成一条关于"${player}"的鸽子理由` },
+      ];
+
+      let chatPromise: Promise<void>;
+      if (this.aiClient && 'featureStreamChat' in this.aiClient) {
+        chatPromise = this.aiClient.featureStreamChat('fun.gugu', messages, {
           onToken: (token) => { result += token; },
           onDone: () => {
             const cleaned = result
@@ -125,8 +129,27 @@ export class GuguCommand implements CommandHandler {
             done(cleaned);
           },
           onError: (err) => fail(new Error(err)),
-        },
-      ).catch((err) => fail(err instanceof Error ? err : new Error(String(err))));
+        });
+      } else {
+        chatPromise = this.aiClient!.streamChat(
+          'qwen3.5-flash',
+          messages,
+          {
+            onToken: (token) => { result += token; },
+            onDone: () => {
+              const cleaned = result
+                .replace(/^<think>[\s\S]*?<\/think>\s*/m, '')
+                .replace(/^["'"「」『』]/g, '')
+                .replace(/["'"「」『』]$/g, '')
+                .trim();
+              done(cleaned);
+            },
+            onError: (err) => fail(new Error(err)),
+          },
+        );
+      }
+
+      void chatPromise.catch((err) => fail(err instanceof Error ? err : new Error(String(err))));
     });
   }
 }

@@ -62,3 +62,7 @@ data/knowledge/indexes/
 data/knowledge/uploads/
 data/knowledge/images/
 data/knowledge/manifest.json
+
+# Codex plan loop working directories
+.codex-plan-loop/
+data/bot.pid

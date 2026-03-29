@@ -12,7 +12,11 @@ import { existsSync } from 'fs';
 import { resolve } from 'path';
 import type { CommandHandler, CommandContext, CommandResult } from '../CommandRegistry';
 import type { ParsedCommand } from '../CommandParser';
-import { DashScopeClient } from '../../ai/client/DashScopeClient';
+import type { AIClient } from '../../ai/client/AIClient';
+import type { AIRouterClient } from '../../ai/client/AIRouterClient';
+import type { StreamCallbacks } from '../../ai/client/DashScopeClient';
+
+type AiClientForFun = AIRouterClient | AIClient | null;
 
 const PROJECT_JRRP_FALLBACK_FILE = new URL('./jrrp.fallback.json', import.meta.url);
 
@@ -239,10 +243,10 @@ export class JrrpCommand implements CommandHandler {
   name = 'jrrp';
   description = '今日人品：.jrrp [话题]';
 
-  private aiClient: DashScopeClient | null;
+  private aiClient: AiClientForFun;
   private guguEval: ((value: number) => string) | null = null;
 
-  constructor(aiClient: DashScopeClient | null) {
+  constructor(aiClient: AiClientForFun) {
     this.aiClient = aiClient;
     this.guguEval = loadGuguFallback();
   }
@@ -319,13 +323,15 @@ export class JrrpCommand implements CommandHandler {
         reject(error);
       };
 
-      void this.aiClient!.streamChat(
-        'qwen3.5-plus',
-        [
-          { role: 'system', content: buildNumberCentricPrompt(style, value, topic) },
-          { role: 'user', content: topic ? `我掷出了 ${value} 分，这次想看和「${topic}」相关的评价` : `我掷出了 ${value} 分` },
-        ],
-        {
+      const messages = [
+        { role: 'system', content: buildNumberCentricPrompt(style, value, topic) },
+        { role: 'user', content: topic ? `我掷出了 ${value} 分，这次想看和「${topic}」相关的评价` : `我掷出了 ${value} 分` },
+      ];
+
+      let chatPromise: Promise<void>;
+      if (this.aiClient && 'featureStreamChat' in this.aiClient) {
+        // 新版 providers 路由
+        chatPromise = this.aiClient.featureStreamChat('fun.jrrp', messages, {
           onToken: (token) => { result += token; },
           onDone: () => {
             finishResolve(this.clean(result, value) || this.fallbackComment(value));
@@ -333,8 +339,25 @@ export class JrrpCommand implements CommandHandler {
           onError: (err) => {
             finishReject(new Error(err));
           },
-        },
-      ).catch((err) => {
+        });
+      } else {
+        // 旧版 legacy 客户端
+        chatPromise = this.aiClient!.streamChat(
+          'qwen3.5-plus',
+          messages,
+          {
+            onToken: (token) => { result += token; },
+            onDone: () => {
+              finishResolve(this.clean(result, value) || this.fallbackComment(value));
+            },
+            onError: (err) => {
+              finishReject(new Error(err));
+            },
+          },
+        );
+      }
+
+      void chatPromise.catch((err) => {
         finishReject(new Error(err instanceof Error ? err.message : String(err)));
       });
     });

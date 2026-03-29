@@ -6,6 +6,7 @@ import ScenarioManager from './ScenarioManager';
 import ScenarioDetail from './ScenarioDetail';
 import KPStudio from './KPStudio';
 import RoomManager from './RoomManager';
+import AIProviders from './AIProviders';
 
 const NAV = [
   { label: '总览', href: '/admin', icon: '📊' },
@@ -13,6 +14,7 @@ const NAV = [
   { label: '模组管理', href: '/admin/scenarios', icon: '📖' },
   { label: '规则书', href: '/admin/knowledge', icon: '📚' },
   { label: 'KP Studio', href: '/admin/studio', icon: '🎨' },
+  { label: 'AI Provider', href: '/admin/ai-providers', icon: '🤖' },
 ];
 
 const AdminApp: Component = () => {
@@ -52,7 +54,8 @@ const AdminApp: Component = () => {
       {(() => {
         const path = location.pathname;
         let page: Component;
-        if (path === '/admin/rooms') page = RoomManager;
+        if (path === '/admin/ai-providers') page = AIProviders;
+        else if (path === '/admin/rooms') page = RoomManager;
         else if (path.startsWith('/admin/scenarios/')) page = ScenarioDetail;
         else if (path === '/admin/scenarios') page = ScenarioManager;
         else if (path === '/admin/knowledge') page = Knowledge;

@@ -24,7 +24,8 @@ import { basename, dirname, resolve } from 'path';
 import type { Database } from 'bun:sqlite';
 import type { CampaignHandler } from '../runtime/CampaignHandler';
 import { ImageLibrary } from '../knowledge/images/ImageLibrary';
-import type { DashScopeClient } from '../ai/client/DashScopeClient';
+import { type AIClient } from '../ai/client/AIClient';
+import { getAIConfig, updateAISettings, type AIConfig } from '../storage/BotSettingsStore';
 import type { NapCatActionClient } from '../adapters/napcat/NapCatActionClient';
 import { deliverCampaignOutput, normalizeCampaignTextParts } from '../runtime/CampaignOutputDelivery';
 import { addMinutesToTime } from '../runtime/SessionState';
@@ -131,8 +132,9 @@ export class AdminRoutes {
     private readonly db: Database,
     private readonly campaignHandler: CampaignHandler | null,
     private readonly adminSecret: string,
-    private readonly aiClient?: DashScopeClient,
+    private readonly aiClient?: AIClient,
     private readonly napcat?: NapCatActionClient,
+    private readonly imagePromptModel = 'qwen3.5-flash',
   ) {}
 
   async handle(req: Request, subPath: string): Promise<Response | null> {
@@ -213,6 +215,12 @@ export class AdminRoutes {
       if (method === 'POST' && !segments[1]) return this.createKpTemplate(req);
       if (method === 'PUT' && segments[1]) return this.updateKpTemplate(segments[1], req);
       if (method === 'DELETE' && segments[1]) return this.deleteKpTemplate(segments[1]);
+    }
+
+    // /ai-config — AI 配置读取/更新
+    if (resource === 'ai-config') {
+      if (method === 'GET') return this.getAIConfigRoute();
+      if (method === 'PUT') return this.updateAIConfigRoute(req);
     }
 
     // /rooms — 管理员可查看/删除/确认/取消审卡任何房间
@@ -1841,167 +1849,6 @@ export class AdminRoutes {
       }
       return;
     }
-
-    console.log(`[AutoFill] === 开始 === moduleId=${moduleId}, docPath=${docPath}`);
-    if (!this.aiClient) { console.log('[AutoFill] 跳过：aiClient 未配置'); return; }
-
-    const mod = this.db.query<{
-      name: string; description: string | null; era: string | null;
-      allowed_occupations: string; total_points: number | null;
-    }, string>('SELECT name, description, era, allowed_occupations, total_points FROM scenario_modules WHERE id = ?').get(moduleId);
-    if (!mod) { console.log('[AutoFill] 跳过：模组不存在'); return; }
-    console.log(`[AutoFill] 当前模组: name="${mod.name}", desc="${mod.description}", era="${mod.era}"`);
-
-    // 从 manifest.json 找到该文档的提取文本路径
-    const { readFileSync, existsSync, readdirSync, statSync } = await import('fs');
-    let text = '';
-
-    // 方案 1: manifest 匹配（对比文件名尾部）
-    const manifestPath = resolveProjectPath('data', 'knowledge', 'manifest.json');
-    const docFileName = docPath.replace(/\\/g, '/').split('/').pop() ?? ''; // 提取纯文件名
-    console.log(`[AutoFill] docFileName="${docFileName}", manifestPath="${manifestPath}", exists=${existsSync(manifestPath)}`);
-
-    if (existsSync(manifestPath)) {
-      try {
-        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
-          files?: Array<{ sourcePath?: string; sourceRelativePath?: string; textPath?: string }>;
-        };
-        console.log(`[AutoFill] manifest 共 ${manifest.files?.length ?? 0} 条:`);
-        manifest.files?.forEach((f, i) => console.log(`  [${i}] relPath="${f.sourceRelativePath}" textPath="${f.textPath}"`));
-
-        const entry = manifest.files?.find((f) =>
-          f.sourceRelativePath === docFileName ||
-          (f.sourcePath && f.sourcePath.replace(/\\/g, '/').split('/').pop() === docFileName),
-        );
-        if (entry?.textPath) {
-          const textFullPath = resolve(entry.textPath);
-          console.log(`[AutoFill] manifest 匹配成功: textPath="${textFullPath}", exists=${existsSync(textFullPath)}`);
-          if (existsSync(textFullPath)) {
-            text = readFileSync(textFullPath, 'utf-8');
-            console.log(`[AutoFill] 读取成功，${text.length} 字符`);
-          }
-        } else {
-          console.log(`[AutoFill] manifest 未匹配 "${docFileName}"`);
-        }
-      } catch (err) {
-        console.error('[AutoFill] manifest 读取失败:', err);
-      }
-    }
-
-    // 方案 2: 扫描 raw 目录找最新的 .txt
-    if (!text) {
-      const rawDir = resolveProjectPath('data', 'knowledge', 'raw');
-      console.log(`[AutoFill] fallback: 扫描 ${rawDir}, exists=${existsSync(rawDir)}`);
-      if (existsSync(rawDir)) {
-        const txtFiles = readdirSync(rawDir)
-          .filter((f) => f.endsWith('.txt'))
-          .map((f) => ({ name: f, mtime: statSync(resolve(rawDir, f)).mtimeMs }))
-          .sort((a, b) => b.mtime - a.mtime);
-        console.log(`[AutoFill] 找到 ${txtFiles.length} 个 .txt 文件: ${txtFiles.map(f => f.name).join(', ')}`);
-        if (txtFiles.length > 0) {
-          try {
-            text = readFileSync(resolve(rawDir, txtFiles[0].name), 'utf-8');
-            console.log(`[AutoFill] fallback 读取 ${txtFiles[0].name}，${text.length} 字符`);
-          } catch (e) { console.error('[AutoFill] fallback 读取失败:', e); }
-        }
-      }
-    }
-
-    if (!text || text.length < 50) { console.log(`[AutoFill] 跳过：文本太短 (${text.length} 字符)`); return; }
-
-    // 截取前 6000 字符给 AI 分析
-    const excerpt = text.slice(0, 6000);
-    console.log(`[AutoFill] 准备调用 AI，excerpt 前100字: "${excerpt.slice(0, 100)}..."`);
-
-    const prompt = `你是一个 CoC（克苏鲁的呼唤）跑团模组分析专家。阅读以下模组文本的开头部分，提取关键信息。
-
-请以严格 JSON 格式输出（不要输出其他内容）：
-{ 
-  "name": "模组名称",
-  "description": "3-5句简明剧情简介，供玩家阅读，不要剧透关键情节和结局",
-  "era": "1920s 或 现代 或 其他时代描述",
-  "allowedOccupations": ["适合的职业1", "职业2"],
-  "totalPoints": 460
-}
-
-规则：
-- name: 提取模组的官方名称
-- description: 玩家可见的简介，营造氛围但不剧透
-- era: 根据内容判断时代背景
-- allowedOccupations: 如果模组有职业限制则列出，否则空数组 []
-- totalPoints: 如果模组明确要求调查员总点则填写数字，否则输出 null
-- 不要输出任何思考过程，只输出 JSON`;
-
-    try {
-      console.log('[AutoFill] 调用 AI chat...');
-      const result = await (this.aiClient as unknown as DashScopeClient).chat('qwen3.5-flash', [
-        { role: 'system', content: prompt },
-        { role: 'user', content: excerpt },
-      ]);
-      console.log(`[AutoFill] AI 返回 ${result.length} 字符: "${result.slice(0, 200)}..."`);
-
-      // 清理 AI 输出（去掉 think 标签和 markdown 代码块）
-      const cleaned = result
-        .replace(/<think>[\s\S]*?<\/think>/g, '')
-        .replace(/```json\s*/g, '')
-        .replace(/```\s*/g, '')
-        .trim();
-      console.log(`[AutoFill] 清理后: "${cleaned.slice(0, 300)}"`);
-
-      const data = JSON.parse(cleaned) as {
-        name?: string;
-        description?: string;
-        era?: string;
-        allowedOccupations?: string[];
-        totalPoints?: number | null;
-      };
-      console.log(`[AutoFill] 解析成功: name="${data.name}", era="${data.era}", desc="${data.description?.slice(0, 50)}..."`);
-
-      // 只更新空字段
-      const updates: string[] = [];
-      const values: (string | null)[] = [];
-
-      const hasOccs = mod.allowed_occupations && JSON.parse(mod.allowed_occupations).length > 0;
-      const currentTotalPoints = normalizeOptionalTotalPoints(mod.total_points);
-
-      // 名称：如果 AI 提取的名称不同于当前临时名称，总是更新
-      if (data.name && data.name !== mod.name) {
-        updates.push('name = ?');
-        values.push(data.name);
-      }
-      if (!mod.description && data.description) {
-        updates.push('description = ?');
-        values.push(data.description);
-      }
-      if (!mod.era && data.era) {
-        updates.push('era = ?');
-        values.push(data.era);
-      }
-      if (!hasOccs && data.allowedOccupations && data.allowedOccupations.length > 0) {
-        updates.push('allowed_occupations = ?');
-        values.push(JSON.stringify(data.allowedOccupations));
-      }
-      const extractedTotalPoints = normalizeOptionalTotalPoints(data.totalPoints);
-      if ((currentTotalPoints === null || currentTotalPoints === 460) && extractedTotalPoints !== null && extractedTotalPoints !== currentTotalPoints) {
-        updates.push('total_points = ?');
-        values.push(String(extractedTotalPoints));
-      }
-
-      console.log(`[AutoFill] 待更新字段: ${updates.length > 0 ? updates.join(', ') : '（无）'}`);
-
-      if (updates.length > 0) {
-        updates.push('updated_at = ?');
-        values.push(new Date().toISOString());
-        values.push(moduleId);
-        this.db.run(
-          `UPDATE scenario_modules SET ${updates.join(', ')} WHERE id = ?`,
-          values,
-        );
-        console.log(`[AutoFill] ✅ 已更新模组 ${moduleId}: ${updates.filter(u => u !== 'updated_at = ?').join(', ')}`);
-      }
-    } catch (err) {
-      console.error('[AutoFill] ❌ AI 解析失败:', err);
-    }
   }
 
   private async loadModuleImportText(docPath: string): Promise<string> {
@@ -2096,9 +1943,8 @@ export class AdminRoutes {
   }
 
   private async rewriteSpoilerSafeModuleDescription(excerpt: string): Promise<string> {
-    const aiClient = this.aiClient;
-    if (!aiClient) return '';
-    const result = await aiClient.chat('qwen3.5-flash', [
+    if (!this.aiClient) return '';
+    const result = await this.aiClient.chat(this.imagePromptModel, [
       {
         role: 'system',
         content: `你是 CoC 模组招募文案助手。请根据模组开头文本，写一个“玩家可见、不剧透”的开场钩子。
@@ -2190,9 +2036,8 @@ export class AdminRoutes {
   }
 
   private async extractJsonWithAi<T>(prompt: string, excerpt: string): Promise<T> {
-    const aiClient = this.aiClient;
-    if (!aiClient) throw new Error('AI client unavailable');
-    const result = await aiClient.chat('qwen3.5-flash', [
+    if (!this.aiClient) throw new Error('AI client unavailable');
+    const result = await this.aiClient.chat(this.imagePromptModel, [
       { role: 'system', content: prompt },
       { role: 'user', content: excerpt },
     ]);
@@ -2655,6 +2500,39 @@ export class AdminRoutes {
         totalPoints: normalizeOptionalTotalPoints(module.total_points),
       },
     };
+  }
+
+  // ─── AI 配置路由 ────────────────────────────────────────────────────────────
+
+  private getAIConfigRoute(): Response {
+    try {
+      const config = getAIConfig(this.db);
+      return Response.json(config);
+    } catch (e) {
+      console.error('[AdminRoutes] getAIConfig error:', e);
+      return Response.json({ error: String(e) }, { status: 500 });
+    }
+  }
+
+  private async updateAIConfigRoute(req: Request): Promise<Response> {
+    try {
+      const body = await req.json() as Record<string, unknown>;
+      const allowed = [
+        'provider', 'chatModel', 'guardrailModel',
+        'openingModel', 'recapModel', 'imagePromptModel', 'embedModel',
+      ];
+      const patch: Partial<AIConfig> = {};
+      for (const key of allowed) {
+        if (key in body) {
+          (patch as Record<string, unknown>)[key] = body[key];
+        }
+      }
+      updateAISettings(this.db, patch);
+      return Response.json({ ok: true, config: getAIConfig(this.db) });
+    } catch (e) {
+      console.error('[AdminRoutes] updateAIConfig error:', e);
+      return Response.json({ error: String(e) }, { status: 500 });
+    }
   }
 }
 

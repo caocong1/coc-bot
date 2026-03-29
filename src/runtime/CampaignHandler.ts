@@ -18,7 +18,8 @@
 import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import type { Database } from 'bun:sqlite';
-import { DashScopeClient } from '../ai/client/DashScopeClient';
+import type { AIClient } from '../ai/client/AIClient';
+import type { CampaignAIConfig } from '../ai/client/createAIRuntime';
 import { KPPipeline, type KPInput, type KPImage } from '../ai/pipeline/KPPipeline';
 import { KnowledgeService } from '../knowledge/retrieval/KnowledgeService';
 import { SessionState, type ScenarioImage } from './SessionState';
@@ -33,7 +34,6 @@ import { SessionDirector } from './SessionDirector';
 import { createDefaultRoomDirectorPrefs, type OpeningDirectorPlan, type RoomRelationship } from '@shared/types/StoryDirector';
 
 const MANIFEST_PATH = 'data/knowledge/manifest.json';
-const KP_MODEL = 'qwen3.5-plus';
 
 /** Campaign 处理器返回值（支持文字 + 图片） */
 export interface CampaignOutput {
@@ -73,7 +73,8 @@ interface PausedSessionRow {
 
 export interface CampaignHandlerOptions {
   db: Database;
-  aiClient: DashScopeClient;
+  aiClient: AIClient;
+  aiConfig: CampaignAIConfig;
   store: CharacterStore;
   modeResolver: ModeResolver;
   /** 每个群的 KP 模板 ID，默认 'classic' */
@@ -93,7 +94,8 @@ interface GroupSession {
 
 export class CampaignHandler {
   private readonly db: Database;
-  private readonly aiClient: DashScopeClient;
+  private readonly aiClient: AIClient;
+  private readonly aiConfig: CampaignAIConfig;
   private readonly store: CharacterStore;
   private readonly modeResolver: ModeResolver;
   private readonly defaultTemplateId: string;
@@ -114,10 +116,11 @@ export class CampaignHandler {
   constructor(options: CampaignHandlerOptions) {
     this.db = options.db;
     this.aiClient = options.aiClient;
+    this.aiConfig = options.aiConfig;
     this.store = options.store;
     this.modeResolver = options.modeResolver;
     this.defaultTemplateId = options.defaultTemplateId ?? 'classic';
-    this.openingDirector = new OpeningDirector(this.aiClient);
+    this.openingDirector = new OpeningDirector(this.aiClient, this.aiConfig.openingModel);
   }
 
   // ─── 开 / 暂停 / 继续 / 结团 ────────────────────────────────────────────────
@@ -167,7 +170,14 @@ export class CampaignHandler {
     );
 
     const state = new SessionState(this.db, sessionId, campaignId, groupId);
-    const pipeline = new KPPipeline(this.aiClient, state, this.store, this.knowledge, { templateId: tid, customPrompts, db: this.db, roomId: roomId ?? undefined });
+    const pipeline = new KPPipeline(this.aiClient, state, this.store, this.knowledge, {
+      templateId: tid,
+      customPrompts,
+      db: this.db,
+      roomId: roomId ?? undefined,
+      chatModel: this.aiConfig.chatModel,
+      guardrailModel: this.aiConfig.guardrailModel,
+    });
 
     this.sessions.set(groupId, {
       sessionId,
@@ -273,7 +283,14 @@ export class CampaignHandler {
     const resumeRoomId = this.getRoomIdBySession(row.id);
     const pipeline = new KPPipeline(
       this.aiClient, state, this.store, this.knowledge,
-      { templateId: tid, customPrompts, db: this.db, roomId: resumeRoomId ?? undefined },
+      {
+        templateId: tid,
+        customPrompts,
+        db: this.db,
+        roomId: resumeRoomId ?? undefined,
+        chatModel: this.aiConfig.chatModel,
+        guardrailModel: this.aiConfig.guardrailModel,
+      },
     );
 
     this.sessions.set(groupId, {
@@ -1168,7 +1185,7 @@ export class CampaignHandler {
       `本次跑团调查员：\n${pcBlock}` +
       moduleHint;
 
-    const raw = await this.streamToString(KP_MODEL, systemPrompt, userContent);
+    const raw = await this.streamToString(this.aiConfig.chatModel, systemPrompt, userContent);
     if (!raw) {
       return [`⚔️ 跑团模式已开启（模板：${templateId}）\n守秘人已就位，请各位调查员就位。`];
     }
@@ -1250,7 +1267,7 @@ export class CampaignHandler {
       `== 当前场景 ==\n${sceneText}` +
       (timeText ? `\n\n${timeText}` : '');
 
-    const raw = await this.streamToString(KP_MODEL, systemPrompt, userContent);
+    const raw = await this.streamToString(this.aiConfig.recapModel, systemPrompt, userContent);
 
     console.log(`[Campaign] recap AI response: ${raw.length} chars`);
 
@@ -1356,7 +1373,7 @@ export class CampaignHandler {
       if (seg.seq === 0) continue;
 
       const summary = await this.streamToString(
-        'qwen3.5-plus',
+        this.aiConfig.chatModel,
         `你是一个克苏鲁跑团模组编辑。请将以下模组片段压缩为简洁摘要（150字以内），` +
         `保留：场景名称、关键NPC及其态度、可获得的线索、可能触发的遭遇或检定。` +
         `不要添加任何评论，直接输出摘要文字。`,

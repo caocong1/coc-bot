@@ -10,7 +10,7 @@
 import type { CommandContext, CommandResult } from '../CommandRegistry';
 import type { ParsedCommand } from '../CommandParser';
 import { ImageLibrary } from '../../knowledge/images/ImageLibrary';
-import type { DashScopeClient } from '../../ai/client/DashScopeClient';
+import type { AIClient } from '../../ai/client/AIClient';
 import type { NapCatActionClient } from '../../adapters/napcat/NapCatActionClient';
 import { mkdirSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
@@ -23,7 +23,7 @@ export class RegenCommand {
   private readonly library = new ImageLibrary();
 
   constructor(
-    private readonly aiClient: DashScopeClient | null,
+    private readonly aiClient: AIClient | null,
     private readonly napcat: NapCatActionClient,
   ) {}
 

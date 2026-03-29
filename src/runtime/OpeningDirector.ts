@@ -1,4 +1,4 @@
-﻿import { DashScopeClient } from '../ai/client/DashScopeClient';
+﻿import type { AIClient } from '../ai/client/AIClient';
 import type { Character } from '@shared/types/Character';
 import type { ModuleRulePack, ScenarioEntity, ScenarioItem } from '@shared/types/ScenarioAssets';
 import {
@@ -14,7 +14,7 @@ import {
   type RoomRelationship,
 } from '@shared/types/StoryDirector';
 
-const OPENING_MODEL = 'qwen3.5-plus';
+const DEFAULT_OPENING_MODEL = 'qwen3.5-plus';
 const DEFAULT_START_TIME = '1925-03-15T10:00';
 
 export interface OpeningDirectorInput {
@@ -40,7 +40,13 @@ interface ResolvedOpeningDirectorInput {
 }
 
 export class OpeningDirector {
-  constructor(private readonly client: DashScopeClient) {}
+  private readonly client: AIClient;
+  private readonly model: string;
+
+  constructor(client: AIClient, model?: string) {
+    this.client = client;
+    this.model = model ?? DEFAULT_OPENING_MODEL;
+  }
 
   async createPlan(input: OpeningDirectorInput): Promise<OpeningDirectorPlan> {
     const normalizedInput: ResolvedOpeningDirectorInput = {
@@ -170,7 +176,7 @@ export class OpeningDirector {
 }`,
     ].join('\n');
 
-    const raw = await this.client.chat(OPENING_MODEL, [
+    const raw = await this.client.chat(this.model, [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ]);
@@ -225,7 +231,7 @@ export class OpeningDirector {
       `【模组正文前段】\n${compact(input.scenarioText, 3500) || '（暂无模组正文）'}`,
     ].join('\n');
 
-    const raw = await this.client.chat(OPENING_MODEL, [
+    const raw = await this.client.chat(this.model, [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ]);

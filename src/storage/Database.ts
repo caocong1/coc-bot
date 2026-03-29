@@ -344,6 +344,13 @@ export function migrateCoreSchema(db: Database): void {
       value    TEXT    NOT NULL,
       PRIMARY KEY (user_id, scope, key)
     );
+
+    -- ── 通用键值设置（AI provider/模型配置等）────────────────────────────────
+    CREATE TABLE IF NOT EXISTS bot_settings (
+      key         TEXT PRIMARY KEY,
+      value       TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // 对已存在的旧表做安全迁移（列不存在时才执行，已有则忽略）

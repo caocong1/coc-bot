@@ -253,10 +253,15 @@ export class AIRouter {
     }
   }
 
+  private stripPrefix(modelId: string, providerId: string): string {
+    const prefix = `${providerId}:`;
+    return modelId.startsWith(prefix) ? modelId.slice(prefix.length) : modelId;
+  }
+
   private async doChat(providerId: string, modelId: string, messages: VisionMessage[]): Promise<string> {
     const client = this.registry.getClient(providerId);
     if (!client) throw new Error(`Provider '${providerId}' 未找到或已禁用`);
-    return client.chat({ modelId, messages });
+    return client.chat({ modelId: this.stripPrefix(modelId, providerId), messages });
   }
 
   private async doStreamChat(
@@ -267,7 +272,7 @@ export class AIRouter {
   ): Promise<void> {
     const client = this.registry.getClient(providerId);
     if (!client) { callbacks.onError(`Provider '${providerId}' 未找到或已禁用`); return; }
-    await client.streamChat({ modelId, messages }, callbacks);
+    await client.streamChat({ modelId: this.stripPrefix(modelId, providerId), messages }, callbacks);
   }
 
   private getClientForPolicy(policy: { providerId: string; modelId: string }): BaseProviderClient | null {

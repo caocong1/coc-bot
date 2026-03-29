@@ -829,10 +829,10 @@ export interface KpTemplatePayload {
 
 // ─── AI Config ────────────────────────────────────────────────────────────────
 
-export type AIProvider = 'dashscope' | 'openlimits';
+export type LegacyAIProvider = 'dashscope' | 'openlimits';
 
 export interface AIConfig {
-  provider: AIProvider;
+  provider: LegacyAIProvider;
   chatModel: string;
   guardrailModel: string;
   openingModel: string;
@@ -847,7 +847,7 @@ export interface AIConfig {
 
 // ─── AI Provider 配置系统（新版）─────────────────────────────────────────────
 
-export type AIProviderType = 'openai-compatible' | 'anthropic' | 'ollama' | 'dashscope' | 'opencode';
+export type AIProviderType = 'openai-compatible' | 'openai-responses' | 'anthropic' | 'ollama' | 'dashscope' | 'opencode';
 export type AuthType = 'bearer' | 'basic' | 'none';
 
 export interface AIModelCapabilities {

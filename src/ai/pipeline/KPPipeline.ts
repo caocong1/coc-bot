@@ -14,7 +14,8 @@
  *     → 返回最终文本供发送到 QQ
  */
 
-import { DashScopeClient, DashScopeApiError } from '../client/DashScopeClient';
+import type { AIClient } from '../client/AIClient';
+import { DashScopeApiError } from '../client/DashScopeClient';
 import { ContextBuilder } from '../context/ContextBuilder';
 import { KPTemplateRegistry } from '../config/KPTemplateRegistry';
 import { KnowledgeService, type KnowledgeCategory } from '../../knowledge/retrieval/KnowledgeService';
@@ -45,6 +46,15 @@ export interface KPInput {
   viewerScope?: ViewerScope;
   /** 本轮待注入的导演提示 */
   directorCue?: DirectorCue | null;
+}
+
+/** 检定结果的结构化上下文（从 PendingRoll + 骰子文本中捕获） */
+export interface DiceContext {
+  skillName: string;
+  difficulty: 'normal' | 'hard' | 'extreme';
+  reason: string;
+  outcome: string;      // 大成功|极限成功|困难成功|成功|失败|大失败|未知
+  sourceText: string;    // input.content 原文
 }
 
 /** 需要展示给玩家的图片 */
@@ -93,6 +103,10 @@ export interface KPPipelineOptions {
   roomId?: string;
   /** 数据库实例（用于加载自定义模板） */
   db?: import('bun:sqlite').Database;
+  /** KP 主模型，默认 'qwen3.5-plus' */
+  chatModel?: string;
+  /** 守密人过滤模型，默认 'qwen3.5-flash' */
+  guardrailModel?: string;
 }
 
 interface PrivateDirective {
@@ -138,11 +152,8 @@ interface ItemChangeDirective {
 
 // ─── 实现 ─────────────────────────────────────────────────────────────────────
 
-const KP_MODEL = 'qwen3.5-plus';
-const GUARDRAIL_MODEL = 'qwen3.5-flash'; // 过滤用轻量模型即可
-
 export class KPPipeline {
-  private readonly client: DashScopeClient;
+  private readonly client: AIClient;
   private readonly contextBuilder = new ContextBuilder();
   private readonly templateRegistry: KPTemplateRegistry;
   private readonly knowledge: KnowledgeService;
@@ -154,6 +165,8 @@ export class KPPipeline {
   private readonly silenceThreshold: number;
   private readonly enableGuardrail: boolean;
   private readonly summaryTriggerCount: number;
+  private readonly chatModel: string;
+  private readonly guardrailModel: string;
 
   private readonly roomId?: string;
 
@@ -161,7 +174,7 @@ export class KPPipeline {
   private silentCount = 0;
 
   constructor(
-    client: DashScopeClient,
+    client: AIClient,
     state: SessionState,
     store: CharacterStore,
     knowledge: KnowledgeService,
@@ -178,6 +191,8 @@ export class KPPipeline {
     this.enableGuardrail = options.enableGuardrail ?? true;
     this.summaryTriggerCount = options.summaryTriggerCount ?? 40;
     this.roomId = options.roomId;
+    this.chatModel = options.chatModel ?? 'qwen3.5-plus';
+    this.guardrailModel = options.guardrailModel ?? 'qwen3.5-flash';
   }
 
   async process(input: KPInput, onThinking?: () => void): Promise<KPOutput> {
@@ -197,8 +212,19 @@ export class KPPipeline {
       visibility: input.visibility,
     });
 
-    // 骰子结果：清除对应玩家的等待投骰状态
+    // 骰子结果：先捕获检定上下文，再清除等待投骰状态
+    let diceContext: DiceContext | undefined;
     if (input.kind === 'dice_result' && input.diceRollerId !== undefined) {
+      const pending = this.state.getPendingRollsForChannel(channelId)
+        .find((r) => r.playerId === input.diceRollerId);
+      const outcomeMatch = input.content.match(/(大成功|极限成功|困难成功|成功|失败|大失败)/);
+      diceContext = {
+        skillName: pending?.skillName ?? '未知',
+        difficulty: pending?.difficulty ?? 'normal',
+        reason: pending?.reason ?? '',
+        outcome: outcomeMatch?.[1] ?? '未知',
+        sourceText: input.content,
+      };
       this.state.clearPendingRoll(input.diceRollerId, { channelId, actorId: input.userId });
     }
 
@@ -264,7 +290,7 @@ export class KPPipeline {
 
     // 6. 生成草稿
     const t0 = Date.now();
-    console.log(`[KPPipeline] 调用 AI 草稿生成 (model=${KP_MODEL}, reason=${intervention.reason})...`);
+    console.log(`[KPPipeline] 调用 AI 草稿生成 (model=${this.chatModel}, reason=${intervention.reason})...`);
     const draft = await this.generateDraft(systemPrompt, messages, intervention.reason);
     console.log(`[KPPipeline] 草稿生成完成: ${draft.length}字, 耗时${Date.now() - t0}ms`);
     if (!draft) {
@@ -291,10 +317,21 @@ export class KPPipeline {
     const guardrailInput = [draftClean, ...downgradedPrivateTexts].filter(Boolean).join('\n\n');
 
     // 8. 守密人过滤（仅过滤文字部分）
+    const recentExchangeSummary = snapshot.recentMessages
+      .filter((m) => m.role === 'player' || m.role === 'kp')
+      .slice(-3)
+      .map((m) => `[${m.role === 'player' ? m.displayName : 'KP'}] ${m.content.slice(0, 80)}`)
+      .join('\n') || '（无近期互动）';
     const t1 = Date.now();
-    if (this.enableGuardrail) console.log(`[KPPipeline] 调用守密人过滤 (model=${GUARDRAIL_MODEL})...`);
+    if (this.enableGuardrail) console.log(`[KPPipeline] 调用守密人过滤 (model=${this.guardrailModel})...`);
     const filteredText = this.enableGuardrail
-      ? await this.applyGuardrail(guardrailInput, snapshot.discoveredClues.map((c) => c.title))
+      ? await this.applyGuardrail(guardrailInput, snapshot.discoveredClues.map((c) => c.title), {
+        interventionReason: intervention.reason,
+        inputKind: input.kind,
+        playerMessage: input.content,
+        recentExchangeSummary,
+        diceContext,
+      })
       : guardrailInput;
     if (this.enableGuardrail) console.log(`[KPPipeline] 过滤完成: ${filteredText.length}字, 耗时${Date.now() - t1}ms`);
 
@@ -356,7 +393,12 @@ export class KPPipeline {
     }
 
     this.applySceneDirectives(sceneDirectives, channelId);
-    this.applyClueDirectives(clueDirectives, input.userId, channelId);
+    const validatedClueDirectives = this.validateClueDirectives(clueDirectives, {
+      interventionReason: intervention.reason,
+      inputKind: input.kind,
+      diceContext,
+    });
+    this.applyClueDirectives(validatedClueDirectives, input.userId, channelId);
     this.applyEntityDirectives(entityDirectives, channelId, input.userId);
     this.applyItemDirectives(itemDirectives, channelId, input.userId);
     this.applyItemChangeDirectives(itemChangeDirectives, channelId, input.userId);
@@ -475,7 +517,7 @@ export class KPPipeline {
 
     const t0 = Date.now();
     const response = await this.client.chat(
-      'qwen3.5-flash',
+      this.guardrailModel,
       [
         { role: 'system', content: prompt },
         { role: 'user', content: text },
@@ -521,7 +563,7 @@ export class KPPipeline {
       new Promise<string>((resolve) => {
         let buffer = '';
         this.client.streamChat(
-          KP_MODEL,
+          this.chatModel,
           [{ role: 'system', content: systemPrompt }, ...finalMessages],
           {
             onToken: (token) => { buffer += token; },
@@ -550,12 +592,26 @@ export class KPPipeline {
 
   // ─── 守密人过滤 ─────────────────────────────────────────────────────────────
 
-  private async applyGuardrail(draft: string, discoveredClueTitles: string[]): Promise<string> {
+  private async applyGuardrail(
+    draft: string,
+    discoveredClueTitles: string[],
+    context: {
+      interventionReason: string;
+      inputKind: KPInput['kind'];
+      playerMessage: string;
+      recentExchangeSummary: string;
+      diceContext?: DiceContext;
+    },
+  ): Promise<string> {
     if (!draft) return draft;
+
+    const diceBlock = context.diceContext
+      ? `\n检定信息：技能=${context.diceContext.skillName}，难度=${context.diceContext.difficulty}，结果=${context.diceContext.outcome}，原因=${context.diceContext.reason}\n注意：如果检定失败，KP 不应在此回复中交付该检定原本要获取的实质线索。失败可以带来错误判断、片面理解、暴露意图或局势变化，但不应给出有用的关键信息。`
+      : '';
 
     const systemPrompt = `你是一个对话内容安全检查器，专门用于桌游守秘人（KP）输出过滤。
 
-你的任务：检查以下 KP 回复草稿，判断是否包含玩家目前不应知晓的守密人专属信息。
+你的任务：检查以下 KP 回复草稿，判断是否包含玩家目前不应知晓的守密人专属信息，或存在信息过度给予。
 
 守密人专属信息的特征：
 - 幕后黑手或真正的凶手身份
@@ -563,17 +619,33 @@ export class KPPipeline {
 - 剧情真相、最终 Boss 的真实形态
 - 标记为 [KP ONLY] 的内容
 
+信息过度给予的特征（同样需要修正）：
+- KP 叙述中玩家"注意到"、"发现"、"意识到"关键线索，但该轮玩家并未执行对应的调查行动或检定
+- NPC 在没有社交检定或充分角色扮演的情况下主动透露关键剧情信息
+- 环境描写中嵌入了实质线索（超出氛围和公开可见事实的范围）
+- NPC 的言行与其设定的精神状态明显不符（如疯狂 NPC 清晰解释剧情）
+- 使用"你好像觉得…""你隐约感到…"等软包装偷渡实质信息
+- 玩家只是随口问了一句或装傻，NPC 却热情地倾倒了大量有用信息
+
 玩家已知线索：${discoveredClueTitles.length > 0 ? discoveredClueTitles.join('、') : '（暂无）'}
 
 处理规则：
-1. 如果草稿没有泄露守密信息，原文返回
+1. 如果草稿没有泄露守密信息且无信息过度给予，原文返回
 2. 如果有泄露，改写为合理的引导性描述，保留叙事节奏但不直接说出真相
-3. 只返回最终文本，不要添加任何解释`;
+3. 如果有信息过度给予，将主动揭示改写为被动的氛围/公开事实描述，或让 NPC 表现出合理的抵抗（拒答、敷衍、回避、谈条件）
+4. 只返回最终文本，不要添加任何解释
+
+--- 本轮上下文 ---
+触发原因：${context.interventionReason}
+输入类型：${context.inputKind}
+玩家原始输入：${context.playerMessage}
+近期互动：
+${context.recentExchangeSummary}${diceBlock}`;
 
     return new Promise<string>((resolve) => {
       let result = '';
       this.client.streamChat(
-        GUARDRAIL_MODEL,
+        this.guardrailModel,
         [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `草稿：\n${draft}` },
@@ -618,7 +690,7 @@ export class KPPipeline {
     await new Promise<void>((resolve) => {
       let summary = '';
       this.client.streamChat(
-        GUARDRAIL_MODEL,
+        this.guardrailModel,
         [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: conversationText },
@@ -752,6 +824,34 @@ export class KPPipeline {
     const directive = directives[directives.length - 1];
     if (!directive) return;
     this.state.setScene(directive.scene, { channelId });
+  }
+
+  private validateClueDirectives(
+    directives: ClueDirective[],
+    context: { interventionReason: string; inputKind: KPInput['kind']; diceContext?: DiceContext },
+  ): ClueDirective[] {
+    if (directives.length === 0) return directives;
+
+    // 检定失败时，不应触发线索发现
+    if (context.diceContext) {
+      const failOutcomes = ['失败', '大失败'];
+      if (failOutcomes.includes(context.diceContext.outcome)) {
+        console.log(`[KPPipeline] 检定失败(${context.diceContext.outcome})，拦截 ${directives.length} 条线索指令`);
+        return [];
+      }
+    }
+
+    // 没有成功检定上下文时，最多允许 1 条线索指令，防止 AI 在无检定时批量灌线索
+    const hasSuccessfulCheck = context.diceContext
+      && !['失败', '大失败'].includes(context.diceContext.outcome);
+    if (!hasSuccessfulCheck && context.inputKind !== 'force_kp') {
+      if (directives.length > 1) {
+        console.log(`[KPPipeline] 无成功检定上下文，线索指令从 ${directives.length} 条限制为 1 条`);
+        return directives.slice(0, 1);
+      }
+    }
+
+    return directives;
   }
 
   private applyClueDirectives(directives: ClueDirective[], userId: number, channelId: string): void {

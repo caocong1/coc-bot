@@ -51,7 +51,7 @@ export class KPTemplateRegistry {
         builtin: true,
         tone: 6,
         flexibility: 5,
-        guidance: 5,
+        guidance: 4,
         lethality: 5,
         pacing: 5,
         defaultPromptBlock: '你是一位经验丰富的守秘人，在规则与叙事之间保持平衡，营造恰到好处的悬疑氛围。',
