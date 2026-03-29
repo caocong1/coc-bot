@@ -53,8 +53,11 @@ export class CommandParser {
     const nameMatch = body.match(/^([a-zA-Z][a-zA-Z0-9]*)/);
     if (!nameMatch) return null;
 
-    const name = nameMatch[1].toLowerCase();
-    let rest = body.slice(nameMatch[0].length).trim();
+    let name = nameMatch[1].toLowerCase();
+    let rest = body.slice(nameMatch[0].length);
+
+    // 无空格格式：.r3d6 -> rest = ""，需要从 name 末尾提取骰子表达式
+    rest = rest.trim();
 
     let repeat: number | undefined;
     let bonus: number | undefined;
@@ -78,6 +81,15 @@ export class CommandParser {
         else penalty = count;
         rest = body.slice(bpMatch[0].length).trim();
       }
+    }
+
+    // 无空格格式 .r3d6 / .r3d6*5：命令名以"单字母 + 数字"开头时拆分
+    // 例如 .r3d6*5 -> name="r3d6*5"，拆成 name="r", rest="3d6*5"
+    // 天然排除所有多字母命令（ra、rc、rah、st、ri 等第二个字符是字母）
+    const splitMatch = name.match(/^([a-zA-Z])(\d.*)$/i);
+    if (splitMatch) {
+      name = splitMatch[1].toLowerCase();
+      rest = splitMatch[2] + rest;
     }
 
     // 检查困难等级前缀

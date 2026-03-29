@@ -19,7 +19,7 @@ import { roll, rollBonus, rollPenalty, rollMultiple } from '../../rules/dice/Dic
 export class DiceCommand implements CommandHandler {
   name = 'r';
   aliases = ['roll', 'dice', 'rb', 'rp', 'rh'];
-  description = '掷骰：.r 1d100 / .r 3d6+2 / .r 3#1d6 / .rb2 / .rp / .rh';
+  description = '掷骰：.r 1d100 / .r3d6+2 / .r 3#1d6 / .rb2 / .rp / .rh';
 
   constructor(private readonly settings?: UserSettingsStore) {}
 
